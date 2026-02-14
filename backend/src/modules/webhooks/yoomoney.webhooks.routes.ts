@@ -37,6 +37,7 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
 
   const unaccepted = String(body.unaccepted ?? "false").toLowerCase() === "true";
   const amountIncoming = Number(body.amount ?? "0");
+  const withdrawAmountIncoming = Number(body.withdraw_amount ?? "0");
   const currencyIncoming = String(body.currency ?? "");
 
   if (currencyIncoming !== "643") {
@@ -51,11 +52,17 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
     console.warn("[YooMoney Webhook] Transfer unaccepted", { label });
     return res.status(200).json({ received: true });
   }
-  if (amountIncoming + 0.00001 < payment.amount) {
+  // В ЮMoney комиссия может уменьшить amount (зачислено получателю),
+  // поэтому дополнительно учитываем withdraw_amount (сколько списано у отправителя).
+  const paidEnough =
+    amountIncoming + 0.00001 >= payment.amount ||
+    withdrawAmountIncoming + 0.00001 >= payment.amount;
+  if (!paidEnough) {
     console.warn("[YooMoney Webhook] Incoming amount is less than expected", {
       label,
       expected: payment.amount,
       actual: amountIncoming,
+      withdrawAmount: withdrawAmountIncoming,
     });
     return res.status(200).json({ received: true });
   }
