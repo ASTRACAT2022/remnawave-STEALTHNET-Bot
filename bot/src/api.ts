@@ -6,6 +6,7 @@ const API_URL = (process.env.API_URL || "").replace(/\/$/, "");
 if (!API_URL) {
   console.warn("API_URL not set in .env — bot API calls will fail");
 }
+const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || "12000");
 
 function getHeaders(token?: string): HeadersInit {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -13,18 +14,66 @@ function getHeaders(token?: string): HeadersInit {
   return h;
 }
 
-async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string }): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method: opts?.method ?? "GET",
-    headers: getHeaders(opts?.token),
-    ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
-  });
-  const data = (await res.json().catch(() => ({}))) as T | { message?: string };
-  if (!res.ok) {
-    const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
-    throw new Error(msg);
+function humanizeBotApiError(message: string): string {
+  const m = message.toLowerCase();
+
+  if (m.includes("fetch failed") || m.includes("econnrefused") || m.includes("enotfound")) {
+    return "API недоступен. Проверьте контейнеры `api` и `bot`.\n\nЕсли в логах api есть `P1000 Authentication failed`, выполните:\n`docker compose build api bot`";
   }
-  return data as T;
+
+  if (m.includes("http 502") || m.includes("http 503") || m.includes("http 504")) {
+    return "Сервер временно недоступен (502/503/504). Проверьте reverse proxy и что `api` отвечает на `/api/health`.";
+  }
+
+  if (m.includes("timeout")) {
+    return "Превышен таймаут ответа API. Проверьте сеть/прокси и нагрузку сервера.";
+  }
+
+  if (m.includes("p1000") || m.includes("authentication failed")) {
+    return "Ошибка подключения к БД (P1000). Пересоберите API и BOT:\n`docker compose build api bot`";
+  }
+
+  return message;
+}
+
+async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string }): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      method: opts?.method ?? "GET",
+      headers: getHeaders(opts?.token),
+      signal: controller.signal,
+      ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
+    });
+
+    const text = await res.text();
+    let data: T | { message?: string } = {};
+    if (text) {
+      try {
+        data = JSON.parse(text) as T | { message?: string };
+      } catch {
+        data = {};
+      }
+    }
+    if (!res.ok) {
+      const raw =
+        typeof (data as { message?: string }).message === "string"
+          ? (data as { message: string }).message
+          : `HTTP ${res.status}`;
+      throw new Error(humanizeBotApiError(raw));
+    }
+    return data as T;
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    if (err.name === "AbortError") {
+      throw new Error(humanizeBotApiError(`timeout after ${API_TIMEOUT_MS}ms`));
+    }
+    throw new Error(humanizeBotApiError(err.message));
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /** Публичный конфиг (тарифы, кнопки, способы оплаты, trial и т.д.) */

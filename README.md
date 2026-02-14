@@ -57,9 +57,11 @@ bash install.sh
 ```
 
 > [!WARNING]
-> Если после запуска у вас **падает API** сервис, бот отвечает «**❌ fetch failed**», а в логах «docker compose logs -f api» видим ошибку «**Error: P1000: Authentication failed**», значит нужно пересобрать контейнеры командой:
+> Если после запуска у вас **падает API** сервис, бот может показывать ошибку доступа к API, а в логах `docker compose logs -f api` видна «**Error: P1000: Authentication failed**», пересоберите контейнеры:
 > 
 > docker compose build api bot
+>
+> Также проверьте `docker compose up -d api bot` и `curl -fsS http://127.0.0.1:5000/api/health` (или ваш `API_HOST_PORT`).
 
 > **Если при запуске появляется ошибка** вида `invalid option nameet: pipefail` — у скрипта могли сохраниться переводы строк в формате Windows (CRLF). Исправление: `sed -i 's/\r$//' install.sh`, затем снова `bash install.sh`.
 

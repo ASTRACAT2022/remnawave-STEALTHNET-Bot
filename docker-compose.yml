@@ -65,6 +65,7 @@ services:
     environment:
       BOT_TOKEN: "${BOT_TOKEN:-}"
       API_URL: "http://api:5000"
+      API_TIMEOUT_MS: "${API_TIMEOUT_MS:-12000}"
     depends_on:
       - api
     networks:
