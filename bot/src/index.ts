@@ -1,0 +1,818 @@
+/**
+ * STEALTHNET 3.0 — Telegram-бот
+ * Полный функционал кабинета: главная, тарифы, профиль, пополнение, триал, реферальная ссылка, VPN.
+ * Цветные кнопки: style primary / success / danger (Telegram Bot API).
+ */
+
+import "dotenv/config";
+import { Bot, InputFile } from "grammy";
+import * as api from "./api.js";
+import {
+  mainMenu,
+  backToMenu,
+  supportSubMenu,
+  topUpPresets,
+  tariffPayButtons,
+  tariffsOfCategoryButtons,
+  tariffPaymentMethodButtons,
+  topupPaymentMethodButtons,
+  payUrlMarkup,
+  profileButtons,
+  langButtons,
+  currencyButtons,
+  trialConfirmButton,
+  openSubscribePageMarkup,
+  type InlineMarkup,
+  type InnerEmojiIds,
+} from "./keyboard.js";
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error("Set BOT_TOKEN in .env");
+  process.exit(1);
+}
+
+const bot = new Bot(BOT_TOKEN);
+
+let BOT_USERNAME = "";
+
+type TariffItem = { id: string; name: string; price: number; currency: string };
+type TariffCategory = { id: string; name: string; emoji?: string; emojiKey?: string | null; tariffs: TariffItem[] };
+
+// Токены по telegram_id (в памяти; для продакшена лучше Redis/БД)
+const tokenStore = new Map<number, string>();
+
+function getToken(userId: number): string | undefined {
+  return tokenStore.get(userId);
+}
+
+function setToken(userId: number, token: string): void {
+  tokenStore.set(userId, token);
+}
+
+// Пользователи, ожидающие ввода промокода
+const awaitingPromoCode = new Set<number>();
+
+/** Достаём subscriptionUrl из ответа Remna */
+function getSubscriptionUrl(sub: unknown): string | null {
+  if (!sub || typeof sub !== "object") return null;
+  const o = sub as Record<string, unknown>;
+  const resp = o.response ?? o.data;
+  if (resp && typeof resp === "object") {
+    const r = resp as Record<string, unknown>;
+    const url = r.subscriptionUrl ?? r.subscription_url;
+    if (typeof url === "string" && url.trim()) return url.trim();
+  }
+  if (typeof o.subscriptionUrl === "string" && o.subscriptionUrl.trim()) return o.subscriptionUrl.trim();
+  return null;
+}
+
+/** Достаём объект пользователя из ответа Remna (response или data или сам объект) */
+function getSubUser(sub: unknown): Record<string, unknown> | null {
+  if (!sub || typeof sub !== "object") return null;
+  const o = sub as Record<string, unknown>;
+  const resp = o.response ?? o.data ?? o;
+  const r = typeof resp === "object" && resp !== null ? (resp as Record<string, unknown>) : null;
+  if (r && (r.user != null || r.expireAt != null || r.subscriptionUrl != null)) {
+    const user = r.user;
+    return (typeof user === "object" && user !== null ? user : r) as Record<string, unknown>;
+  }
+  return r;
+}
+
+function bytesToGb(bytes: number): string {
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2);
+}
+
+/** Прогресс-бар из символов (0..1), длина barLen */
+function progressBar(pct: number, barLen: number): string {
+  const filled = Math.round(Math.max(0, Math.min(1, pct)) * barLen);
+  return "█".repeat(filled) + "░".repeat(barLen - filled);
+}
+
+const DEFAULT_MENU_TEXTS: Record<string, string> = {
+  welcomeTitlePrefix: "🛡 ",
+  welcomeGreeting: "👋 Добро пожаловать в ",
+  balancePrefix: "💰 Баланс: ",
+  tariffPrefix: "💎 Ваш тариф : ",
+  subscriptionPrefix: "📊 Статус подписки — ",
+  statusInactive: "🔴 Истекла",
+  statusActive: "🟡 Активна",
+  statusExpired: "🔴 Истекла",
+  statusLimited: "🟡 Ограничена",
+  statusDisabled: "🔴 Отключена",
+  expirePrefix: "📅 до ",
+  daysLeftPrefix: "⏰ осталось ",
+  devicesLabel: "📱 Устройств: ",
+  devicesAvailable: " доступно",
+  trafficPrefix: "📈 Трафик — ",
+  linkLabel: "🔗 Ссылка подключения:",
+  chooseAction: "Выберите действие:",
+};
+
+function t(texts: Record<string, string> | null | undefined, key: string): string {
+  return (texts?.[key] ?? DEFAULT_MENU_TEXTS[key]) || "";
+}
+
+type CustomEmojiEntity = { type: "custom_emoji"; offset: number; length: number; custom_emoji_id: string };
+
+/** Длина первого символа в UTF-16 (для entity) */
+function firstCharLengthUtf16(s: string): number {
+  if (!s.length) return 0;
+  const cp = s.codePointAt(0);
+  return cp != null && cp > 0xffff ? 2 : 1;
+}
+
+const DEFAULT_EMOJI_UNICODE: Record<string, string> = {
+  PACKAGE: "📦", TARIFFS: "📦", CARD: "💳", LINK: "🔗", PUZZLE: "👤", PROFILE: "👤",
+  TRIAL: "🎁", SERVERS: "🌐", CONNECT: "🌐",
+};
+
+/** Заголовок с эмодзи: если в botEmojis есть tgEmojiId для ключа — добавляем entity (премиум-эмодзи в тексте). */
+function titleWithEmoji(
+  emojiKey: string,
+  rest: string,
+  botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null
+): { text: string; entities: CustomEmojiEntity[] } {
+  const entry = botEmojis?.[emojiKey];
+  const unicode = entry?.unicode?.trim() || DEFAULT_EMOJI_UNICODE[emojiKey] || "•";
+  const space = rest.startsWith("\n") ? "" : " ";
+  const text = unicode + space + rest;
+  const entities: CustomEmojiEntity[] = [];
+  if (entry?.tgEmojiId) {
+    const len = firstCharLengthUtf16(unicode);
+    if (len > 0) entities.push({ type: "custom_emoji", offset: 0, length: len, custom_emoji_id: entry.tgEmojiId });
+  }
+  return { text, entities };
+}
+
+/** Полный текст главного меню + entities для премиум-эмодзи в тексте (владелец бота должен иметь Telegram Premium). */
+function buildMainMenuText(opts: {
+  serviceName: string;
+  balance: number;
+  currency: string;
+  subscription: unknown;
+  /** Отображаемое имя тарифа с бэкенда: Триал, название с сайта или «Тариф не выбран» */
+  tariffDisplayName?: string | null;
+  menuTexts?: Record<string, string> | null;
+  menuTextCustomEmojiIds?: Record<string, string> | null;
+}): { text: string; entities: CustomEmojiEntity[] } {
+  const { serviceName, balance, currency, subscription, tariffDisplayName, menuTexts, menuTextCustomEmojiIds } = opts;
+  const name = serviceName.trim() || "Кабинет";
+  const balanceStr = formatMoney(balance, currency);
+  const lines: string[] = [];
+  const lineStartKeys: (string | null)[] = [];
+
+  lines.push(t(menuTexts, "welcomeGreeting"));
+  lineStartKeys.push("welcomeGreeting");
+  lines.push(t(menuTexts, "welcomeTitlePrefix") + name);
+  lineStartKeys.push("welcomeTitlePrefix");
+  lines.push(t(menuTexts, "balancePrefix") + balanceStr);
+  lineStartKeys.push("balancePrefix");
+
+  const user = getSubUser(subscription);
+  const url = getSubscriptionUrl(subscription);
+  const tariffName = (tariffDisplayName && tariffDisplayName.trim()) || "Тариф не выбран";
+  lines.push(t(menuTexts, "tariffPrefix") + tariffName);
+  lineStartKeys.push("tariffPrefix");
+
+  if (!user && !url) {
+    lines.push(t(menuTexts, "subscriptionPrefix") + t(menuTexts, "statusInactive"));
+    lineStartKeys.push("subscriptionPrefix");
+    lines.push(t(menuTexts, "trafficPrefix") + " 0.00 GB");
+    lineStartKeys.push("trafficPrefix");
+    lines.push(t(menuTexts, "chooseAction"));
+    lineStartKeys.push("chooseAction");
+  } else {
+    const expireAt = user?.expireAt ?? user?.expirationDate ?? user?.expire_at;
+    let expireDate: Date | null = null;
+    if (expireAt != null) {
+      const d = typeof expireAt === "number" ? new Date(expireAt * 1000) : new Date(String(expireAt));
+      if (!Number.isNaN(d.getTime())) expireDate = d;
+    }
+    const status = (user?.status ?? user?.userStatus ?? "ACTIVE") as string;
+    const statusLabel =
+      status === "ACTIVE" ? t(menuTexts, "statusActive")
+      : status === "EXPIRED" ? t(menuTexts, "statusExpired")
+      : status === "LIMITED" ? t(menuTexts, "statusLimited")
+      : status === "DISABLED" ? t(menuTexts, "statusDisabled")
+      : `🟡 ${status}`;
+    const expireStr = expireDate
+      ? expireDate.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "—";
+    const daysLeft =
+      expireDate && expireDate > new Date()
+        ? Math.max(0, Math.ceil((expireDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+        : null;
+
+    lines.push(t(menuTexts, "subscriptionPrefix") + statusLabel);
+    lineStartKeys.push("subscriptionPrefix");
+    lines.push(t(menuTexts, "expirePrefix") + expireStr);
+    lineStartKeys.push("expirePrefix");
+    if (daysLeft != null) {
+      lines.push(t(menuTexts, "daysLeftPrefix") + `${daysLeft} ${daysLeft === 1 ? "день" : daysLeft < 5 ? "дня" : "дней"}`);
+      lineStartKeys.push("daysLeftPrefix");
+    }
+    const deviceLimit = user?.hwidDeviceLimit ?? user?.deviceLimit ?? user?.device_limit;
+    const devicesUsed = user?.devicesUsed ?? user?.devices_used;
+    if (deviceLimit != null && typeof deviceLimit === "number") {
+      const available = devicesUsed != null ? Math.max(0, deviceLimit - Number(devicesUsed)) : deviceLimit;
+      lines.push(t(menuTexts, "devicesLabel") + available + t(menuTexts, "devicesAvailable"));
+      lineStartKeys.push("devicesLabel");
+    }
+    const trafficUsedBytes =
+      (user?.userTraffic as { usedTrafficBytes?: number } | undefined)?.usedTrafficBytes ??
+      user?.trafficUsedBytes ??
+      user?.usedTrafficBytes ??
+      user?.traffic_used_bytes;
+    const trafficLimitBytes = user?.trafficLimitBytes ?? user?.traffic_limit_bytes;
+    const usedNum = typeof trafficUsedBytes === "string" ? parseFloat(trafficUsedBytes) : Number(trafficUsedBytes);
+    const limitNum = typeof trafficLimitBytes === "string" ? parseFloat(trafficLimitBytes) : Number(trafficLimitBytes);
+    if (Number.isFinite(usedNum) && Number.isFinite(limitNum) && limitNum > 0) {
+      const pct = usedNum / limitNum;
+      const usedGb = bytesToGb(usedNum);
+      const limitGb = bytesToGb(limitNum);
+      const pctInt = Math.round(Math.min(100, pct * 100));
+      lines.push(t(menuTexts, "trafficPrefix") + `🟢 ${progressBar(pct, 14)} ${pctInt}% (${usedGb} / ${limitGb} GB)`);
+    } else if (Number.isFinite(usedNum)) {
+      lines.push(t(menuTexts, "trafficPrefix") + ` ${bytesToGb(usedNum)} GB`);
+    } else {
+      lines.push(t(menuTexts, "trafficPrefix") + " 0.00 GB");
+    }
+    lineStartKeys.push("trafficPrefix");
+    if (url) {
+      lines.push(t(menuTexts, "linkLabel"), url);
+      lineStartKeys.push("linkLabel", null);
+    }
+    lines.push(t(menuTexts, "chooseAction"));
+    lineStartKeys.push("chooseAction");
+  }
+
+  const text = lines.join("\n");
+  const entities: CustomEmojiEntity[] = [];
+  if (menuTextCustomEmojiIds && Object.keys(menuTextCustomEmojiIds).length > 0) {
+    let offset = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const key = lineStartKeys[i];
+      if (key && menuTextCustomEmojiIds[key]) {
+        const line = lines[i]!;
+        const firstLen = firstCharLengthUtf16(line);
+        if (firstLen > 0) entities.push({ type: "custom_emoji", offset, length: firstLen, custom_emoji_id: menuTextCustomEmojiIds[key]! });
+      }
+      offset += lines[i]!.length + 1;
+    }
+  }
+  return { text, entities };
+}
+
+const TELEGRAM_CAPTION_MAX = 1024;
+
+/** Логотип из настроек: data URL или обычный URL — в InputFile или URL для sendPhoto */
+function logoToPhotoSource(logo: string | null | undefined): InputFile | string | null {
+  if (!logo || !logo.trim()) return null;
+  const s = logo.trim();
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  const base64Match = /^data:image\/[a-z]+;base64,(.+)$/i.exec(s);
+  if (base64Match) {
+    try {
+      const buf = Buffer.from(base64Match[1]!, "base64");
+      if (buf.length > 0) return new InputFile(buf, "logo.png");
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const buf = Buffer.from(s, "base64");
+    if (buf.length > 0) return new InputFile(buf, "logo.png");
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** Редактировать сообщение: текст и клавиатура (если с фото — caption + caption_entities, иначе text + entities) */
+async function editMessageContent(ctx: {
+  editMessageCaption: (opts: { caption: string; caption_entities?: CustomEmojiEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  editMessageText: (text: string, opts?: { entities?: CustomEmojiEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  callbackQuery?: { message?: { photo?: unknown[] } };
+}, text: string, reply_markup: InlineMarkup, entities?: CustomEmojiEntity[]): Promise<unknown> {
+  const msg = ctx.callbackQuery?.message;
+  const hasPhoto = msg && typeof msg === "object" && "photo" in msg && Array.isArray((msg as { photo: unknown[] }).photo) && (msg as { photo: unknown[] }).photo.length > 0;
+  const caption = text.length > TELEGRAM_CAPTION_MAX ? text.slice(0, TELEGRAM_CAPTION_MAX - 3) + "..." : text;
+  const truncatedEntities = text.length > TELEGRAM_CAPTION_MAX && entities ? entities.filter((e) => e.offset + e.length <= TELEGRAM_CAPTION_MAX - 3) : entities;
+  if (hasPhoto) return ctx.editMessageCaption({ caption, caption_entities: truncatedEntities?.length ? truncatedEntities : undefined, reply_markup });
+  return ctx.editMessageText(text, { entities: entities?.length ? entities : undefined, reply_markup });
+}
+
+function formatMoney(amount: number, currency: string): string {
+  const c = currency.toUpperCase();
+  const sym = c === "RUB" ? "₽" : c === "USD" ? "$" : "₴";
+  return `${amount} ${sym}`;
+}
+
+// ——— /start с реферальным кодом (например /start ref_ABC123) или промо (/start promo_XXXX)
+bot.command("start", async (ctx) => {
+  const from = ctx.from;
+  if (!from) return;
+  const telegramId = String(from.id);
+  const telegramUsername = from.username ?? undefined;
+  const payload = ctx.match?.trim() || "";
+
+  // Определяем тип deeplink
+  const isPromo = /^promo_/i.test(payload);
+  const promoCode = isPromo ? payload.replace(/^promo_/i, "") : undefined;
+  const refCode = !isPromo ? payload.replace(/^ref_?/i, "") || undefined : undefined;
+
+  try {
+    const config = await api.getPublicConfig();
+    const name = config?.serviceName?.trim() || "Кабинет";
+
+    const auth = await api.registerByTelegram({
+      telegramId,
+      telegramUsername,
+      preferredLang: "ru",
+      preferredCurrency: config?.defaultCurrency ?? "usd",
+      referralCode: refCode,
+    });
+
+    setToken(from.id, auth.token);
+    const client = auth.client;
+
+    // Если это промо-ссылка — активируем промокод
+    if (promoCode) {
+      try {
+        const result = await api.activatePromo(auth.token, promoCode);
+        await ctx.reply(`✅ ${result.message}\n\nНажмите /start чтобы открыть меню.`);
+        return;
+      } catch (promoErr: unknown) {
+        const promoMsg = promoErr instanceof Error ? promoErr.message : "Ошибка активации промокода";
+        await ctx.reply(`❌ ${promoMsg}\n\nНажмите /start чтобы открыть меню.`);
+        return;
+      }
+    }
+
+    const subRes = await api.getSubscription(auth.token).catch(() => ({ subscription: null }));
+    const vpnUrl = getSubscriptionUrl(subRes.subscription);
+    const showTrial = Boolean(config?.trialEnabled && !client.trialUsed);
+    const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
+
+    const { text, entities } = buildMainMenuText({
+      serviceName: name,
+      balance: client.balance,
+      currency: client.preferredCurrency,
+      subscription: subRes.subscription,
+      tariffDisplayName: (subRes as { tariffDisplayName?: string | null }).tariffDisplayName ?? null,
+      menuTexts: config?.resolvedBotMenuTexts ?? config?.botMenuTexts ?? null,
+      menuTextCustomEmojiIds: config?.menuTextCustomEmojiIds ?? null,
+    });
+    const caption = text.length > TELEGRAM_CAPTION_MAX ? text.slice(0, TELEGRAM_CAPTION_MAX - 3) + "..." : text;
+    const captionEntities = text.length > TELEGRAM_CAPTION_MAX && entities.length ? entities.filter((e) => e.offset + e.length <= TELEGRAM_CAPTION_MAX - 3) : entities;
+    const hasSupportLinks = !!(config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink);
+    const markup = mainMenu({
+      showTrial,
+      showVpn: Boolean(vpnUrl),
+      appUrl,
+      botButtons: config?.botButtons ?? null,
+      botBackLabel: config?.botBackLabel ?? null,
+      hasSupportLinks,
+    });
+
+    const photoSource = logoToPhotoSource(config?.logo);
+    if (photoSource) {
+      await ctx.replyWithPhoto(photoSource, { caption, caption_entities: captionEntities.length ? captionEntities : undefined, reply_markup: markup });
+    } else {
+      await ctx.reply(text, { entities: entities.length ? entities : undefined, reply_markup: markup });
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Ошибка входа";
+    await ctx.reply(`❌ ${msg}`);
+  }
+});
+
+// ——— Callback: меню и действия
+bot.on("callback_query:data", async (ctx) => {
+  const data = ctx.callbackQuery.data;
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  await ctx.answerCallbackQuery().catch(() => {});
+
+  const token = getToken(userId);
+  if (!token) {
+    await ctx.reply("Сессия истекла. Отправьте /start");
+    return;
+  }
+
+  try {
+    const config = await api.getPublicConfig();
+    const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
+    const rawStyles = config?.botInnerButtonStyles;
+    const innerStyles = {
+      tariffPay: rawStyles?.tariffPay !== undefined ? rawStyles.tariffPay : "success",
+      topup: rawStyles?.topup !== undefined ? rawStyles.topup : "primary",
+      back: rawStyles?.back !== undefined ? rawStyles.back : "danger",
+      profile: rawStyles?.profile !== undefined ? rawStyles.profile : "primary",
+      trialConfirm: rawStyles?.trialConfirm !== undefined ? rawStyles.trialConfirm : "success",
+      lang: rawStyles?.lang !== undefined ? rawStyles.lang : "primary",
+      currency: rawStyles?.currency !== undefined ? rawStyles.currency : "primary",
+    };
+    const botEmojis = config?.botEmojis;
+    const innerEmojiIds: InnerEmojiIds | undefined = botEmojis
+      ? {
+          back: botEmojis.BACK?.tgEmojiId,
+          card: botEmojis.CARD?.tgEmojiId,
+          tariff: botEmojis.PACKAGE?.tgEmojiId || botEmojis.TARIFFS?.tgEmojiId,
+          trial: botEmojis.TRIAL?.tgEmojiId,
+          profile: botEmojis.PUZZLE?.tgEmojiId || botEmojis.PROFILE?.tgEmojiId,
+          connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
+        }
+      : undefined;
+
+    if (data === "menu:main") {
+      const [client, subRes] = await Promise.all([api.getMe(token), api.getSubscription(token).catch(() => ({ subscription: null }))]);
+      const vpnUrl = getSubscriptionUrl(subRes.subscription);
+      const showTrial = Boolean(config?.trialEnabled && !client.trialUsed);
+      const name = config?.serviceName?.trim() || "Кабинет";
+      const { text, entities } = buildMainMenuText({
+        serviceName: name,
+        balance: client.balance,
+        currency: client.preferredCurrency,
+        subscription: subRes.subscription,
+        tariffDisplayName: (subRes as { tariffDisplayName?: string | null }).tariffDisplayName ?? null,
+        menuTexts: config?.resolvedBotMenuTexts ?? config?.botMenuTexts ?? null,
+        menuTextCustomEmojiIds: config?.menuTextCustomEmojiIds ?? null,
+      });
+      const hasSupportLinks = !!(config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink);
+      await editMessageContent(ctx, text, mainMenu({
+        showTrial,
+        showVpn: Boolean(vpnUrl),
+        appUrl,
+        botButtons: config?.botButtons ?? null,
+        botBackLabel: config?.botBackLabel ?? null,
+        hasSupportLinks,
+      }), entities);
+      return;
+    }
+
+    if (data === "menu:support") {
+      const hasAny = config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink;
+      if (!hasAny) {
+        await editMessageContent(ctx, "Раздел поддержки не настроен.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      await editMessageContent(
+        ctx,
+        "🆘 Поддержка\n\nВыберите раздел:",
+        supportSubMenu(
+          {
+            support: config?.supportLink,
+            agreement: config?.agreementLink,
+            offer: config?.offerLink,
+            instructions: config?.instructionsLink,
+          },
+          config?.botBackLabel ?? null,
+          innerStyles?.back,
+          innerEmojiIds
+        )
+      );
+      return;
+    }
+
+    if (data === "menu:tariffs") {
+      const { items } = await api.getPublicTariffs();
+      if (!items?.length) {
+        await editMessageContent(ctx, "Тарифы пока не настроены.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (items.length > 1) {
+        const { text, entities } = titleWithEmoji("PACKAGE", "Тарифы\n\nВыберите категорию:", config?.botEmojis);
+        await editMessageContent(ctx, text, tariffPayButtons(items, config?.botBackLabel ?? null, innerStyles, innerEmojiIds), entities);
+        return;
+      }
+      const cat = items[0]!;
+      const head = (cat.emoji && cat.emoji.trim() ? cat.emoji + " " : "") + cat.name;
+      const tariffLines = cat.tariffs.map((t: TariffItem) => `• ${t.name} — ${t.price} ${t.currency}`).join("\n");
+      const { text, entities } = titleWithEmoji("PACKAGE", `Тарифы\n\n${head}\n${tariffLines}\n\nВыберите тариф для оплаты:`, config?.botEmojis);
+      await editMessageContent(ctx, text, tariffPayButtons(items, config?.botBackLabel ?? null, innerStyles, innerEmojiIds), entities);
+      return;
+    }
+
+    if (data.startsWith("cat_tariffs:")) {
+      const categoryId = data.slice("cat_tariffs:".length);
+      const { items } = await api.getPublicTariffs();
+      const category = items?.find((c: TariffCategory) => c.id === categoryId);
+      if (!category?.tariffs?.length) {
+        await editMessageContent(ctx, "Категория не найдена.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const head = (category.emoji && category.emoji.trim() ? category.emoji + " " : "") + category.name;
+      const tariffLines = category.tariffs.map((t: TariffItem) => `• ${t.name} — ${t.price} ${t.currency}`).join("\n");
+      const { text, entities } = titleWithEmoji("PACKAGE", `${head}\n\n${tariffLines}\n\nВыберите тариф для оплаты:`, config?.botEmojis);
+      await editMessageContent(ctx, text, tariffsOfCategoryButtons(category, config?.botBackLabel ?? null, innerStyles, "menu:tariffs", innerEmojiIds), entities);
+      return;
+    }
+
+    if (data.startsWith("pay_tariff_balance:")) {
+      const tariffId = data.slice("pay_tariff_balance:".length);
+      try {
+        const result = await api.payByBalance(token, tariffId);
+        await editMessageContent(ctx, `✅ ${result.message}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка оплаты";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
+    if (data.startsWith("pay_tariff:")) {
+      const rest = data.slice("pay_tariff:".length);
+      const parts = rest.split(":");
+      const tariffId = parts[0];
+      const methodIdFromBtn = parts.length >= 2 ? Number(parts[1]) : null;
+      const { items } = await api.getPublicTariffs();
+      const tariff = items?.flatMap((c: TariffCategory) => c.tariffs).find((t: TariffItem) => t.id === tariffId);
+      if (!tariff) {
+        await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const methods = config?.plategaMethods ?? [];
+      const client = await api.getMe(token);
+      const balanceLabel = client.balance >= tariff.price ? `💰 Оплатить балансом (${formatMoney(client.balance, client.preferredCurrency)})` : null;
+
+      if (methodIdFromBtn != null && Number.isFinite(methodIdFromBtn)) {
+        const payment = await api.createPlategaPayment(token, {
+          amount: tariff.price,
+          currency: tariff.currency,
+          paymentMethod: methodIdFromBtn,
+          description: `Тариф: ${tariff.name}`,
+          tariffId: tariff.id,
+        });
+        const pay1 = titleWithEmoji("CARD", `Оплата: ${tariff.name} — ${formatMoney(tariff.price, tariff.currency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
+        await editMessageContent(ctx, pay1.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), pay1.entities);
+        return;
+      }
+      // Показываем способы оплаты (всегда, чтобы была кнопка баланса)
+      const pay2 = titleWithEmoji("CARD", `Оплата: ${tariff.name} — ${formatMoney(tariff.price, tariff.currency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
+      await editMessageContent(ctx, pay2.text, tariffPaymentMethodButtons(tariffId, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, balanceLabel), pay2.entities);
+      return;
+    }
+
+    if (data === "menu:profile") {
+      const client = await api.getMe(token);
+      const langs = config?.activeLanguages?.length ? config.activeLanguages : ["ru", "en", "ua"];
+      const currencies = config?.activeCurrencies?.length ? config.activeCurrencies : ["usd", "rub", "uah"];
+      const { text, entities } = titleWithEmoji(
+        "PROFILE",
+        `Профиль\n\nБаланс: ${formatMoney(client.balance, client.preferredCurrency)}\nЯзык: ${client.preferredLang}\nВалюта: ${client.preferredCurrency}\n\nИзменить:`,
+        config?.botEmojis
+      );
+      await editMessageContent(ctx, text, profileButtons(config?.botBackLabel ?? null, innerStyles, innerEmojiIds), entities);
+      return;
+    }
+
+    if (data === "profile:lang") {
+      const langs = config?.activeLanguages?.length ? config.activeLanguages : ["ru", "en", "ua"];
+      await editMessageContent(ctx, "Выберите язык:", langButtons(langs, innerStyles, innerEmojiIds));
+      return;
+    }
+
+    if (data.startsWith("set_lang:")) {
+      const lang = data.slice("set_lang:".length);
+      await api.updateProfile(token, { preferredLang: lang });
+      await editMessageContent(ctx, `Язык изменён на ${lang.toUpperCase()}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      return;
+    }
+
+    if (data === "profile:currency") {
+      const currencies = config?.activeCurrencies?.length ? config.activeCurrencies : ["usd", "rub", "uah"];
+      await editMessageContent(ctx, "Выберите валюту:", currencyButtons(currencies, innerStyles, innerEmojiIds));
+      return;
+    }
+
+    if (data.startsWith("set_currency:")) {
+      const currency = data.slice("set_currency:".length);
+      await api.updateProfile(token, { preferredCurrency: currency });
+      await editMessageContent(ctx, `Валюта изменена на ${currency.toUpperCase()}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      return;
+    }
+
+    if (data === "menu:topup") {
+      const client = await api.getMe(token);
+      const methods = config?.plategaMethods ?? [];
+      if (!methods.length) {
+        await editMessageContent(ctx, "Пополнение временно недоступно.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const topupTitle = titleWithEmoji("CARD", "Пополнить баланс\n\nВыберите сумму или введите свою (числом):", config?.botEmojis);
+      await editMessageContent(ctx, topupTitle.text, topUpPresets(client.preferredCurrency, config?.botBackLabel ?? null, innerStyles, innerEmojiIds), topupTitle.entities);
+      return;
+    }
+
+    if (data.startsWith("topup:")) {
+      const rest = data.slice("topup:".length);
+      const parts = rest.split(":");
+      const amountStr = parts[0];
+      const amount = Number(amountStr);
+      const methodIdFromBtn = parts.length >= 2 ? Number(parts[1]) : null;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        await editMessageContent(ctx, "Неверная сумма.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const client = await api.getMe(token);
+      const methods = config?.plategaMethods ?? [];
+      if (methodIdFromBtn != null && Number.isFinite(methodIdFromBtn)) {
+        const payment = await api.createPlategaPayment(token, {
+          amount,
+          currency: client.preferredCurrency,
+          paymentMethod: methodIdFromBtn,
+          description: "Пополнение баланса",
+        });
+        const topupPay1 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
+        await editMessageContent(ctx, topupPay1.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), topupPay1.entities);
+        return;
+      }
+      if (methods.length > 1) {
+        const topupPay2 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
+        await editMessageContent(ctx, topupPay2.text, topupPaymentMethodButtons(amountStr, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), topupPay2.entities);
+        return;
+      }
+      const methodId = methods[0]?.id ?? 2;
+      const payment = await api.createPlategaPayment(token, {
+        amount,
+        currency: client.preferredCurrency,
+        paymentMethod: methodId,
+        description: "Пополнение баланса",
+      });
+      const topupPay3 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
+      await editMessageContent(ctx, topupPay3.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), topupPay3.entities);
+      return;
+    }
+
+    if (data === "menu:referral") {
+      const client = await api.getMe(token);
+      if (!client.referralCode) {
+        await editMessageContent(ctx, "Реферальная ссылка недоступна.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const linkSite = appUrl ? `${appUrl}/cabinet/register?ref=${encodeURIComponent(client.referralCode)}` : null;
+      const linkBot = `https://t.me/${BOT_USERNAME || "bot"}?start=ref_${client.referralCode}`;
+      const p1 = (client.referralPercent != null && client.referralPercent > 0) ? client.referralPercent : (config?.defaultReferralPercent ?? 0);
+      const p2 = config?.referralPercentLevel2 ?? 0;
+      const p3 = config?.referralPercentLevel3 ?? 0;
+      let rest = "Реферальная программа\n\nПоделитесь ссылкой с друзьями и получайте процент от их пополнений!\n\n";
+      rest += "Как это работает:\n";
+      rest += `• 1 уровень — ${p1}% от пополнений тех, кто перешёл по вашей ссылке.\n`;
+      rest += `• 2 уровень — ${p2}% от пополнений рефералов ваших рефералов.\n`;
+      rest += `• 3 уровень — ${p3}% от пополнений рефералов второго уровня.\n`;
+      rest += "\nНачисления зачисляются на ваш баланс и могут быть использованы для оплаты тарифов.";
+      rest += "\n\nВаши ссылки:";
+      if (linkSite) rest += "\n\nСайт:\n" + linkSite;
+      rest += "\n\nБот:\n" + linkBot;
+      const { text: refText, entities: refEntities } = titleWithEmoji("LINK", rest, config?.botEmojis);
+      await editMessageContent(ctx, refText, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), refEntities);
+      return;
+    }
+
+    if (data === "menu:promocode") {
+      awaitingPromoCode.add(userId);
+      await editMessageContent(
+        ctx,
+        "🎟️ Введите промокод\n\nОтправьте промокод сообщением в этот чат.",
+        backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds),
+      );
+      return;
+    }
+
+    if (data === "menu:trial") {
+      const days = config?.trialDays ?? 0;
+      const trialTitle = titleWithEmoji("TRIAL", `Попробовать бесплатно\n\n${days > 0 ? `${days} дней триала.` : "Триал без оплаты."}\n\nАктивировать?`, config?.botEmojis);
+      await editMessageContent(ctx, trialTitle.text, trialConfirmButton(innerStyles, innerEmojiIds), trialTitle.entities);
+      return;
+    }
+
+    if (data === "trial:confirm") {
+      const result = await api.activateTrial(token);
+      await editMessageContent(ctx, `✅ ${result.message}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      return;
+    }
+
+    if (data === "menu:vpn") {
+      const subRes = await api.getSubscription(token);
+      const vpnUrl = getSubscriptionUrl(subRes.subscription);
+      if (!vpnUrl) {
+        await editMessageContent(ctx, "Ссылка на VPN недоступна. Оформите подписку.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
+      if (appUrl) {
+        const vpnTitle = titleWithEmoji("SERVERS", "Подключиться к VPN\n\nНажмите кнопку ниже — откроется страница с приложениями и кнопкой «Добавить подписку» (как в кабинете).", config?.botEmojis);
+        await editMessageContent(ctx, vpnTitle.text, openSubscribePageMarkup(appUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle.entities);
+      } else {
+        const vpnTitle2 = titleWithEmoji("SERVERS", `Подключиться к VPN\n\nОткройте ссылку в приложении VPN:\n${vpnUrl}`, config?.botEmojis);
+        await editMessageContent(ctx, vpnTitle2.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle2.entities);
+      }
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Неизвестное действие" });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Ошибка";
+    await ctx.reply(`❌ ${msg}`).catch(() => {});
+  }
+});
+
+// Сообщения с текстом — промокод или число для пополнения
+bot.on("message:text", async (ctx) => {
+  if (ctx.message.text?.startsWith("/")) return;
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  const token = getToken(userId);
+  if (!token) return;
+
+  // Если пользователь ожидает ввод промокода
+  if (awaitingPromoCode.has(userId)) {
+    awaitingPromoCode.delete(userId);
+    const code = ctx.message.text.trim();
+    if (!code) {
+      await ctx.reply("❌ Промокод не может быть пустым.");
+      return;
+    }
+    try {
+      // Сначала проверяем
+      const checkResult = await api.checkPromoCode(token, code);
+      if (checkResult.type === "FREE_DAYS") {
+        // Активируем сразу
+        const activateResult = await api.activatePromoCode(token, code);
+        await ctx.reply(`✅ ${activateResult.message}\n\nНажмите /start чтобы открыть меню.`);
+      } else if (checkResult.type === "DISCOUNT") {
+        const desc = checkResult.discountPercent
+          ? `скидка ${checkResult.discountPercent}%`
+          : checkResult.discountFixed
+            ? `скидка ${checkResult.discountFixed}`
+            : "скидка";
+        await ctx.reply(`✅ Промокод «${checkResult.name}» принят! ${desc}.\n\nСкидка будет применена при оплате тарифа. Используйте этот промокод при оплате.`);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка активации промокода";
+      await ctx.reply(`❌ ${msg}`);
+    }
+    return;
+  }
+
+  const num = Number(ctx.message.text.replace(/,/, "."));
+  if (!Number.isFinite(num) || num < 1 || num > 1000000) return;
+
+  try {
+    const config = await api.getPublicConfig();
+    const methods = config?.plategaMethods ?? [];
+    if (!methods.length) {
+      await ctx.reply("Пополнение временно недоступно.");
+      return;
+    }
+    const client = await api.getMe(token);
+    const rawStyles = config?.botInnerButtonStyles;
+    const backStyle = rawStyles?.back !== undefined ? rawStyles.back : "danger";
+    const botEmojis = config?.botEmojis;
+    const msgEmojiIds: InnerEmojiIds | undefined = botEmojis
+      ? {
+          back: botEmojis.BACK?.tgEmojiId,
+          card: botEmojis.CARD?.tgEmojiId,
+          tariff: botEmojis.PACKAGE?.tgEmojiId || botEmojis.TARIFFS?.tgEmojiId,
+          trial: botEmojis.TRIAL?.tgEmojiId,
+          profile: botEmojis.PUZZLE?.tgEmojiId || botEmojis.PROFILE?.tgEmojiId,
+          connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
+        }
+      : undefined;
+    if (methods.length > 1) {
+      const topupMsg1 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
+      await ctx.reply(topupMsg1.text, {
+        entities: topupMsg1.entities.length ? topupMsg1.entities : undefined,
+        reply_markup: topupPaymentMethodButtons(String(num), methods, config?.botBackLabel ?? null, backStyle, msgEmojiIds),
+      });
+      return;
+    }
+    const payment = await api.createPlategaPayment(token, {
+      amount: num,
+      currency: client.preferredCurrency,
+      paymentMethod: methods[0].id,
+      description: "Пополнение баланса",
+    });
+    const topupMsg2 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
+    await ctx.reply(topupMsg2.text, {
+      entities: topupMsg2.entities.length ? topupMsg2.entities : undefined,
+      reply_markup: payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, backStyle, msgEmojiIds),
+    });
+  } catch {
+    // не число или ошибка — игнорируем
+  }
+});
+
+bot.catch((err) => {
+  console.error("Bot error:", err);
+});
+
+bot.start({
+  onStart: async (info) => {
+    BOT_USERNAME = info.username || "";
+    console.log(`Bot @${BOT_USERNAME} started`);
+  },
+});

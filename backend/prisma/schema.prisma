@@ -1,0 +1,248 @@
+// STEALTHNET 3.0 — PostgreSQL schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String   @map("password_hash")
+  mustChangePassword Boolean @default(true) @map("must_change_password")
+  role              String   @default("ADMIN")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  refreshTokens     RefreshToken[]
+
+  @@map("admins")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  adminId   String   @map("admin_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model SystemSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+
+  @@map("system_settings")
+}
+
+// Клиент панели (покупатель подписок): сайт, бот, mini app
+model Client {
+  id               String    @id @default(cuid())
+  email            String?   @unique
+  passwordHash     String?   @map("password_hash")
+  role             String    @default("CLIENT")
+  remnawaveUuid    String?   @map("remnawave_uuid")
+  referralCode     String?   @unique @map("referral_code")
+  referrerId       String?   @map("referrer_id")
+  balance          Float     @default(0)
+  preferredLang    String    @default("ru") @map("preferred_lang")
+  preferredCurrency String   @default("usd") @map("preferred_currency")
+  telegramId       String?   @unique @map("telegram_id")
+  telegramUsername String?   @map("telegram_username")
+  isBlocked        Boolean   @default(false) @map("is_blocked")
+  blockReason      String?   @map("block_reason")
+  referralPercent  Float?   @map("referral_percent")
+  trialUsed        Boolean   @default(false) @map("trial_used")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  referrer   Client?   @relation("ClientReferrer", fields: [referrerId], references: [id])
+  referrals  Client[]  @relation("ClientReferrer")
+  payments   Payment[]
+  referralCredits ReferralCredit[]
+  promoActivations PromoActivation[]
+  promoCodeUsages  PromoCodeUsage[]
+
+  @@index([telegramId])
+  @@index([email])
+  @@map("clients")
+}
+
+// Ожидание подтверждения email при регистрации (ссылка из письма)
+model PendingEmailRegistration {
+  id               String   @id @default(cuid())
+  email            String
+  passwordHash     String   @map("password_hash")
+  preferredLang    String   @default("ru") @map("preferred_lang")
+  preferredCurrency String  @default("usd") @map("preferred_currency")
+  referralCode     String?  @map("referral_code")
+  verificationToken String @unique @map("verification_token")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([verificationToken])
+  @@index([email])
+  @@map("pending_email_registrations")
+}
+
+model Payment {
+  id           String   @id @default(cuid())
+  clientId     String   @map("client_id")
+  orderId      String   @unique @map("order_id")
+  amount       Float
+  currency     String
+  status       String   @default("PENDING") // PENDING, PAID, FAILED, REFUNDED
+  provider     String?  // yookassa, cryptobot, etc.
+  externalId   String?  @map("external_id")
+  tariffId     String?  @map("tariff_id")
+  remnawaveUserId String? @map("remnawave_user_id")
+  metadata     String?  @db.Text // JSON
+  createdAt    DateTime @default(now()) @map("created_at")
+  paidAt       DateTime? @map("paid_at")
+  referralDistributedAt DateTime? @map("referral_distributed_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tariff Tariff? @relation(fields: [tariffId], references: [id], onDelete: SetNull)
+  referralCredits ReferralCredit[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([tariffId])
+  @@map("payments")
+}
+
+// Начисление реферального бонуса (для отчёта «заработок с рефералов»)
+model ReferralCredit {
+  id           String   @id @default(cuid())
+  referrerId   String   @map("referrer_id")
+  paymentId    String   @map("payment_id")
+  amount       Float
+  level        Int      // 1, 2 или 3
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  referrer Client  @relation(fields: [referrerId], references: [id], onDelete: Cascade)
+  payment  Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+  @@index([paymentId])
+  @@map("referral_credits")
+}
+
+// ——— Промо-группы и активации ———
+model PromoGroup {
+  id               String   @id @default(cuid())
+  name             String                            // Название промо-группы
+  code             String   @unique                  // Уникальный код (используется в ссылке /start promo_<code>)
+  squadUuid        String   @map("squad_uuid")       // UUID сквада в Remnawave
+  trafficLimitBytes BigInt  @default(0) @map("traffic_limit_bytes")
+  deviceLimit      Int?     @map("device_limit")
+  durationDays     Int      @map("duration_days")    // На сколько дней даётся подписка
+  maxActivations   Int      @map("max_activations")  // Макс. кол-во активаций (0 = без лимита)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  activations PromoActivation[]
+
+  @@map("promo_groups")
+}
+
+model PromoActivation {
+  id           String   @id @default(cuid())
+  promoGroupId String   @map("promo_group_id")
+  clientId     String   @map("client_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  promoGroup PromoGroup @relation(fields: [promoGroupId], references: [id], onDelete: Cascade)
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([promoGroupId, clientId])
+  @@index([promoGroupId])
+  @@index([clientId])
+  @@map("promo_activations")
+}
+
+// ——— Промокоды (скидки и бесплатные дни) ———
+model PromoCode {
+  id                String    @id @default(cuid())
+  code              String    @unique                  // Уникальный промокод (вводится вручную)
+  name              String                             // Описание / название
+  type              String                             // DISCOUNT | FREE_DAYS
+  // Для DISCOUNT:
+  discountPercent   Float?    @map("discount_percent") // Скидка в %
+  discountFixed     Float?    @map("discount_fixed")   // Или фикс. скидка в валюте
+  // Для FREE_DAYS:
+  squadUuid         String?   @map("squad_uuid")
+  trafficLimitBytes BigInt?   @map("traffic_limit_bytes")
+  deviceLimit       Int?      @map("device_limit")
+  durationDays      Int?      @map("duration_days")
+  // Общие:
+  maxUses           Int       @default(0) @map("max_uses") // 0 = без лимита
+  maxUsesPerClient  Int       @default(1) @map("max_uses_per_client")
+  isActive          Boolean   @default(true) @map("is_active")
+  expiresAt         DateTime? @map("expires_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  usages PromoCodeUsage[]
+
+  @@map("promo_codes")
+}
+
+model PromoCodeUsage {
+  id          String   @id @default(cuid())
+  promoCodeId String   @map("promo_code_id")
+  clientId    String   @map("client_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  promoCode PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([promoCodeId])
+  @@index([clientId])
+  @@map("promo_code_usages")
+}
+
+// Категория тарифов (например «Базовый», «Премиум»). emojiKey — код из админки (ordinary, premium) для подстановки эмодзи.
+model TariffCategory {
+  id        String   @id @default(cuid())
+  name      String
+  emojiKey  String?  @map("emoji_key") // ordinary | premium — подставляется эмодзи из настройки category_emojis
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tariffs Tariff[]
+
+  @@map("tariff_categories")
+}
+
+// Тариф внутри категории: название, срок, сквады, лимиты, цена
+model Tariff {
+  id                 String   @id @default(cuid())
+  categoryId         String   @map("category_id")
+  name               String
+  durationDays       Int      @map("duration_days")
+  internalSquadUuids String[] @map("internal_squad_uuids")
+  trafficLimitBytes  BigInt?  @map("traffic_limit_bytes")
+  deviceLimit        Int?     @map("device_limit")
+  price              Float    @default(0)
+  currency           String   @default("usd") @map("currency")
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  category TariffCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([categoryId])
+  @@map("tariffs")
+}

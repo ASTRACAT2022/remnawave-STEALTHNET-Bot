@@ -1,0 +1,144 @@
+###############################################################################
+#  STEALTHNET 3.0 — Docker Compose
+#  Репозиторий: https://github.com/STEALTHNET-APP/remnawave-STEALTHNET-Bot
+#  Запуск: docker compose up -d
+###############################################################################
+name: stealthnet
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: stealthnet-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stealthnet}
+      POSTGRES_USER: ${POSTGRES_USER:-stealthnet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stealthnet_change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - stealthnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stealthnet} -d ${POSTGRES_DB:-stealthnet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API ─────────────────────────────────────────────────
+  # Порт API на хосте нужен для внешнего reverse proxy.
+  # По умолчанию API слушает только localhost (без внешней публикации).
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stealthnet-api
+    restart: unless-stopped
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_HOST_PORT:-5000}:5000"
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-stealthnet}:${POSTGRES_PASSWORD:-stealthnet_change_me}@postgres:5432/${POSTGRES_DB:-stealthnet}"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_ACCESS_EXPIRES_IN: "${JWT_ACCESS_EXPIRES_IN:-15m}"
+      JWT_REFRESH_EXPIRES_IN: "${JWT_REFRESH_EXPIRES_IN:-7d}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-https://${DOMAIN:-localhost}}"
+      REMNA_API_URL: "${REMNA_API_URL:-}"
+      REMNA_ADMIN_TOKEN: "${REMNA_ADMIN_TOKEN:-}"
+      REMNA_TIMEOUT_MS: "${REMNA_TIMEOUT_MS:-15000}"
+      INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
+      INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stealthnet
+
+  # ── Telegram Bot ────────────────────────────────────────────────
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: stealthnet-bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: "${BOT_TOKEN:-}"
+      API_URL: "http://api:5000"
+    depends_on:
+      - api
+    networks:
+      - stealthnet
+
+  # ── Frontend Build ──────────────────────────────────────────────
+  # Одноразовый контейнер для сборки фронтенда в volume
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: stealthnet-frontend-build
+    volumes:
+      - frontend_dist:/out
+    entrypoint: ["sh", "-c", "cp -r /dist/* /out/ && echo 'Frontend copied to volume'"]
+
+  # ── Nginx (встроенный) ─────────────────────────────────────────
+  # Включается когда USE_BUILTIN_NGINX=true.
+  # При конфликте с Remnawave можно изменить NGINX_HTTP_PORT/NGINX_HTTPS_PORT.
+  nginx:
+    image: nginx:1.28-alpine
+    container_name: stealthnet-nginx
+    restart: unless-stopped
+    profiles:
+      - builtin-nginx
+    ports:
+      - "${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - frontend_dist:/var/www/stealthnet:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/nginx/ssl:ro
+    depends_on:
+      frontend:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    networks:
+      - stealthnet
+
+  # ── Certbot (авто-SSL) ─────────────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: stealthnet-certbot
+    profiles:
+      - builtin-nginx
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - stealthnet
+
+  # ── Migration Runner ───────────────────────────────────────────
+  # Вспомогательный контейнер для встроенного migration mode из install.sh
+  migrator:
+    image: node:20-alpine
+    profiles:
+      - tools
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - stealthnet
+
+volumes:
+  postgres_data:
+  frontend_dist:
+  certbot_www:
+  certbot_certs:
+
+networks:
+  stealthnet:
+    driver: bridge

@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║          STEALTHNET 3.0 — Автоустановщик                        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# ── Цвета ─────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+banner() {
+  echo ""
+  echo -e "${CYAN}${BOLD}"
+  echo "  ███████╗████████╗███████╗ █████╗ ██╗  ████████╗██╗  ██╗"
+  echo "  ██╔════╝╚══██╔══╝██╔════╝██╔══██╗██║  ╚══██╔══╝██║  ██║"
+  echo "  ███████╗   ██║   █████╗  ███████║██║     ██║   ███████║"
+  echo "  ╚════██║   ██║   ██╔══╝  ██╔══██║██║     ██║   ██╔══██║"
+  echo "  ███████║   ██║   ███████╗██║  ██║███████╗██║   ██║  ██║"
+  echo "  ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝  ╚═╝"
+  echo -e "                         ${YELLOW}v3.0.1${NC}"
+  echo -e "  ${NC}github.com/STEALTHNET-APP/remnawave-STEALTHNET-Bot${NC}"
+  echo ""
+}
+
+info()    { echo -e "${CYAN}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+ask() {
+  local prompt="$1" default="$2" var="$3"
+  if [ -n "$default" ]; then
+    read -rp "$(echo -e "${BOLD}$prompt${NC} [${default}]: ")" input
+    eval "$var=\"\${input:-$default}\""
+  else
+    read -rp "$(echo -e "${BOLD}$prompt${NC}: ")" input
+    eval "$var=\"\$input\""
+  fi
+}
+
+ask_secret() {
+  local prompt="$1" default="$2" var="$3"
+  if [ -n "$default" ]; then
+    read -rsp "$(echo -e "${BOLD}$prompt${NC} [***]: ")" input
+    echo ""
+    eval "$var=\"\${input:-$default}\""
+  else
+    read -rsp "$(echo -e "${BOLD}$prompt${NC}: ")" input
+    echo ""
+    eval "$var=\"\$input\""
+  fi
+}
+
+# ── Проверка зависимостей ─────────────────────────────────────────
+check_deps() {
+  info "Проверка зависимостей..."
+
+  if ! command -v docker &>/dev/null; then
+    error "Docker не установлен!"
+    echo ""
+    echo "  Установите Docker:"
+    echo "  curl -fsSL https://get.docker.com | sh"
+    echo ""
+    exit 1
+  fi
+
+  if ! docker compose version &>/dev/null 2>&1; then
+    error "Docker Compose V2 не найден!"
+    echo "  Обновите Docker или установите docker-compose-plugin"
+    exit 1
+  fi
+
+  success "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+') найден"
+  success "Docker Compose $(docker compose version --short 2>/dev/null || echo 'OK')"
+}
+
+# ── Интерактивная настройка .env ──────────────────────────────────
+configure_env() {
+  echo ""
+  echo -e "${BOLD}${CYAN}═══ Настройка проекта ═══${NC}"
+  echo ""
+
+  # Домен
+  ask "Введите домен StealthNet панели (например web.example.com), не Remnawave панели!" "" DOMAIN
+  while [ -z "$DOMAIN" ]; do
+    warn "Домен обязателен!"
+    ask "Введите домен" "" DOMAIN
+  done
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── PostgreSQL ──${NC}"
+  ask "Имя базы данных" "stealthnet" POSTGRES_DB
+  ask "Пользователь БД" "stealthnet" POSTGRES_USER
+
+  # Генерируем пароль по умолчанию
+  DEFAULT_PG_PASS=$(openssl rand -base64 16 2>/dev/null || head -c 24 /dev/urandom | base64)
+  ask_secret "Пароль БД (Enter = сгенерировать)" "$DEFAULT_PG_PASS" POSTGRES_PASSWORD
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── JWT ──${NC}"
+  DEFAULT_JWT=$(openssl rand -base64 32 2>/dev/null || head -c 48 /dev/urandom | base64)
+  ask_secret "JWT Secret (Enter = сгенерировать)" "$DEFAULT_JWT" JWT_SECRET
+  ask "Время жизни access-токена" "15m" JWT_ACCESS_EXPIRES_IN
+  ask "Время жизни refresh-токена" "7d" JWT_REFRESH_EXPIRES_IN
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── Админ ──${NC}"
+  ask "Email администратора" "admin@stealthnet.local" INIT_ADMIN_EMAIL
+  DEFAULT_ADMIN_PASS=$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | base64)
+  ask_secret "Пароль админа (Enter = сгенерировать)" "$DEFAULT_ADMIN_PASS" INIT_ADMIN_PASSWORD
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── Remnawave ──${NC}"
+  ask "URL панели Remnawave (например https://panel.example.com или https://panel.example.com/api)" "" REMNA_API_URL
+  if [ -n "$REMNA_API_URL" ]; then
+    ask_secret "Токен Remnawave API" "" REMNA_ADMIN_TOKEN
+  else
+    REMNA_ADMIN_TOKEN=""
+  fi
+  ask "Таймаут запроса к Remnawave (мс)" "15000" REMNA_TIMEOUT_MS
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── API / CORS ──${NC}"
+  ask "CORS_ORIGIN (домен или список через запятую)" "https://$DOMAIN" CORS_ORIGIN
+  ask "Порт API на хосте" "5000" API_HOST_PORT
+  ask "Bind API (127.0.0.1 для локального прокси, 0.0.0.0 для контейнерного)" "127.0.0.1" API_BIND_ADDRESS
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── Telegram Bot ──${NC}"
+  ask "Токен бота от @BotFather" "" BOT_TOKEN
+  if [ -z "$BOT_TOKEN" ]; then
+    warn "Токен бота не указан — бот не будет запущен. Можно добавить позже в .env"
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── Nginx ──${NC}"
+  echo ""
+  echo -e "  ${BOLD}1)${NC} Встроенный nginx + авто-SSL (Let's Encrypt) — рекомендуется"
+  echo -e "  ${BOLD}2)${NC} Свой nginx / Caddy / reverse proxy — я настрою сам"
+  echo ""
+  read -rp "$(echo -e "${BOLD}Выберите [1/2]${NC} [1]: ")" NGINX_CHOICE
+  NGINX_CHOICE="${NGINX_CHOICE:-1}"
+
+  USE_BUILTIN_NGINX="true"
+  CERTBOT_EMAIL=""
+  NGINX_BIND_ADDRESS="0.0.0.0"
+  NGINX_HTTP_PORT="80"
+  NGINX_HTTPS_PORT="443"
+  if [ "$NGINX_CHOICE" = "1" ]; then
+    USE_BUILTIN_NGINX="true"
+    ask "Email для Let's Encrypt" "$INIT_ADMIN_EMAIL" CERTBOT_EMAIL
+    ask "Порт встроенного nginx HTTP" "80" NGINX_HTTP_PORT
+    ask "Порт встроенного nginx HTTPS" "443" NGINX_HTTPS_PORT
+    ask "Bind встроенного nginx" "0.0.0.0" NGINX_BIND_ADDRESS
+    if [ "$NGINX_HTTP_PORT" != "80" ]; then
+      warn "Для auto-SSL (Let's Encrypt webroot) NGINX_HTTP_PORT должен быть 80. Принудительно ставлю 80."
+      NGINX_HTTP_PORT="80"
+    fi
+  else
+    USE_BUILTIN_NGINX="false"
+    echo ""
+    info "Пример конфигурации nginx: ${BOLD}nginx/external.conf.example${NC}"
+    info "API будет на ${API_BIND_ADDRESS}:${API_HOST_PORT}, фронтенд в /var/www/stealthnet/"
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}── Migration Mode ──${NC}"
+  echo ""
+  echo -e "  ${BOLD}1)${NC} Без миграции"
+  echo -e "  ${BOLD}2)${NC} Миграция из старой STEALTHNET панели (Flask/Postgres)"
+  echo -e "  ${BOLD}3)${NC} Миграция из Бедолага бэкапа (.tar.gz)"
+  echo ""
+  read -rp "$(echo -e "${BOLD}Выберите [1/2/3]${NC} [1]: ")" MIGRATION_CHOICE
+  MIGRATION_CHOICE="${MIGRATION_CHOICE:-1}"
+
+  MIGRATION_MODE="none"
+  MIGRATION_OLD_DB_HOST=""
+  MIGRATION_OLD_DB_PORT="5432"
+  MIGRATION_OLD_DB_NAME="stealthnet"
+  MIGRATION_OLD_DB_USER="stealthnet"
+  MIGRATION_OLD_DB_PASSWORD=""
+  MIGRATION_BACKUP_PATH=""
+  MIGRATION_KOPEKS_TO_USD="0.0001"
+  MIGRATION_DEFAULT_CURRENCY=""
+  if [ "$MIGRATION_CHOICE" = "2" ]; then
+    MIGRATION_MODE="old-panel"
+    ask "OLD_DB_HOST (если БД на хосте этой машины: host.docker.internal)" "host.docker.internal" MIGRATION_OLD_DB_HOST
+    ask "OLD_DB_PORT" "5432" MIGRATION_OLD_DB_PORT
+    ask "OLD_DB_NAME" "stealthnet" MIGRATION_OLD_DB_NAME
+    ask "OLD_DB_USER" "stealthnet" MIGRATION_OLD_DB_USER
+    ask_secret "OLD_DB_PASSWORD" "" MIGRATION_OLD_DB_PASSWORD
+    ask "DEFAULT_CURRENCY (пусто = авто из system_settings)" "" MIGRATION_DEFAULT_CURRENCY
+  elif [ "$MIGRATION_CHOICE" = "3" ]; then
+    MIGRATION_MODE="bedolaga"
+    ask "Путь к backup.tar.gz (внутри папки проекта)" "./backup_20260126_000000.tar.gz" MIGRATION_BACKUP_PATH
+    ask "KOPEKS_TO_USD" "0.0001" MIGRATION_KOPEKS_TO_USD
+    ask "DEFAULT_CURRENCY (пусто = авто из system_settings)" "" MIGRATION_DEFAULT_CURRENCY
+  fi
+
+  # Записываем .env
+  cat > "$SCRIPT_DIR/.env" << ENVEOF
+# STEALTHNET 3.0 — сгенерировано install.sh $(date '+%Y-%m-%d %H:%M')
+DOMAIN=$DOMAIN
+
+# PostgreSQL
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
+# JWT
+JWT_SECRET=$JWT_SECRET
+JWT_ACCESS_EXPIRES_IN=$JWT_ACCESS_EXPIRES_IN
+JWT_REFRESH_EXPIRES_IN=$JWT_REFRESH_EXPIRES_IN
+
+# Admin
+INIT_ADMIN_EMAIL=$INIT_ADMIN_EMAIL
+INIT_ADMIN_PASSWORD=$INIT_ADMIN_PASSWORD
+
+# Remnawave
+REMNA_API_URL=$REMNA_API_URL
+REMNA_ADMIN_TOKEN=$REMNA_ADMIN_TOKEN
+REMNA_TIMEOUT_MS=$REMNA_TIMEOUT_MS
+
+# API
+CORS_ORIGIN=$CORS_ORIGIN
+API_HOST_PORT=$API_HOST_PORT
+API_BIND_ADDRESS=$API_BIND_ADDRESS
+
+# Telegram Bot
+BOT_TOKEN=$BOT_TOKEN
+
+# Nginx
+USE_BUILTIN_NGINX=$USE_BUILTIN_NGINX
+CERTBOT_EMAIL=$CERTBOT_EMAIL
+NGINX_BIND_ADDRESS=$NGINX_BIND_ADDRESS
+NGINX_HTTP_PORT=$NGINX_HTTP_PORT
+NGINX_HTTPS_PORT=$NGINX_HTTPS_PORT
+
+# Migration
+MIGRATION_MODE=$MIGRATION_MODE
+MIGRATION_OLD_DB_HOST=$MIGRATION_OLD_DB_HOST
+MIGRATION_OLD_DB_PORT=$MIGRATION_OLD_DB_PORT
+MIGRATION_OLD_DB_NAME=$MIGRATION_OLD_DB_NAME
+MIGRATION_OLD_DB_USER=$MIGRATION_OLD_DB_USER
+MIGRATION_OLD_DB_PASSWORD=$MIGRATION_OLD_DB_PASSWORD
+MIGRATION_BACKUP_PATH=$MIGRATION_BACKUP_PATH
+MIGRATION_KOPEKS_TO_USD=$MIGRATION_KOPEKS_TO_USD
+MIGRATION_DEFAULT_CURRENCY=$MIGRATION_DEFAULT_CURRENCY
+ENVEOF
+
+  success "Файл .env создан"
+}
+
+# ── Генерация nginx.conf из шаблона ──────────────────────────────
+generate_nginx_conf() {
+  info "Генерация nginx.conf для домена $DOMAIN ..."
+  sed "s/REPLACE_DOMAIN/$DOMAIN/g" "$SCRIPT_DIR/nginx/nginx.conf.template" \
+    > "$SCRIPT_DIR/nginx/nginx.conf"
+  success "nginx/nginx.conf сгенерирован"
+}
+
+generate_nginx_initial() {
+  info "Генерация начального nginx.conf (HTTP only, для certbot)..."
+  sed "s/REPLACE_DOMAIN/$DOMAIN/g" "$SCRIPT_DIR/nginx/nginx-initial.conf" \
+    > "$SCRIPT_DIR/nginx/nginx.conf"
+  success "nginx/nginx.conf (HTTP-only) сгенерирован"
+}
+
+# ── Получение SSL сертификата ────────────────────────────────────
+obtain_ssl() {
+  info "Получение SSL-сертификата от Let's Encrypt..."
+
+  # 1. Запускаем nginx с HTTP-only конфигом
+  generate_nginx_initial
+
+  info "Запуск nginx (HTTP-only) для ACME-challenge..."
+  docker compose --profile builtin-nginx up -d nginx 2>/dev/null || true
+  sleep 3
+
+  # 2. Запускаем certbot для получения сертификата (--entrypoint переопределяет цикл "renew" из compose)
+  info "Запуск certbot..."
+  docker compose --profile builtin-nginx run --rm --entrypoint certbot certbot \
+    certonly \
+    --webroot \
+    --webroot-path=/var/www/certbot \
+    --email "$CERTBOT_EMAIL" \
+    --agree-tos \
+    --no-eff-email \
+    -d "$DOMAIN" \
+    --force-renewal 2>&1 || {
+      error "Не удалось получить SSL-сертификат!"
+      echo ""
+      echo "  Проверьте:"
+      echo "  1. DNS-запись A для $DOMAIN указывает на этот сервер"
+      echo "  2. Порт 80 открыт в фаерволе (и NGINX_HTTP_PORT=80)"
+      echo "  3. Домен $DOMAIN доступен извне"
+      echo ""
+      echo "  После исправления запустите: bash install.sh"
+      exit 1
+    }
+
+  success "SSL-сертификат получен"
+
+  # 3. Останавливаем nginx, генерируем полный конфиг с SSL
+  docker compose --profile builtin-nginx stop nginx 2>/dev/null || true
+  generate_nginx_conf
+}
+
+# ── Сборка и запуск ──────────────────────────────────────────────
+build_and_start() {
+  echo ""
+  echo -e "${BOLD}${CYAN}═══ Сборка проекта ═══${NC}"
+  echo ""
+
+  # Определяем compose profiles
+  PROFILES=""
+  if [ "$USE_BUILTIN_NGINX" = "true" ]; then
+    PROFILES="--profile builtin-nginx"
+  fi
+
+  # Сборка
+  info "Сборка Docker-образов (это может занять несколько минут)..."
+  docker compose $PROFILES build 2>&1 | tail -5
+  success "Образы собраны"
+
+  # Запуск БД
+  info "Запуск PostgreSQL..."
+  docker compose up -d postgres
+  echo "  Ожидание готовности БД..."
+  sleep 5
+
+  # Запуск API
+  info "Запуск Backend API..."
+  docker compose up -d api
+  sleep 3
+
+  # Запуск бота (если токен указан)
+  if [ -n "$BOT_TOKEN" ]; then
+    info "Запуск Telegram Bot..."
+    docker compose up -d bot
+  else
+    warn "BOT_TOKEN не указан — бот не запущен"
+  fi
+
+  # Сборка фронтенда
+  info "Сборка фронтенда..."
+  docker compose up frontend 2>&1 | tail -3
+
+  # Nginx
+  if [ "$USE_BUILTIN_NGINX" = "true" ]; then
+    info "Запуск Nginx..."
+    docker compose $PROFILES up -d nginx
+    
+    info "Запуск Certbot (авто-обновление)..."
+    docker compose $PROFILES up -d certbot
+  else
+    # При внешнем nginx — копируем dist в нужную папку
+    info "Копирование фронтенда в /var/www/stealthnet..."
+    sudo mkdir -p /var/www/stealthnet
+    docker compose cp frontend:/dist/. /var/www/stealthnet/ 2>/dev/null || {
+      # Fallback: копируем из volume
+      docker run --rm -v stealthnet_frontend_dist:/src -v /var/www/stealthnet:/dst alpine sh -c "cp -r /src/* /dst/"
+    }
+    success "Фронтенд скопирован в /var/www/stealthnet/"
+  fi
+}
+
+ensure_migration_deps() {
+  if [ -d "$SCRIPT_DIR/scripts/node_modules/pg" ]; then
+    return 0
+  fi
+  info "Установка зависимостей migration-скриптов..."
+  docker compose --profile tools run --rm migrator sh -lc "cd /workspace/scripts && npm install"
+}
+
+run_migration_mode() {
+  case "${MIGRATION_MODE:-none}" in
+    none)
+      return 0
+      ;;
+    old-panel)
+      info "Запуск встроенной миграции: old-panel..."
+      ensure_migration_deps
+      docker compose --profile tools run --rm \
+        -e OLD_DB_HOST="${MIGRATION_OLD_DB_HOST}" \
+        -e OLD_DB_PORT="${MIGRATION_OLD_DB_PORT}" \
+        -e OLD_DB_NAME="${MIGRATION_OLD_DB_NAME}" \
+        -e OLD_DB_USER="${MIGRATION_OLD_DB_USER}" \
+        -e OLD_DB_PASSWORD="${MIGRATION_OLD_DB_PASSWORD}" \
+        -e NEW_DB_HOST="postgres" \
+        -e NEW_DB_PORT="5432" \
+        -e NEW_DB_NAME="${POSTGRES_DB}" \
+        -e NEW_DB_USER="${POSTGRES_USER}" \
+        -e NEW_DB_PASSWORD="${POSTGRES_PASSWORD}" \
+        -e DEFAULT_CURRENCY="${MIGRATION_DEFAULT_CURRENCY}" \
+        migrator sh -lc "node /workspace/scripts/migrate-from-old-panel.js"
+      success "Миграция old-panel завершена"
+      ;;
+    bedolaga)
+      info "Запуск встроенной миграции: bedolaga..."
+      if [ ! -f "$MIGRATION_BACKUP_PATH" ]; then
+        error "Файл бэкапа не найден: $MIGRATION_BACKUP_PATH"
+        error "Укажите путь внутри папки проекта и повторите запуск."
+        exit 1
+      fi
+      ensure_migration_deps
+      LOCAL_BACKUP_PATH="$MIGRATION_BACKUP_PATH"
+      if [[ "$LOCAL_BACKUP_PATH" = "$SCRIPT_DIR"* ]]; then
+        BACKUP_PATH_IN_CONTAINER="/workspace${LOCAL_BACKUP_PATH#$SCRIPT_DIR}"
+      elif [[ "$LOCAL_BACKUP_PATH" = /* ]]; then
+        error "Абсолютный путь вне проекта не поддерживается встроенной миграцией: $LOCAL_BACKUP_PATH"
+        error "Скопируйте архив в папку проекта и укажите относительный путь."
+        exit 1
+      else
+        BACKUP_PATH_IN_CONTAINER="/workspace/$LOCAL_BACKUP_PATH"
+      fi
+      docker compose --profile tools run --rm \
+        -e BACKUP_PATH="${BACKUP_PATH_IN_CONTAINER}" \
+        -e NEW_DB_HOST="postgres" \
+        -e NEW_DB_PORT="5432" \
+        -e NEW_DB_NAME="${POSTGRES_DB}" \
+        -e NEW_DB_USER="${POSTGRES_USER}" \
+        -e NEW_DB_PASSWORD="${POSTGRES_PASSWORD}" \
+        -e KOPEKS_TO_USD="${MIGRATION_KOPEKS_TO_USD}" \
+        -e DEFAULT_CURRENCY="${MIGRATION_DEFAULT_CURRENCY}" \
+        migrator sh -lc 'node /workspace/scripts/migrate-from-bedolaga.js "$BACKUP_PATH"'
+      success "Миграция bedolaga завершена"
+      ;;
+    *)
+      warn "Неизвестный MIGRATION_MODE=${MIGRATION_MODE}, миграция пропущена"
+      ;;
+  esac
+}
+
+# ── Финальная проверка ───────────────────────────────────────────
+show_status() {
+  echo ""
+  echo -e "${BOLD}${CYAN}═══ Статус ═══${NC}"
+  echo ""
+  docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || docker compose ps
+  echo ""
+}
+
+show_summary() {
+  echo ""
+  echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}${BOLD}║          STEALTHNET 3.0 — Установка завершена!                  ║${NC}"
+  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}Панель:${NC}      https://$DOMAIN/admin"
+  echo -e "  ${BOLD}Кабинет:${NC}     https://$DOMAIN/cabinet"
+  echo -e "  ${BOLD}Админ:${NC}       $INIT_ADMIN_EMAIL / $INIT_ADMIN_PASSWORD"
+  echo ""
+  if [ -n "$BOT_TOKEN" ]; then
+    echo -e "  ${BOLD}Telegram Bot:${NC} запущен"
+  else
+    echo -e "  ${YELLOW}Telegram Bot:${NC} не настроен (добавьте BOT_TOKEN в .env)"
+  fi
+  echo ""
+  if [ "$USE_BUILTIN_NGINX" != "true" ]; then
+    echo -e "  ${YELLOW}Nginx:${NC} Настройте свой reverse proxy"
+    echo -e "  Пример конфига: ${BOLD}nginx/external.conf.example${NC}"
+    echo -e "  API: ${BOLD}${API_BIND_ADDRESS}:${API_HOST_PORT}${NC}"
+    echo -e "  Фронтенд: ${BOLD}/var/www/stealthnet/${NC}"
+    echo ""
+  fi
+  if [ "${MIGRATION_MODE:-none}" != "none" ]; then
+    echo -e "  ${BOLD}Migration:${NC}  ${MIGRATION_MODE} (выполнена)"
+    echo ""
+  fi
+  echo -e "  ${BOLD}Команды:${NC}"
+  echo "    docker compose ps                  — статус"
+  echo "    docker compose logs -f api         — логи API"
+  echo "    docker compose logs -f bot         — логи бота"
+  echo "    docker compose restart api bot     — перезапуск"
+  echo "    docker compose down                — остановить всё"
+  echo "    docker compose up -d               — запустить всё"
+  echo ""
+}
+
+# ── Основной поток ───────────────────────────────────────────────
+main() {
+  banner
+  check_deps
+
+  # Если .env уже есть — спрашиваем
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    echo ""
+    warn "Файл .env уже существует!"
+    read -rp "$(echo -e "${BOLD}Перезаписать? [y/N]${NC}: ")" OVERWRITE
+    if [[ "$OVERWRITE" =~ ^[Yy]$ ]]; then
+      configure_env
+    else
+      info "Используем существующий .env"
+      # Загружаем переменные
+      set -a
+      source "$SCRIPT_DIR/.env"
+      set +a
+    fi
+  else
+    configure_env
+  fi
+
+  # Загружаем .env
+  set -a
+  source "$SCRIPT_DIR/.env"
+  set +a
+
+  : "${API_HOST_PORT:=5000}"
+  : "${API_BIND_ADDRESS:=127.0.0.1}"
+  : "${NGINX_BIND_ADDRESS:=0.0.0.0}"
+  : "${NGINX_HTTP_PORT:=80}"
+  : "${NGINX_HTTPS_PORT:=443}"
+  : "${REMNA_TIMEOUT_MS:=15000}"
+  : "${MIGRATION_MODE:=none}"
+  : "${MIGRATION_OLD_DB_HOST:=}"
+  : "${MIGRATION_OLD_DB_PORT:=5432}"
+  : "${MIGRATION_OLD_DB_NAME:=stealthnet}"
+  : "${MIGRATION_OLD_DB_USER:=stealthnet}"
+  : "${MIGRATION_OLD_DB_PASSWORD:=}"
+  : "${MIGRATION_BACKUP_PATH:=}"
+  : "${MIGRATION_KOPEKS_TO_USD:=0.0001}"
+  : "${MIGRATION_DEFAULT_CURRENCY:=}"
+
+  # SSL + nginx
+  if [ "$USE_BUILTIN_NGINX" = "true" ]; then
+    obtain_ssl
+  fi
+
+  build_and_start
+  run_migration_mode
+  show_status
+  show_summary
+}
+
+main "$@"
