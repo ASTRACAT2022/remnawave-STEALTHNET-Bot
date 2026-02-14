@@ -38,6 +38,15 @@ let BOT_USERNAME = "";
 
 type TariffItem = { id: string; name: string; price: number; currency: string };
 type TariffCategory = { id: string; name: string; emoji?: string; emojiKey?: string | null; tariffs: TariffItem[] };
+const YOOMONEY_METHOD_ID = 1000;
+
+function getPaymentMethods(config: Awaited<ReturnType<typeof api.getPublicConfig>>): { id: number; label: string }[] {
+  const methods = [...(config?.plategaMethods ?? [])];
+  if (config?.yoomoneyEnabled) {
+    methods.push({ id: YOOMONEY_METHOD_ID, label: (config.yoomoneyLabel ?? "ЮMoney").trim() || "ЮMoney" });
+  }
+  return methods;
+}
 
 // Токены по telegram_id (в памяти; для продакшена лучше Redis/БД)
 const tokenStore = new Map<number, string>();
@@ -534,18 +543,25 @@ bot.on("callback_query:data", async (ctx) => {
         await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
       }
-      const methods = config?.plategaMethods ?? [];
+      const methods = getPaymentMethods(config);
       const client = await api.getMe(token);
       const balanceLabel = client.balance >= tariff.price ? `💰 Оплатить балансом (${formatMoney(client.balance, client.preferredCurrency)})` : null;
 
       if (methodIdFromBtn != null && Number.isFinite(methodIdFromBtn)) {
-        const payment = await api.createPlategaPayment(token, {
-          amount: tariff.price,
-          currency: tariff.currency,
-          paymentMethod: methodIdFromBtn,
-          description: `Тариф: ${tariff.name}`,
-          tariffId: tariff.id,
-        });
+        const payment = methodIdFromBtn === YOOMONEY_METHOD_ID
+          ? await api.createYooMoneyPayment(token, {
+              amount: tariff.price,
+              currency: tariff.currency,
+              description: `Тариф: ${tariff.name}`,
+              tariffId: tariff.id,
+            })
+          : await api.createPlategaPayment(token, {
+              amount: tariff.price,
+              currency: tariff.currency,
+              paymentMethod: methodIdFromBtn,
+              description: `Тариф: ${tariff.name}`,
+              tariffId: tariff.id,
+            });
         const pay1 = titleWithEmoji("CARD", `Оплата: ${tariff.name} — ${formatMoney(tariff.price, tariff.currency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
         await editMessageContent(ctx, pay1.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), pay1.entities);
         return;
@@ -597,7 +613,7 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (data === "menu:topup") {
       const client = await api.getMe(token);
-      const methods = config?.plategaMethods ?? [];
+      const methods = getPaymentMethods(config);
       if (!methods.length) {
         await editMessageContent(ctx, "Пополнение временно недоступно.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
@@ -618,14 +634,20 @@ bot.on("callback_query:data", async (ctx) => {
         return;
       }
       const client = await api.getMe(token);
-      const methods = config?.plategaMethods ?? [];
+      const methods = getPaymentMethods(config);
       if (methodIdFromBtn != null && Number.isFinite(methodIdFromBtn)) {
-        const payment = await api.createPlategaPayment(token, {
-          amount,
-          currency: client.preferredCurrency,
-          paymentMethod: methodIdFromBtn,
-          description: "Пополнение баланса",
-        });
+        const payment = methodIdFromBtn === YOOMONEY_METHOD_ID
+          ? await api.createYooMoneyPayment(token, {
+              amount,
+              currency: client.preferredCurrency,
+              description: "Пополнение баланса",
+            })
+          : await api.createPlategaPayment(token, {
+              amount,
+              currency: client.preferredCurrency,
+              paymentMethod: methodIdFromBtn,
+              description: "Пополнение баланса",
+            });
         const topupPay1 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
         await editMessageContent(ctx, topupPay1.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), topupPay1.entities);
         return;
@@ -636,12 +658,18 @@ bot.on("callback_query:data", async (ctx) => {
         return;
       }
       const methodId = methods[0]?.id ?? 2;
-      const payment = await api.createPlategaPayment(token, {
-        amount,
-        currency: client.preferredCurrency,
-        paymentMethod: methodId,
-        description: "Пополнение баланса",
-      });
+      const payment = methodId === YOOMONEY_METHOD_ID
+        ? await api.createYooMoneyPayment(token, {
+            amount,
+            currency: client.preferredCurrency,
+            description: "Пополнение баланса",
+          })
+        : await api.createPlategaPayment(token, {
+            amount,
+            currency: client.preferredCurrency,
+            paymentMethod: methodId,
+            description: "Пополнение баланса",
+          });
       const topupPay3 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
       await editMessageContent(ctx, topupPay3.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), topupPay3.entities);
       return;
@@ -763,7 +791,7 @@ bot.on("message:text", async (ctx) => {
 
   try {
     const config = await api.getPublicConfig();
-    const methods = config?.plategaMethods ?? [];
+    const methods = getPaymentMethods(config);
     if (!methods.length) {
       await ctx.reply("Пополнение временно недоступно.");
       return;
@@ -790,12 +818,19 @@ bot.on("message:text", async (ctx) => {
       });
       return;
     }
-    const payment = await api.createPlategaPayment(token, {
-      amount: num,
-      currency: client.preferredCurrency,
-      paymentMethod: methods[0].id,
-      description: "Пополнение баланса",
-    });
+    const firstMethodId = methods[0].id;
+    const payment = firstMethodId === YOOMONEY_METHOD_ID
+      ? await api.createYooMoneyPayment(token, {
+          amount: num,
+          currency: client.preferredCurrency,
+          description: "Пополнение баланса",
+        })
+      : await api.createPlategaPayment(token, {
+          amount: num,
+          currency: client.preferredCurrency,
+          paymentMethod: firstMethodId,
+          description: "Пополнение баланса",
+        });
     const topupMsg2 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
     await ctx.reply(topupMsg2.text, {
       entities: topupMsg2.entities.length ? topupMsg2.entities : undefined,

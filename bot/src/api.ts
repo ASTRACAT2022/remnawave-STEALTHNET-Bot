@@ -85,6 +85,8 @@ export async function getPublicConfig(): Promise<{
   trialEnabled?: boolean;
   trialDays?: number;
   plategaMethods?: { id: number; label: string }[];
+  yoomoneyEnabled?: boolean;
+  yoomoneyLabel?: string | null;
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; iconCustomEmojiId?: string }[] | null;
   /** Тексты меню с уже подставленными эмодзи ({{BALANCE}} → unicode из bot_emojis) */
   resolvedBotMenuTexts?: Record<string, string>;
@@ -163,6 +165,19 @@ export async function createPlategaPayment(
   }
 ): Promise<{ paymentUrl: string; orderId: string; paymentId: string }> {
   return fetchJson("/api/client/payments/platega", { method: "POST", body, token });
+}
+
+/** Создать платёж ЮMoney (возвращает paymentUrl) */
+export async function createYooMoneyPayment(
+  token: string,
+  body: {
+    amount: number;
+    currency: string;
+    description?: string;
+    tariffId?: string;
+  }
+): Promise<{ paymentUrl: string; orderId: string; paymentId: string }> {
+  return fetchJson("/api/client/payments/yoomoney", { method: "POST", body, token });
 }
 
 /** Обновить профиль (язык, валюта) */
