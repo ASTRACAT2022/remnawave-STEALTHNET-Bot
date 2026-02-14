@@ -19,11 +19,13 @@
   <a href="https://t.me/stealthnet_admin_panel"><img src="https://img.shields.io/badge/Telegram-канал-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
 </p>
 
+
+
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/3ebb814b-2a17-4140-9564-a37f06c850fb" width="830" alt="STEALTHNET скриншот 1" />
+  <img src="https://github.com/user-attachments/assets/5c504c46-0b00-47d1-b767-7afed7f36983" width="830" alt="STEALTHNET скриншот 1" />
 </p>
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/2e6cae39-f2c0-4bf4-920d-6ee20e54a15d" width="830" alt="STEALTHNET скриншот 2" />
+  <img src="https://github.com/user-attachments/assets/ecd37b8e-68ef-4616-92da-550f8bd9cdb5" width="830" alt="STEALTHNET скриншот 2" />
 </p>
 
 <p align="center">
