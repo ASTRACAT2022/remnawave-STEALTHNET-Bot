@@ -45,6 +45,8 @@ export function ClientProfilePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [copiedRef, setCopiedRef] = useState<"site" | "bot" | null>(null);
   const [plategaMethods, setPlategaMethods] = useState<{ id: number; label: string }[]>([]);
+  const [yoomoneyEnabled, setYoomoneyEnabled] = useState(false);
+  const [yoomoneyLabel, setYoomoneyLabel] = useState("ЮMoney");
   const [activeLanguages, setActiveLanguages] = useState<string[]>([]);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([]);
   const [publicAppUrl, setPublicAppUrl] = useState<string | null>(null);
@@ -73,6 +75,8 @@ export function ClientProfilePage() {
   useEffect(() => {
     api.getPublicConfig().then((c) => {
       setPlategaMethods(c.plategaMethods ?? []);
+      setYoomoneyEnabled(c.yoomoneyEnabled === true);
+      setYoomoneyLabel((c.yoomoneyLabel ?? "ЮMoney").trim() || "ЮMoney");
       setActiveLanguages(c.activeLanguages?.length ? c.activeLanguages : ["ru", "en", "ua"]);
       setActiveCurrencies(c.activeCurrencies?.length ? c.activeCurrencies : ["usd", "rub", "uah"]);
       setPublicAppUrl(c.publicAppUrl ?? null);
@@ -94,6 +98,30 @@ export function ClientProfilePage() {
         amount,
         currency,
         paymentMethod: methodId,
+        description: "Пополнение баланса",
+      });
+      setTopUpModalOpen(false);
+      window.open(res.paymentUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setTopUpError(e instanceof Error ? e.message : "Ошибка создания платежа");
+    } finally {
+      setTopUpLoading(false);
+    }
+  }
+
+  async function startTopUpYoomoney() {
+    if (!token || !client) return;
+    const amount = Number(topUpAmount?.replace(",", "."));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError("Укажите сумму");
+      return;
+    }
+    setTopUpError(null);
+    setTopUpLoading(true);
+    try {
+      const res = await api.clientCreateYooMoneyPayment(token, {
+        amount,
+        currency: "rub",
         description: "Пополнение баланса",
       });
       setTopUpModalOpen(false);
@@ -269,7 +297,7 @@ export function ClientProfilePage() {
         </Card>
       </motion.div>
 
-      {plategaMethods.length > 0 && (
+      {(plategaMethods.length > 0 || yoomoneyEnabled) && (
         <Card id="topup" className={cardClass}>
           <CardHeader className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base min-w-0 truncate">
@@ -346,6 +374,17 @@ export function ClientProfilePage() {
                 {m.label}
               </Button>
             ))}
+            {yoomoneyEnabled && (
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={topUpLoading}
+                onClick={startTopUpYoomoney}
+              >
+                {topUpLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
+                {yoomoneyLabel} (RUB)
+              </Button>
+            )}
           </div>
           {topUpError && <p className="text-sm text-destructive">{topUpError}</p>}
           <DialogFooter>

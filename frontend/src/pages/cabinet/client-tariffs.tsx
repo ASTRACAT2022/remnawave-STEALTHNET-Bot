@@ -32,6 +32,8 @@ export function ClientTariffsPage() {
   const [tariffs, setTariffs] = useState<PublicTariffCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [plategaMethods, setPlategaMethods] = useState<{ id: number; label: string }[]>([]);
+  const [yoomoneyEnabled, setYoomoneyEnabled] = useState(false);
+  const [yoomoneyLabel, setYoomoneyLabel] = useState("ЮMoney");
   const [trialConfig, setTrialConfig] = useState<{ trialEnabled: boolean; trialDays: number }>({ trialEnabled: false, trialDays: 0 });
   const [payModal, setPayModal] = useState<{ tariff: TariffForPay } | null>(null);
   const [payLoading, setPayLoading] = useState(false);
@@ -57,6 +59,8 @@ export function ClientTariffsPage() {
   useEffect(() => {
     api.getPublicConfig().then((c) => {
       setPlategaMethods(c.plategaMethods ?? []);
+      setYoomoneyEnabled(c.yoomoneyEnabled === true);
+      setYoomoneyLabel((c.yoomoneyLabel ?? "ЮMoney").trim() || "ЮMoney");
       setTrialConfig({ trialEnabled: !!c.trialEnabled, trialDays: c.trialDays ?? 0 });
     }).catch(() => {});
   }, []);
@@ -125,6 +129,34 @@ export function ClientTariffsPage() {
         amount: finalPrice,
         currency: tariff.currency,
         paymentMethod: methodId,
+        description: tariff.name,
+        tariffId: tariff.id,
+        promoCode: promoResult ? promoInput.trim() : undefined,
+      });
+      setPayModal(null);
+      setPromoInput("");
+      setPromoResult(null);
+      window.open(res.paymentUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "Ошибка создания платежа");
+    } finally {
+      setPayLoading(false);
+    }
+  }
+
+  async function startYoomoneyPayment(tariff: TariffForPay) {
+    if (!token) return;
+    if (tariff.currency.toLowerCase() !== "rub") {
+      setPayError("ЮMoney доступен только для тарифов в RUB");
+      return;
+    }
+    setPayError(null);
+    setPayLoading(true);
+    try {
+      const finalPrice = promoResult ? getDiscountedPrice(tariff.price) : tariff.price;
+      const res = await api.clientCreateYooMoneyPayment(token, {
+        amount: finalPrice,
+        currency: "rub",
         description: tariff.name,
         tariffId: tariff.id,
         promoCode: promoResult ? promoInput.trim() : undefined,
@@ -349,6 +381,17 @@ export function ClientTariffsPage() {
                 {m.label}
               </Button>
             ))}
+            {payModal && yoomoneyEnabled && (
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={payLoading || payModal.tariff.currency.toLowerCase() !== "rub"}
+                onClick={() => startYoomoneyPayment(payModal.tariff)}
+              >
+                {payLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
+                {yoomoneyLabel} (RUB)
+              </Button>
+            )}
           </div>
           {payError && <p className="text-sm text-destructive">{payError}</p>}
           <DialogFooter>

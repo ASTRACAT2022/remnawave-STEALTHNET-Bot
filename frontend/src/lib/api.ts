@@ -323,6 +323,13 @@ export const api = {
     return request("/client/payments/platega", { method: "POST", body: JSON.stringify(data), token });
   },
 
+  async clientCreateYooMoneyPayment(
+    token: string,
+    data: { amount: number; currency: string; description?: string; tariffId?: string; promoCode?: string }
+  ): Promise<{ paymentUrl: string; orderId: string; paymentId: string; discountApplied?: boolean; finalAmount?: number }> {
+    return request("/client/payments/yoomoney", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async getPublicTariffs(): Promise<{ items: PublicTariffCategory[] }> {
     return request("/public/tariffs");
   },
@@ -466,6 +473,12 @@ export type UpdateSettingsPayload = {
   plategaMerchantId?: string | null;
   plategaSecret?: string | null;
   plategaMethods?: string | null;
+  yoomoneyEnabled?: boolean;
+  yoomoneyWallet?: string | null;
+  yoomoneyNotificationSecret?: string | null;
+  yoomoneyLabel?: string | null;
+  yoomoneySuccessUrl?: string | null;
+  yoomoneyFailUrl?: string | null;
   botButtons?: string | null;
   botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | string | null;
   botBackLabel?: string | null;
@@ -546,6 +559,12 @@ export interface AdminSettings {
   plategaMerchantId?: string | null;
   plategaSecret?: string | null;
   plategaMethods?: { id: number; enabled: boolean; label: string }[];
+  yoomoneyEnabled?: boolean;
+  yoomoneyWallet?: string | null;
+  yoomoneyNotificationSecret?: string | null;
+  yoomoneyLabel?: string | null;
+  yoomoneySuccessUrl?: string | null;
+  yoomoneyFailUrl?: string | null;
   /** Кнопки главного меню бота: порядок, видимость, текст, стиль, ключ эмодзи (TRIAL, PACKAGE, …) */
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; emojiKey?: string }[];
   /** Эмодзи по ключам: Unicode и/или TG custom emoji ID (премиум). Ключи: TRIAL, PACKAGE, CARD, LINK, SERVERS, … */
@@ -866,6 +885,8 @@ export interface PublicConfig {
   publicAppUrl?: string | null;
   telegramBotUsername?: string | null;
   plategaMethods?: { id: number; label: string }[];
+  yoomoneyEnabled?: boolean;
+  yoomoneyLabel?: string | null;
   trialEnabled?: boolean;
   trialDays?: number;
   themeAccent?: string;

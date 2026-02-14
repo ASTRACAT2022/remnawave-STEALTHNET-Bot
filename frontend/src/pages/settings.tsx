@@ -99,6 +99,7 @@ export function SettingsPage() {
   const [squads, setSquads] = useState<{ uuid: string; name?: string }[]>([]);
   const [activeTab, setActiveTab] = useState("general");
   const [plategaCallbackCopied, setPlategaCallbackCopied] = useState(false);
+  const [yoomoneyCallbackCopied, setYoomoneyCallbackCopied] = useState(false);
   const [defaultSubpageConfig, setDefaultSubpageConfig] = useState<SubscriptionPageConfig | null>(null);
   const token = state.accessToken!;
 
@@ -112,6 +113,12 @@ export function SettingsPage() {
         referralPercentLevel2: (data as AdminSettings).referralPercentLevel2 ?? 10,
         referralPercentLevel3: (data as AdminSettings).referralPercentLevel3 ?? 10,
         plategaMethods: (data as AdminSettings).plategaMethods ?? DEFAULT_PLATEGA_METHODS,
+        yoomoneyEnabled: (data as AdminSettings).yoomoneyEnabled ?? false,
+        yoomoneyWallet: (data as AdminSettings).yoomoneyWallet ?? null,
+        yoomoneyNotificationSecret: (data as AdminSettings).yoomoneyNotificationSecret ?? null,
+        yoomoneyLabel: (data as AdminSettings).yoomoneyLabel ?? "ЮMoney",
+        yoomoneySuccessUrl: (data as AdminSettings).yoomoneySuccessUrl ?? null,
+        yoomoneyFailUrl: (data as AdminSettings).yoomoneyFailUrl ?? null,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -240,6 +247,15 @@ export function SettingsPage() {
         plategaMerchantId: settings.plategaMerchantId ?? null,
         plategaSecret: settings.plategaSecret && settings.plategaSecret !== "********" ? settings.plategaSecret : undefined,
         plategaMethods: settings.plategaMethods != null ? JSON.stringify(settings.plategaMethods) : undefined,
+        yoomoneyEnabled: settings.yoomoneyEnabled ?? false,
+        yoomoneyWallet: settings.yoomoneyWallet ?? null,
+        yoomoneyNotificationSecret:
+          settings.yoomoneyNotificationSecret && settings.yoomoneyNotificationSecret !== "********"
+            ? settings.yoomoneyNotificationSecret
+            : undefined,
+        yoomoneyLabel: settings.yoomoneyLabel ?? "ЮMoney",
+        yoomoneySuccessUrl: settings.yoomoneySuccessUrl ?? null,
+        yoomoneyFailUrl: settings.yoomoneyFailUrl ?? null,
         botButtons: settings.botButtons != null ? JSON.stringify(settings.botButtons) : undefined,
         botEmojis: settings.botEmojis != null ? settings.botEmojis : undefined,
         botBackLabel: settings.botBackLabel ?? null,
@@ -1151,6 +1167,121 @@ export function SettingsPage() {
                         ))}
                       </div>
                     </div>
+                    {message && <p className="text-sm text-muted-foreground">{message}</p>}
+                    <Button type="submit" disabled={saving}>
+                      {saving ? "Сохранение…" : "Сохранить"}
+                    </Button>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible defaultOpen={false} className="group mt-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-t-lg text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <CardHeader className="pointer-events-none [&_.chevron]:transition-transform [&_.chevron]:duration-200 group-data-[state=open]:[&_.chevron]:rotate-180">
+                      <div className="flex items-center justify-between pr-2">
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="h-5 w-5 text-primary" />
+                          <CardTitle>ЮMoney</CardTitle>
+                          <span className="text-xs font-normal text-muted-foreground">— нажмите, чтобы развернуть настройки</span>
+                        </div>
+                        <ChevronDown className="chevron h-5 w-5 shrink-0 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">HTTP-уведомления + быстрая ссылка оплаты</p>
+                    </CardHeader>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 border-t pt-4">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id="yoomoney-enabled"
+                        checked={settings.yoomoneyEnabled === true}
+                        onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, yoomoneyEnabled: checked === true } : s))}
+                      />
+                      <Label htmlFor="yoomoney-enabled" className="cursor-pointer">Включить ЮMoney</Label>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Callback URL для ЮMoney (HTTP-уведомления)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          readOnly
+                          value={(settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/yoomoney` : "Укажите «URL приложения» во вкладке «Общие»"}
+                          className="font-mono text-sm bg-muted/50"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={async () => {
+                            const url = (settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/yoomoney` : "";
+                            if (url && navigator.clipboard) {
+                              await navigator.clipboard.writeText(url);
+                              setYoomoneyCallbackCopied(true);
+                              setTimeout(() => setYoomoneyCallbackCopied(false), 2000);
+                            }
+                          }}
+                          disabled={!(settings.publicAppUrl ?? "").trim()}
+                          title="Копировать"
+                        >
+                          {yoomoneyCallbackCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">В настройках кошелька ЮMoney включите HTTP-уведомления на этот URL и задайте секретное слово ниже.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Номер кошелька (receiver)</Label>
+                        <Input
+                          value={settings.yoomoneyWallet ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yoomoneyWallet: e.target.value || null } : s))}
+                          placeholder="41001XXXXXXXXXXX"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Секретное слово уведомлений</Label>
+                        <Input
+                          type="password"
+                          value={settings.yoomoneyNotificationSecret ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yoomoneyNotificationSecret: e.target.value || null } : s))}
+                          placeholder="notification_secret"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>Название кнопки</Label>
+                        <Input
+                          value={settings.yoomoneyLabel ?? "ЮMoney"}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yoomoneyLabel: e.target.value || "ЮMoney" } : s))}
+                          placeholder="ЮMoney"
+                        />
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>Success URL (опционально)</Label>
+                        <Input
+                          value={settings.yoomoneySuccessUrl ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yoomoneySuccessUrl: e.target.value || null } : s))}
+                          placeholder="https://cabinet.example.com/cabinet/dashboard?payment=success"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Fail URL (опционально)</Label>
+                      <Input
+                        value={settings.yoomoneyFailUrl ?? ""}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, yoomoneyFailUrl: e.target.value || null } : s))}
+                        placeholder="https://cabinet.example.com/cabinet/dashboard?payment=failed"
+                      />
+                    </div>
+
                     {message && <p className="text-sm text-muted-foreground">{message}</p>}
                     <Button type="submit" disabled={saving}>
                       {saving ? "Сохранение…" : "Сохранить"}

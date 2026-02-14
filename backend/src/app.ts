@@ -8,6 +8,7 @@ import { adminRouter } from "./modules/admin/admin.routes.js";
 import { clientRouter, publicConfigRouter } from "./modules/client/client.routes.js";
 import { remnaWebhooksRouter } from "./modules/webhooks/remna.webhooks.routes.js";
 import { plategaWebhooksRouter } from "./modules/webhooks/platega.webhooks.routes.js";
+import { yoomoneyWebhooksRouter } from "./modules/webhooks/yoomoney.webhooks.routes.js";
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(cors({
 }));
 // Лимит 5MB для настроек с логотипом и favicon (data URL)
 app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: false }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -47,6 +49,7 @@ app.use("/api/client", clientRouter);
 app.use("/api/public", publicConfigRouter);
 app.use("/api/webhooks", remnaWebhooksRouter);
 app.use("/api/webhooks", plategaWebhooksRouter);
+app.use("/api/webhooks", yoomoneyWebhooksRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });

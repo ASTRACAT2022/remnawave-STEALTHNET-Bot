@@ -15,6 +15,7 @@ import { requireClientAuth } from "./client.middleware.js";
 import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, extractRemnaUuid } from "../remna/remna.client.js";
 import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
+import { createYooMoneyPaymentUrl, isYooMoneyConfigured } from "../yoomoney/yoomoney.service.js";
 import { activateTariffForClient } from "../tariff/tariff-activation.service.js";
 
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
@@ -909,6 +910,99 @@ clientRouter.post("/payments/platega", async (req, res) => {
 
   return res.status(201).json({
     paymentUrl: result.paymentUrl,
+    orderId,
+    paymentId: payment.id,
+    discountApplied: promoCodeRecord ? true : false,
+    finalAmount,
+  });
+});
+
+const createYooMoneyPaymentSchema = z.object({
+  amount: z.number().positive(),
+  currency: z.string().min(1).max(10),
+  description: z.string().max(500).optional(),
+  tariffId: z.string().min(1).optional(),
+  promoCode: z.string().max(50).optional(),
+});
+clientRouter.post("/payments/yoomoney", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const parsed = createYooMoneyPaymentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+  const { amount: originalAmount, currency, description, tariffId, promoCode: promoCodeStr } = parsed.data;
+
+  const curr = currency.toLowerCase();
+  if (curr !== "rub" && curr !== "643") {
+    return res.status(400).json({ message: "ЮMoney поддерживает только RUB" });
+  }
+
+  let tariffIdToStore: string | null = null;
+  let finalAmount = originalAmount;
+  if (tariffId) {
+    const tariff = await prisma.tariff.findUnique({ where: { id: tariffId } });
+    if (!tariff) return res.status(400).json({ message: "Тариф не найден" });
+    tariffIdToStore = tariffId;
+  }
+
+  let promoCodeRecord: { id: string } | null = null;
+  if (promoCodeStr?.trim()) {
+    const result = await validatePromoCode(promoCodeStr.trim(), clientId);
+    if (!result.ok) return res.status(result.status).json({ message: result.error });
+    const promo = result.promo;
+    if (promo.type !== "DISCOUNT") return res.status(400).json({ message: "Этот промокод не даёт скидку на оплату" });
+
+    if (promo.discountPercent && promo.discountPercent > 0) {
+      finalAmount = Math.max(0, finalAmount - finalAmount * promo.discountPercent / 100);
+    }
+    if (promo.discountFixed && promo.discountFixed > 0) {
+      finalAmount = Math.max(0, finalAmount - promo.discountFixed);
+    }
+    finalAmount = Math.round(finalAmount * 100) / 100;
+    if (finalAmount <= 0) return res.status(400).json({ message: "Итоговая сумма не может быть 0" });
+    promoCodeRecord = promo;
+  }
+
+  const config = await getSystemConfig();
+  const yoomoneyConfig = {
+    wallet: config.yoomoneyWallet || "",
+    notificationSecret: config.yoomoneyNotificationSecret || "",
+  };
+  if (!config.yoomoneyEnabled || !isYooMoneyConfigured(yoomoneyConfig)) {
+    return res.status(503).json({ message: "ЮMoney не настроен" });
+  }
+
+  const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
+  const successUrl = config.yoomoneySuccessUrl || (appUrl ? `${appUrl}/cabinet/dashboard?payment=success` : null);
+
+  const orderId = randomUUID();
+  const payment = await prisma.payment.create({
+    data: {
+      clientId,
+      orderId,
+      amount: finalAmount,
+      currency: "RUB",
+      status: "PENDING",
+      provider: "yoomoney",
+      tariffId: tariffIdToStore,
+      metadata: promoCodeRecord ? JSON.stringify({ promoCodeId: promoCodeRecord.id, originalAmount: originalAmount }) : null,
+    },
+  });
+
+  const paymentUrl = createYooMoneyPaymentUrl({
+    wallet: yoomoneyConfig.wallet,
+    amount: finalAmount,
+    orderId,
+    description: description || `Оплата заказа ${orderId}`,
+    successUrl,
+  });
+
+  if (promoCodeRecord) {
+    await prisma.promoCodeUsage.create({ data: { promoCodeId: promoCodeRecord.id, clientId } });
+  }
+
+  return res.status(201).json({
+    paymentUrl,
     orderId,
     paymentId: payment.id,
     discountApplied: promoCodeRecord ? true : false,

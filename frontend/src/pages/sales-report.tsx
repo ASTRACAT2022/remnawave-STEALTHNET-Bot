@@ -48,6 +48,7 @@ const PROVIDERS = [
   { value: "", label: "Все" },
   { value: "balance", label: "Баланс" },
   { value: "platega", label: "Platega" },
+  { value: "yoomoney", label: "ЮMoney" },
 ];
 
 export function SalesReportPage() {
@@ -244,7 +245,7 @@ export function SalesReportPage() {
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                           r.provider === "balance" ? "bg-blue-500/15 text-blue-700 dark:text-blue-400" : "bg-green-500/15 text-green-700 dark:text-green-400"
                         }`}>
-                          {r.provider === "balance" ? "Баланс" : r.provider === "platega" ? "Platega" : r.provider}
+                          {r.provider === "balance" ? "Баланс" : r.provider === "platega" ? "Platega" : r.provider === "yoomoney" ? "ЮMoney" : r.provider}
                         </span>
                       </td>
                       <td className="px-4 py-3">

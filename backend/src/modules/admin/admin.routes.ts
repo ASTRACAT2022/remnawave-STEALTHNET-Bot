@@ -793,6 +793,12 @@ const updateSettingsSchema = z.object({
   plategaMerchantId: z.string().max(200).nullable().optional(),
   plategaSecret: z.string().max(500).nullable().optional(),
   plategaMethods: z.string().max(2000).nullable().optional(),
+  yoomoneyEnabled: z.boolean().optional(),
+  yoomoneyWallet: z.string().max(100).nullable().optional(),
+  yoomoneyNotificationSecret: z.string().max(500).nullable().optional(),
+  yoomoneyLabel: z.string().max(100).nullable().optional(),
+  yoomoneySuccessUrl: z.string().max(2000).nullable().optional(),
+  yoomoneyFailUrl: z.string().max(2000).nullable().optional(),
   botButtons: z.string().max(10000).nullable().optional(),
   botEmojis: z.union([z.string().max(15000), z.record(z.object({ unicode: z.string().max(20).optional(), tgEmojiId: z.string().max(50).optional() }))]).nullable().optional(),
   botBackLabel: z.string().max(200).nullable().optional(),
@@ -987,6 +993,30 @@ adminRouter.patch("/settings", async (req, res) => {
   if (updates.plategaMethods !== undefined) {
     const val = updates.plategaMethods ?? "";
     await prisma.systemSetting.upsert({ where: { key: "platega_methods" }, create: { key: "platega_methods", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneyEnabled !== undefined) {
+    const val = updates.yoomoneyEnabled ? "true" : "false";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_enabled" }, create: { key: "yoomoney_enabled", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneyWallet !== undefined) {
+    const val = updates.yoomoneyWallet ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_wallet" }, create: { key: "yoomoney_wallet", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneyNotificationSecret !== undefined) {
+    const val = updates.yoomoneyNotificationSecret ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_notification_secret" }, create: { key: "yoomoney_notification_secret", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneyLabel !== undefined) {
+    const val = updates.yoomoneyLabel ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_label" }, create: { key: "yoomoney_label", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneySuccessUrl !== undefined) {
+    const val = updates.yoomoneySuccessUrl ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_success_url" }, create: { key: "yoomoney_success_url", value: val }, update: { value: val } });
+  }
+  if (updates.yoomoneyFailUrl !== undefined) {
+    const val = updates.yoomoneyFailUrl ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yoomoney_fail_url" }, create: { key: "yoomoney_fail_url", value: val }, update: { value: val } });
   }
   if (updates.botButtons !== undefined) {
     const val = updates.botButtons ?? "";
@@ -1466,7 +1496,7 @@ adminRouter.get("/analytics", async (_req, res) => {
 
   // ─── Доход по провайдерам ───
   const providerSeries = Object.entries(revenueByProvider).map(([provider, amount]) => ({
-    provider: provider === "balance" ? "Баланс" : provider === "platega" ? "Platega" : provider,
+    provider: provider === "balance" ? "Баланс" : provider === "platega" ? "Platega" : provider === "yoomoney" ? "ЮMoney" : provider,
     amount,
   }));
 
