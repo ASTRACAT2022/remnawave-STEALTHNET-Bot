@@ -1,13 +1,9 @@
 /**
- * Вебхуки Platega.io — callback при смене статуса оплаты.
- * Пополнение баланса (без tariffId) → зачисляем на баланс клиента.
- * Покупка тарифа (есть tariffId) → активируем тариф в Remnawave, баланс не трогаем.
- * Реферальные начисления — в обоих случаях.
- *
- * Platega API docs:
- * - Статусы: PENDING, CANCELED, CONFIRMED, CHARGEBACKED
- * - Успешный платёж: CONFIRMED
- * - Структура webhook: { id, status, transaction: { id, status }, paymentDetails, externalId, invoiceId }
+ * Webhook Platega:
+ * - надёжно принимает разные форматы payload (orderId/externalId/transaction.id)
+ * - идемпотентно переводит платежи PENDING -> PAID/FAILED
+ * - топ-ап: зачисляет баланс атомарно вместе со сменой статуса
+ * - тариф: активирует в Remna и распределяет реферальные (с ретраем по повторному webhook)
  */
 
 import { Router } from "express";
@@ -17,113 +13,268 @@ import { distributeReferralRewards } from "../referral/referral.service.js";
 
 export const plategaWebhooksRouter = Router();
 
-const SELECT = { id: true, status: true, clientId: true, amount: true, currency: true, tariffId: true } as const;
+type PaymentRow = {
+  id: string;
+  orderId: string;
+  externalId: string | null;
+  status: string;
+  clientId: string;
+  amount: number;
+  currency: string;
+  tariffId: string | null;
+  metadata: string | null;
+};
+
+const PAYMENT_SELECT = {
+  id: true,
+  orderId: true,
+  externalId: true,
+  status: true,
+  clientId: true,
+  amount: true,
+  currency: true,
+  tariffId: true,
+  metadata: true,
+} as const;
+
+const SUCCESS_STATUSES = new Set(["CONFIRMED", "PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "SUCCESSFUL", "APPROVED"]);
+const FAILED_STATUSES = new Set(["CANCELED", "CANCELLED", "FAILED", "DECLINED", "REJECTED", "ERROR", "EXPIRED", "CHARGEBACK", "CHARGEBACKED"]);
+
+type Meta = Record<string, unknown> & {
+  plategaActivationAppliedAt?: string;
+  plategaActivationInProgressAt?: string;
+  plategaActivationAttempts?: number;
+  plategaActivationLastError?: string | null;
+};
+
+function pickFirstString(...values: unknown[]): string | null {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function parseMeta(raw: string | null): Meta {
+  if (!raw?.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Meta;
+  } catch {
+    return {};
+  }
+}
+
+async function findPlategaPaymentByAnyId(candidateIds: string[]): Promise<PaymentRow | null> {
+  for (const id of candidateIds) {
+    const byExternal = await prisma.payment.findFirst({
+      where: { provider: "platega", externalId: id },
+      select: PAYMENT_SELECT,
+    });
+    if (byExternal) return byExternal;
+
+    const byOrder = await prisma.payment.findUnique({
+      where: { orderId: id },
+      select: { ...PAYMENT_SELECT, provider: true },
+    });
+    if (byOrder && byOrder.provider === "platega") {
+      return {
+        id: byOrder.id,
+        orderId: byOrder.orderId,
+        externalId: byOrder.externalId,
+        status: byOrder.status,
+        clientId: byOrder.clientId,
+        amount: byOrder.amount,
+        currency: byOrder.currency,
+        tariffId: byOrder.tariffId,
+        metadata: byOrder.metadata,
+      };
+    }
+  }
+  return null;
+}
+
+async function ensureTariffActivation(paymentId: string): Promise<void> {
+  const claim = await prisma.$transaction(async (tx) => {
+    const row = await tx.payment.findUnique({
+      where: { id: paymentId },
+      select: { status: true, tariffId: true, metadata: true },
+    });
+    if (!row || row.status !== "PAID" || !row.tariffId) {
+      return { claimed: false as const, reason: "not_paid_or_no_tariff" };
+    }
+
+    const meta = parseMeta(row.metadata);
+    if (typeof meta.plategaActivationAppliedAt === "string" && meta.plategaActivationAppliedAt.trim()) {
+      return { claimed: false as const, reason: "already_applied" };
+    }
+
+    const inProgressAt = typeof meta.plategaActivationInProgressAt === "string" ? new Date(meta.plategaActivationInProgressAt) : null;
+    const freshInProgress = inProgressAt && Number.isFinite(inProgressAt.getTime()) && Date.now() - inProgressAt.getTime() < 10 * 60 * 1000;
+    if (freshInProgress) {
+      return { claimed: false as const, reason: "in_progress" };
+    }
+
+    const next: Meta = {
+      ...meta,
+      plategaActivationInProgressAt: new Date().toISOString(),
+      plategaActivationAttempts: Number(meta.plategaActivationAttempts ?? 0) + 1,
+    };
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: { metadata: JSON.stringify(next) },
+    });
+    return { claimed: true as const, reason: "claimed" };
+  });
+
+  if (!claim.claimed) return;
+
+  const activation = await activateTariffByPaymentId(paymentId);
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.payment.findUnique({
+      where: { id: paymentId },
+      select: { metadata: true },
+    });
+    const meta = parseMeta(row?.metadata ?? null);
+    const next: Meta = { ...meta };
+    delete next.plategaActivationInProgressAt;
+    if (activation.ok) {
+      next.plategaActivationAppliedAt = new Date().toISOString();
+      next.plategaActivationLastError = null;
+    } else {
+      next.plategaActivationLastError = activation.error;
+    }
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: { metadata: JSON.stringify(next) },
+    });
+  });
+
+  if (activation.ok) {
+    console.log("[Platega Webhook] Tariff activated", { paymentId });
+  } else {
+    console.error("[Platega Webhook] Tariff activation failed", { paymentId, error: activation.error });
+  }
+}
 
 plategaWebhooksRouter.post("/platega", async (req, res) => {
-  // Всегда 200 OK, как в Panel — чтобы Platega не повторяла запросы при наших ошибках
+  // Возвращаем 200, чтобы провайдер не спамил ретраями при наших внутренних ошибках.
   try {
-    let data = req.body as Record<string, unknown> | null;
-    if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
-      console.warn("[Platega Webhook] Empty or invalid body");
-      return res.status(200).json({ status: "ok" });
+    const data = (req.body && typeof req.body === "object") ? (req.body as Record<string, unknown>) : null;
+    if (!data || Object.keys(data).length === 0) {
+      console.warn("[Platega Webhook] Empty body");
+      return res.status(200).json({ received: true });
     }
 
-    console.log("[Platega Webhook] Received:", JSON.stringify(data, null, 2));
+    const txObj = (data.transaction && typeof data.transaction === "object")
+      ? (data.transaction as Record<string, unknown>)
+      : {};
+    const idObj = (data.data && typeof data.data === "object")
+      ? (data.data as Record<string, unknown>)
+      : {};
 
-    // --- Статус ---
-    const transaction = (data.transaction && typeof data.transaction === "object" ? data.transaction : {}) as Record<string, unknown>;
-    let status = String(data.status ?? transaction.status ?? "").trim().toUpperCase();
+    const statusRaw = pickFirstString(
+      data.status,
+      txObj.status,
+      data.state,
+      data.paymentStatus,
+      data.payment_status,
+      idObj.status,
+      idObj.state
+    );
+    const status = (statusRaw ?? "").toUpperCase();
 
-    // Успешный платёж — CONFIRMED (по документации Platega), плюс обратная совместимость
-    const SUCCESS_STATUSES = ["CONFIRMED", "PAID", "SUCCESS", "COMPLETED"];
-    if (!SUCCESS_STATUSES.includes(status)) {
-      console.log(`[Platega Webhook] Ignoring status: ${status}`);
-      return res.status(200).json({ status: "ok" });
-    }
+    const transactionId = pickFirstString(
+      data.id,
+      txObj.id,
+      data.transactionId,
+      data.transaction_id,
+      idObj.id,
+      idObj.transactionId,
+      idObj.transaction_id
+    );
+    const externalId = pickFirstString(data.externalId, txObj.externalId, idObj.externalId, data.invoiceId, txObj.invoiceId, idObj.invoiceId);
+    const orderId = pickFirstString(data.orderId, data.order_id, data.order, data.merchant_order_id, idObj.orderId, idObj.order_id, idObj.order);
+    const payloadId = pickFirstString(data.payload, txObj.payload, idObj.payload);
 
-    // --- ID транзакции ---
-    const transactionId = String(data.transactionId ?? data.id ?? transaction.id ?? transaction.transactionId ?? "").trim() || undefined;
-    const externalId = String(data.externalId ?? transaction.externalId ?? "").trim() || undefined;
-    const invoiceId = String(data.invoiceId ?? transaction.invoiceId ?? "").trim() || undefined;
-    // orderId — может прийти напрямую или через payload (мы передаём orderId в payload при создании)
-    const payload = String(data.payload ?? transaction.payload ?? "").trim() || undefined;
-    const orderId = String(data.orderId ?? data.order_id ?? data.order ?? data.merchant_order_id ?? "").trim() || undefined;
-
-    console.log("[Platega Webhook] IDs:", { transactionId, externalId, invoiceId, orderId, payload, status });
-
-    // --- Ищем платёж как в Panel: по всем возможным идентификаторам ---
-    // payload — наш orderId, переданный при создании транзакции
-    const candidateIds = [...new Set([payload, orderId, transactionId, externalId, invoiceId].filter(Boolean) as string[])];
-
+    const candidateIds = [...new Set([payloadId, transactionId, externalId, orderId].filter(Boolean) as string[])];
     if (candidateIds.length === 0) {
-      console.warn("[Platega Webhook] No identifiers in webhook", { keys: Object.keys(data) });
-      return res.status(200).json({ status: "ok" });
+      console.warn("[Platega Webhook] No identifiers", { keys: Object.keys(data) });
+      return res.status(200).json({ received: true });
     }
 
-    let payment: { id: string; status: string; clientId: string; amount: number; currency: string; tariffId: string | null } | null = null;
-
-    for (const id of candidateIds) {
-      // По externalId (payment_system_id в Panel)
-      payment = await prisma.payment.findFirst({
-        where: { externalId: id, provider: "platega" },
-        select: SELECT,
-      });
-      if (payment) break;
-
-      // По orderId
-      payment = await prisma.payment.findUnique({
-        where: { orderId: id },
-        select: SELECT,
-      });
-      if (payment) break;
-    }
-
+    const payment = await findPlategaPaymentByAnyId(candidateIds);
     if (!payment) {
-      console.warn("[Platega Webhook] Payment not found", { triedIds: candidateIds });
-      return res.status(200).json({ status: "ok" });
+      console.warn("[Platega Webhook] Payment not found", { candidateIds, status });
+      return res.status(200).json({ received: true });
     }
 
-    if (payment.status === "PAID") {
-      console.log("[Platega Webhook] Payment already processed", { paymentId: payment.id });
-      return res.status(200).json({ status: "ok" });
+    if (FAILED_STATUSES.has(status)) {
+      const failed = await prisma.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
+        data: { status: "FAILED", externalId: transactionId ?? payment.externalId },
+      });
+      if (failed.count > 0) {
+        console.log("[Platega Webhook] Payment marked FAILED", { paymentId: payment.id, status, transactionId, orderId: payment.orderId });
+      }
+      return res.status(200).json({ received: true });
     }
 
-    // --- Обработка ---
+    if (!SUCCESS_STATUSES.has(status)) {
+      console.log("[Platega Webhook] Ignored status", { status, paymentId: payment.id, candidateIds });
+      return res.status(200).json({ received: true });
+    }
+
     const isTopUp = !payment.tariffId;
     if (isTopUp) {
-      await prisma.$transaction([
-        prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "PAID", paidAt: new Date(), externalId: transactionId ?? payment.id },
-        }),
-        prisma.client.update({
-          where: { id: payment.clientId },
-          data: { balance: { increment: payment.amount } },
-        }),
-      ]);
-      console.log("[Platega Webhook] Payment PAID, balance credited (top-up)", { paymentId: payment.id, amount: payment.amount });
-    } else {
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: { status: "PAID", paidAt: new Date(), externalId: transactionId ?? payment.id },
+      const changed = await prisma.$transaction(async (tx) => {
+        const upd = await tx.payment.updateMany({
+          where: { id: payment.id, status: "PENDING" },
+          data: { status: "PAID", paidAt: new Date(), externalId: transactionId ?? payment.externalId },
+        });
+        if (upd.count > 0) {
+          await tx.client.update({
+            where: { id: payment.clientId },
+            data: { balance: { increment: payment.amount } },
+          });
+        }
+        return upd.count > 0;
       });
-      console.log("[Platega Webhook] Payment PAID (tariff)", { paymentId: payment.id });
-
-      const activation = await activateTariffByPaymentId(payment.id);
-      if (activation.ok) {
-        console.log("[Platega Webhook] Tariff activated", { paymentId: payment.id });
+      if (changed) {
+        console.log("[Platega Webhook] Payment PAID, balance credited (top-up)", {
+          paymentId: payment.id,
+          amount: payment.amount,
+          currency: payment.currency,
+          transactionId,
+          orderId: payment.orderId,
+        });
       } else {
-        console.error("[Platega Webhook] Tariff activation failed", { paymentId: payment.id, error: (activation as { error?: string }).error });
+        console.log("[Platega Webhook] Payment already finalized", { paymentId: payment.id, status: payment.status });
+      }
+    } else {
+      const upd = await prisma.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
+        data: { status: "PAID", paidAt: new Date(), externalId: transactionId ?? payment.externalId },
+      });
+      if (upd.count > 0) {
+        console.log("[Platega Webhook] Payment PAID (tariff)", {
+          paymentId: payment.id,
+          transactionId,
+          orderId: payment.orderId,
+        });
       }
     }
 
+    // Надёжная пост-обработка: даже если платеж уже PAID, повторный webhook
+    // догонит активацию тарифа/рефералку.
+    await ensureTariffActivation(payment.id);
     await distributeReferralRewards(payment.id).catch((e) => {
-      console.error("[Platega Webhook] Referral error", { paymentId: payment!.id, error: e });
+      console.error("[Platega Webhook] Referral distribution error", { paymentId: payment.id, error: e });
     });
 
-    return res.status(200).json({ status: "ok" });
+    return res.status(200).json({ received: true });
   } catch (e) {
     console.error("[Platega Webhook] Error:", e);
-    return res.status(200).json({ status: "ok" });
+    return res.status(200).json({ received: true });
   }
 });
