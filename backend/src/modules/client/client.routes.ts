@@ -18,6 +18,10 @@ import { createPlategaTransaction, isPlategaConfigured } from "../platega/plateg
 import { createYooMoneyPaymentUrl, isYooMoneyConfigured } from "../yoomoney/yoomoney.service.js";
 import { activateTariffForClient } from "../tariff/tariff-activation.service.js";
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
 function extractCurrentExpireAt(data: unknown): Date | null {
   if (!data || typeof data !== "object") return null;
@@ -43,7 +47,7 @@ function calculateExpireAt(currentExpireAt: Date | null, durationDays: number): 
 export const clientAuthRouter = Router();
 
 const registerSchema = z.object({
-  email: z.string().email().optional(),
+  email: z.string().trim().email().optional(),
   password: z.string().min(8).optional(),
   telegramId: z.string().optional(),
   telegramUsername: z.string().optional(),
@@ -59,6 +63,7 @@ clientAuthRouter.post("/register", async (req, res) => {
   }
 
   const data = body.data;
+  const normalizedEmail = data.email ? normalizeEmail(data.email) : undefined;
   const hasEmail = data.email && data.password;
   const hasTelegram = data.telegramId;
 
@@ -68,7 +73,9 @@ clientAuthRouter.post("/register", async (req, res) => {
 
   // Регистрация по email: создаём ожидание и отправляем письмо с ссылкой
   if (hasEmail) {
-    const existing = await prisma.client.findUnique({ where: { email: data.email! } });
+    const existing = await prisma.client.findFirst({
+      where: { email: { equals: normalizedEmail!, mode: "insensitive" } },
+    });
     if (existing) return res.status(400).json({ message: "Email already registered" });
 
     const config = await getSystemConfig();
@@ -103,7 +110,7 @@ clientAuthRouter.post("/register", async (req, res) => {
 
     await prisma.pendingEmailRegistration.create({
       data: {
-        email: data.email!,
+        email: normalizedEmail!,
         passwordHash,
         preferredLang: data.preferredLang,
         preferredCurrency: data.preferredCurrency,
@@ -116,7 +123,7 @@ clientAuthRouter.post("/register", async (req, res) => {
     const verificationLink = `${appUrl}/cabinet/verify-email?token=${verificationToken}`;
     const sendResult = await sendVerificationEmail(
       smtpConfig,
-      data.email!,
+      normalizedEmail!,
       verificationLink,
       config.serviceName
     );
@@ -168,7 +175,7 @@ clientAuthRouter.post("/register", async (req, res) => {
   const passwordHash = data.password ? await hashPassword(data.password) : null;
   const client = await prisma.client.create({
     data: {
-      email: data.email ?? null,
+      email: normalizedEmail ?? null,
       passwordHash,
       remnawaveUuid,
       referralCode,
@@ -199,7 +206,9 @@ clientAuthRouter.post("/verify-email", async (req, res) => {
     return res.status(400).json({ message: "Link expired. Please register again." });
   }
 
-  const existingClient = await prisma.client.findUnique({ where: { email: pending.email } });
+  const existingClient = await prisma.client.findFirst({
+    where: { email: { equals: normalizeEmail(pending.email), mode: "insensitive" } },
+  });
   if (existingClient) {
     await prisma.pendingEmailRegistration.delete({ where: { id: pending.id } }).catch(() => {});
     const signToken = signClientToken(existingClient.id);
@@ -249,7 +258,7 @@ clientAuthRouter.post("/verify-email", async (req, res) => {
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(1),
 });
 
@@ -259,7 +268,10 @@ clientAuthRouter.post("/login", async (req, res) => {
     return res.status(400).json({ message: "Invalid input" });
   }
 
-  const client = await prisma.client.findUnique({ where: { email: body.data.email } });
+  const normalizedEmail = normalizeEmail(body.data.email);
+  const client = await prisma.client.findFirst({
+    where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+  });
   if (!client || !client.passwordHash || client.isBlocked) {
     return res.status(401).json({ message: "Invalid email or password" });
   }

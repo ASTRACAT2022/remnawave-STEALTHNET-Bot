@@ -13,8 +13,12 @@ import { requireAuth } from "./middleware.js";
 
 export const authRouter = Router();
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(1),
 });
 
@@ -25,7 +29,10 @@ authRouter.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
     }
 
-    const admin = await prisma.admin.findUnique({ where: { email: body.data.email } });
+    const normalizedEmail = normalizeEmail(body.data.email);
+    const admin = await prisma.admin.findFirst({
+      where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+    });
     if (!admin) {
       return res.status(401).json({ message: "Invalid email or password" });
     }

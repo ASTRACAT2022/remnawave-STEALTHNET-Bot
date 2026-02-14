@@ -57,7 +57,7 @@ export function ClientLoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email.trim().toLowerCase(), password);
       navigate("/cabinet/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
@@ -140,6 +140,12 @@ export function ClientLoginPage() {
                 <Link to="/cabinet/register" className="text-primary hover:underline">
                   Зарегистрироваться
                 </Link>
+              </p>
+              <p className="text-center text-xs text-muted-foreground">
+                Для входа в админку используйте{" "}
+                <a href="/admin/login" className="text-primary hover:underline">
+                  /admin/login
+                </a>
               </p>
             </form>
           </CardContent>

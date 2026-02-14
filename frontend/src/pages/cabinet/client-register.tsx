@@ -78,7 +78,7 @@ export function ClientRegisterPage() {
     setLoading(true);
     try {
       const result = await register({
-        email,
+        email: email.trim().toLowerCase(),
         password,
         preferredLang: defaults.lang,
         preferredCurrency: defaults.currency,

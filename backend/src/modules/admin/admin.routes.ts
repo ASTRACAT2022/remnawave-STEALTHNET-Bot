@@ -35,8 +35,7 @@ import {
 } from "../remna/remna.client.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { syncFromRemna, syncToRemna, createRemnaUsersForClientsWithoutUuid } from "../sync/sync.service.js";
-import { distributeReferralRewards } from "../referral/referral.service.js";
-import { activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
+import { markPaymentPaidByLookup, processPaidPaymentPostActions } from "../payment/payment-processing.service.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -223,29 +222,29 @@ adminRouter.patch("/payments/:id", asyncRoute(async (req, res) => {
     return res.status(400).json({ message: "Invalid input", errors: err });
   }
   const { id: paymentId } = params.data;
-  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
-  if (!payment) {
+  const paid = await markPaymentPaidByLookup({ paymentId });
+  if (paid.kind === "not_found") {
     return res.status(404).json({ message: "Payment not found" });
   }
-  if (payment.status === "PAID") {
-    const result = await distributeReferralRewards(paymentId);
-    return res.json({ payment: { ...payment, status: "PAID" }, referral: result });
-  }
-  const now = new Date();
-  await prisma.payment.update({
-    where: { id: paymentId },
-    data: { status: "PAID", paidAt: now },
-  });
 
-  // Активируем тариф в Remnawave
-  let activation: { ok: boolean; error?: string } = { ok: false, error: "no tariff" };
-  if (payment.tariffId) {
-    activation = await activateTariffByPaymentId(paymentId);
-  }
-
-  const result = await distributeReferralRewards(paymentId);
   const updated = await prisma.payment.findUnique({ where: { id: paymentId } });
-  return res.json({ payment: updated, referral: result, activation });
+  if (!updated) return res.status(404).json({ message: "Payment not found" });
+
+  if (updated.status !== "PAID") {
+    return res.json({
+      payment: updated,
+      referral: { distributed: false, message: `Payment is in status ${updated.status}` },
+      activation: { attempted: false, ok: false, skippedReason: `status_${updated.status.toLowerCase()}` },
+    });
+  }
+
+  const postActions = await processPaidPaymentPostActions(updated.id);
+  return res.json({
+    payment: updated,
+    referral: postActions.referral,
+    activation: postActions.activation,
+    transition: paid.kind,
+  });
 }));
 
 /** Сериализация тарифа для JSON (BigInt → number) */
