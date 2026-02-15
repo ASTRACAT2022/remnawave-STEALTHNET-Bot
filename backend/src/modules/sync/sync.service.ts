@@ -6,11 +6,13 @@ import { prisma } from "../../db.js";
 import {
   isRemnaConfigured,
   remnaGetUsers,
+  remnaGetUser,
   remnaUpdateUser,
   remnaCreateUser,
   remnaGetUserByTelegramId,
   remnaGetUserByEmail,
   remnaGetUserByUsername,
+  extractRemnaActiveInternalSquadUuids,
   extractRemnaUuid,
 } from "../remna/remna.client.js";
 import { getSystemConfig } from "../client/client.service.js";
@@ -37,6 +39,43 @@ function extractRemnaUsers(data: unknown): RemnaUser[] {
     if (Array.isArray(obj.users)) return obj.users as RemnaUser[];
   }
   return [];
+}
+
+function extractRemnaUserObject(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  const root = data as Record<string, unknown>;
+  const response = root.response;
+  const nestedData = root.data;
+
+  const candidates: unknown[] = [response, nestedData, root];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const obj = candidate as Record<string, unknown>;
+    if (obj.user && typeof obj.user === "object") {
+      return obj.user as Record<string, unknown>;
+    }
+    return obj;
+  }
+  return null;
+}
+
+function extractRemoteTelegramId(data: unknown): number | null {
+  const user = extractRemnaUserObject(data);
+  const raw = user?.telegramId;
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === "string") {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+function extractRemoteEmail(data: unknown): string | null {
+  const user = extractRemnaUserObject(data);
+  const raw = user?.email;
+  if (typeof raw !== "string") return null;
+  const email = raw.trim();
+  return email.length > 0 ? email : null;
 }
 
 /** Синхронизация из Remna: загружаем пользователей Remna и создаём/обновляем клиентов в нашей БД. */
@@ -157,9 +196,31 @@ export async function syncToRemna(): Promise<{
     const uuid = c.remnawaveUuid;
     if (!uuid) continue;
     try {
+      const currentRes = await remnaGetUser(uuid);
+      if (currentRes.error) {
+        result.errors.push(`${uuid}: skipped (failed to read user before sync): ${currentRes.error}`);
+        continue;
+      }
+
       const body: Record<string, unknown> = { uuid };
-      if (c.telegramId != null) body.telegramId = parseInt(c.telegramId, 10);
-      if (c.email != null) body.email = c.email;
+      const currentSquads = extractRemnaActiveInternalSquadUuids(currentRes.data);
+      if (currentSquads.length > 0) body.activeInternalSquads = currentSquads;
+
+      if (c.telegramId?.trim()) {
+        const parsedTelegramId = Number.parseInt(c.telegramId.trim(), 10);
+        if (!Number.isNaN(parsedTelegramId)) body.telegramId = parsedTelegramId;
+      } else {
+        const currentTelegramId = extractRemoteTelegramId(currentRes.data);
+        if (currentTelegramId != null) body.telegramId = currentTelegramId;
+      }
+
+      if (c.email?.trim()) {
+        body.email = c.email.trim();
+      } else {
+        const currentEmail = extractRemoteEmail(currentRes.data);
+        if (currentEmail) body.email = currentEmail;
+      }
+
       const res = await remnaUpdateUser(body);
       if (res.error) result.errors.push(`${uuid}: ${res.error}`);
       else result.updated++;

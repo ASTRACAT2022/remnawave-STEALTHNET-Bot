@@ -29,8 +29,7 @@ import {
   remnaDisableUser,
   remnaEnableUser,
   remnaResetUserTraffic,
-  remnaBulkUpdateUsersSquads,
-  remnaRemoveUsersFromInternalSquad,
+  extractRemnaActiveInternalSquadUuids,
   isRemnaConfigured,
 } from "../remna/remna.client.js";
 import { getSystemConfig } from "../client/client.service.js";
@@ -636,6 +635,18 @@ async function getClientRemnaUuid(clientId: string): Promise<string | null> {
   return client?.remnawaveUuid ?? null;
 }
 
+async function getCurrentClientSquads(remnaUuid: string): Promise<{ squads?: string[]; error?: string; status?: number }> {
+  const userRes = await remnaGetUser(remnaUuid);
+  if (userRes.error) {
+    return { error: userRes.error, status: userRes.status };
+  }
+  return { squads: extractRemnaActiveInternalSquadUuids(userRes.data) };
+}
+
+function toHttpErrorStatus(status?: number): number {
+  return status && status >= 400 ? status : 500;
+}
+
 adminRouter.get("/clients/:id/remna", async (req, res) => {
   const parsed = clientIdParam.safeParse(req.params);
   if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
@@ -655,6 +666,60 @@ const remnaUpdateBodySchema = z.object({
   status: z.enum(["ACTIVE", "DISABLED"]).optional(),
 });
 
+function extractRemnaPatchBase(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object") return {};
+  const root = data as Record<string, unknown>;
+  const response = root.response;
+  if (response && typeof response === "object") {
+    const responseObj = response as Record<string, unknown>;
+    if (responseObj.user && typeof responseObj.user === "object") return responseObj.user as Record<string, unknown>;
+    return responseObj;
+  }
+  const nestedData = root.data;
+  if (nestedData && typeof nestedData === "object") {
+    const dataObj = nestedData as Record<string, unknown>;
+    if (dataObj.user && typeof dataObj.user === "object") return dataObj.user as Record<string, unknown>;
+    return dataObj;
+  }
+  return root;
+}
+
+function pickRemnaPatchState(data: unknown): {
+  trafficLimitBytes?: number;
+  trafficLimitStrategy?: "NO_RESET" | "DAY" | "WEEK" | "MONTH";
+  hwidDeviceLimit?: number | null;
+  expireAt?: string;
+  activeInternalSquads?: string[];
+  status?: "ACTIVE" | "DISABLED";
+} {
+  const base = extractRemnaPatchBase(data);
+  const trafficLimitBytes = typeof base.trafficLimitBytes === "number" && Number.isFinite(base.trafficLimitBytes)
+    ? Math.trunc(base.trafficLimitBytes)
+    : undefined;
+  const trafficLimitStrategy = base.trafficLimitStrategy === "NO_RESET"
+    || base.trafficLimitStrategy === "DAY"
+    || base.trafficLimitStrategy === "WEEK"
+    || base.trafficLimitStrategy === "MONTH"
+    ? base.trafficLimitStrategy
+    : undefined;
+  const hwidDeviceLimit = base.hwidDeviceLimit === null
+    ? null
+    : (typeof base.hwidDeviceLimit === "number" && Number.isFinite(base.hwidDeviceLimit) ? Math.trunc(base.hwidDeviceLimit) : undefined);
+  const expireAt = typeof base.expireAt === "string" ? base.expireAt : undefined;
+  const status = base.status === "ACTIVE" || base.status === "DISABLED" ? base.status : undefined;
+  const activeInternalSquads = Array.isArray(base.activeInternalSquads)
+    ? extractRemnaActiveInternalSquadUuids(data)
+    : undefined;
+  return {
+    trafficLimitBytes,
+    trafficLimitStrategy,
+    hwidDeviceLimit,
+    expireAt,
+    activeInternalSquads,
+    status,
+  };
+}
+
 adminRouter.patch("/clients/:id/remna", async (req, res) => {
   const parsed = clientIdParam.safeParse(req.params);
   if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
@@ -662,7 +727,27 @@ adminRouter.patch("/clients/:id/remna", async (req, res) => {
   if (!remnaUuid) return res.status(400).json({ message: "Клиент не привязан к Remna" });
   const body = remnaUpdateBodySchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
-  const result = await remnaUpdateUser({ uuid: remnaUuid, ...body.data });
+
+  const currentUser = await remnaGetUser(remnaUuid);
+  if (currentUser.error) return res.status(toHttpErrorStatus(currentUser.status)).json({ message: currentUser.error });
+  const current = pickRemnaPatchState(currentUser.data);
+  const rawBody = (req.body && typeof req.body === "object") ? req.body as Record<string, unknown> : {};
+  const hasField = (key: string) => Object.prototype.hasOwnProperty.call(rawBody, key);
+
+  const payload: Record<string, unknown> = { uuid: remnaUuid };
+  payload.trafficLimitBytes = hasField("trafficLimitBytes") ? body.data.trafficLimitBytes : current.trafficLimitBytes;
+  payload.trafficLimitStrategy = hasField("trafficLimitStrategy") ? body.data.trafficLimitStrategy : current.trafficLimitStrategy;
+  payload.hwidDeviceLimit = hasField("hwidDeviceLimit") ? body.data.hwidDeviceLimit : current.hwidDeviceLimit;
+  payload.expireAt = hasField("expireAt") ? body.data.expireAt : current.expireAt;
+  if (hasField("activeInternalSquads")) payload.activeInternalSquads = body.data.activeInternalSquads;
+  else if (current.activeInternalSquads !== undefined) payload.activeInternalSquads = current.activeInternalSquads;
+  payload.status = hasField("status") ? body.data.status : current.status;
+
+  for (const key of Object.keys(payload)) {
+    if (payload[key] === undefined) delete payload[key];
+  }
+
+  const result = await remnaUpdateUser(payload);
   if (result.error) return res.status(result.status >= 400 ? result.status : 500).json({ message: result.error });
   return res.json(result.data ?? {});
 });
@@ -716,18 +801,9 @@ adminRouter.post("/clients/:id/remna/squads/add", async (req, res) => {
   if (!remnaUuid) return res.status(400).json({ message: "Клиент не привязан к Remna" });
   const body = squadActionSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ message: "Invalid input" });
-  // Получаем текущие сквады пользователя, чтобы добавить новый без потери существующих
-  const userRes = await remnaGetUser(remnaUuid);
-  const userData = userRes.data as Record<string, unknown> | undefined;
-  const resp = (userData?.response ?? userData) as Record<string, unknown> | undefined;
-  const currentSquads: string[] = [];
-  const ais = resp?.activeInternalSquads;
-  if (Array.isArray(ais)) {
-    for (const s of ais) {
-      const u = (s && typeof s === "object" && "uuid" in s) ? (s as Record<string, unknown>).uuid : s;
-      if (typeof u === "string") currentSquads.push(u);
-    }
-  }
+  const squadsRes = await getCurrentClientSquads(remnaUuid);
+  if (squadsRes.error) return res.status(toHttpErrorStatus(squadsRes.status)).json({ message: squadsRes.error });
+  const currentSquads = squadsRes.squads ?? [];
   if (!currentSquads.includes(body.data.squadUuid)) {
     currentSquads.push(body.data.squadUuid);
   }
@@ -743,7 +819,11 @@ adminRouter.post("/clients/:id/remna/squads/remove", async (req, res) => {
   if (!remnaUuid) return res.status(400).json({ message: "Клиент не привязан к Remna" });
   const body = squadActionSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ message: "Invalid input" });
-  const result = await remnaRemoveUsersFromInternalSquad(body.data.squadUuid, { userUuids: [remnaUuid] });
+  const squadsRes = await getCurrentClientSquads(remnaUuid);
+  if (squadsRes.error) return res.status(toHttpErrorStatus(squadsRes.status)).json({ message: squadsRes.error });
+  const currentSquads = squadsRes.squads ?? [];
+  const nextSquads = currentSquads.filter((uuid) => uuid !== body.data.squadUuid);
+  const result = await remnaUpdateUser({ uuid: remnaUuid, activeInternalSquads: nextSquads });
   if (result.error) return res.status(result.status >= 400 ? result.status : 500).json({ message: result.error });
   return res.json(result.data ?? {});
 });

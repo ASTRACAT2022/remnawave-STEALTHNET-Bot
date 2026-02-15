@@ -7,6 +7,11 @@ import { env } from "../../config/index.js";
 
 const REMNA_API_URL = env.REMNA_API_URL?.replace(/\/$/, "") ?? "";
 const REMNA_ADMIN_TOKEN = env.REMNA_ADMIN_TOKEN ?? "";
+const DEFAULT_REMNA_TIMEOUT_MS = 15000;
+const rawTimeoutMs = Number(process.env.REMNA_FETCH_TIMEOUT_MS ?? DEFAULT_REMNA_TIMEOUT_MS);
+const REMNA_FETCH_TIMEOUT_MS = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0
+  ? rawTimeoutMs
+  : DEFAULT_REMNA_TIMEOUT_MS;
 
 export function isRemnaConfigured(): boolean {
   return Boolean(REMNA_API_URL && REMNA_ADMIN_TOKEN);
@@ -19,6 +24,24 @@ function getHeaders(): Record<string, string> {
   };
 }
 
+function getErrorMessage(data: unknown, fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const obj = data as Record<string, unknown>;
+  const direct = obj.message ?? obj.error ?? obj.detail;
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const nested = obj.response ?? obj.data;
+  if (nested && typeof nested === "object") {
+    const nestedObj = nested as Record<string, unknown>;
+    const nestedMessage = nestedObj.message ?? nestedObj.error ?? nestedObj.detail;
+    if (typeof nestedMessage === "string" && nestedMessage.trim()) return nestedMessage;
+  }
+  return fallback;
+}
+
+function getAbortErrorMessage(path: string): string {
+  return `Remna request timeout after ${REMNA_FETCH_TIMEOUT_MS}ms (${path})`;
+}
+
 export async function remnaFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -28,9 +51,18 @@ export async function remnaFetch<T>(
   }
 
   const url = `${REMNA_API_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REMNA_FETCH_TIMEOUT_MS);
+
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
   try {
     const res = await fetch(url, {
       ...options,
+      signal: controller.signal,
       headers: { ...getHeaders(), ...(options.headers as object) },
     });
     const text = await res.text();
@@ -44,14 +76,19 @@ export async function remnaFetch<T>(
     }
     if (!res.ok) {
       return {
-        error: (data as { message?: string })?.message ?? res.statusText ?? text.slice(0, 200),
+        error: getErrorMessage(data, res.statusText || text.slice(0, 200)),
         status: res.status,
       };
     }
     return { data: data as T, status: res.status };
   } catch (e) {
+    if ((e as { name?: string })?.name === "AbortError") {
+      return { error: getAbortErrorMessage(path), status: 504 };
+    }
     const message = e instanceof Error ? e.message : String(e);
     return { error: message, status: 500 };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -102,6 +139,28 @@ export function extractRemnaUuid(d: unknown): string | null {
   return first && typeof first === "object" && first !== null && typeof (first as Record<string, unknown>).uuid === "string"
     ? (first as Record<string, unknown>).uuid as string
     : null;
+}
+
+/** Извлекает UUID внутренних сквадов из ответа Remna (string[] или [{uuid}]). */
+export function extractRemnaActiveInternalSquadUuids(data: unknown): string[] {
+  if (!data || typeof data !== "object") return [];
+  const obj = data as Record<string, unknown>;
+  const base = (obj.response ?? obj.data ?? obj) as Record<string, unknown>;
+  const raw = base.activeInternalSquads;
+  if (!Array.isArray(raw)) return [];
+
+  const result: string[] = [];
+  for (const item of raw) {
+    if (typeof item === "string" && item.trim()) {
+      result.push(item);
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const uuid = (item as Record<string, unknown>).uuid;
+      if (typeof uuid === "string" && uuid.trim()) result.push(uuid);
+    }
+  }
+  return result;
 }
 
 /** POST /api/users */
@@ -204,6 +263,30 @@ export function remnaAddUsersToInternalSquad(squadUuid: string, body: { userUuid
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+/** Гарантированно добавить пользователя в каждый внутренний сквад (по очереди, с остановкой на первой ошибке). */
+export async function remnaEnsureUserInInternalSquads(
+  userUuid: string,
+  squadUuids: string[],
+): Promise<{ status: number; error?: string }> {
+  const uniqueSquads = [...new Set(
+    squadUuids
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  )];
+
+  for (const squadUuid of uniqueSquads) {
+    const res = await remnaAddUsersToInternalSquad(squadUuid, { userUuids: [userUuid] });
+    if (res.error) {
+      return {
+        status: res.status >= 400 ? res.status : 500,
+        error: `Failed to add user to squad ${squadUuid}: ${res.error}`,
+      };
+    }
+  }
+
+  return { status: 200 };
 }
 
 /** DELETE /api/internal-squads/{squadUuid}/bulk-actions/remove-users */

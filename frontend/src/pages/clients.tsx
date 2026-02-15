@@ -23,6 +23,7 @@ export function ClientsPage() {
   const [clientRemnaSquads, setClientRemnaSquads] = useState<string[]>([]);
   const [settings, setSettings] = useState<{ activeLanguages: string[]; activeCurrencies: string[] } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [remnaActionBusy, setRemnaActionBusy] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [passwordForm, setPasswordForm] = useState<{ newPassword: string; confirm: string }>({ newPassword: "", confirm: "" });
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
@@ -63,8 +64,8 @@ export function ClientsPage() {
         setRemnaData({ squads: Array.isArray(items) ? items : [] });
       }).catch(() => setRemnaData({ squads: [] }));
       api.getClientRemna(token, editing.id).then((raw: unknown) => {
-        const res = raw as { response?: { activeInternalSquads?: Array<{ uuid?: string } | string> } };
-        const arr = res?.response?.activeInternalSquads ?? [];
+        const res = raw as { response?: { activeInternalSquads?: Array<{ uuid?: string } | string> }; activeInternalSquads?: Array<{ uuid?: string } | string> };
+        const arr = res?.response?.activeInternalSquads ?? res?.activeInternalSquads ?? [];
         const uuids = Array.isArray(arr) ? arr.map((s) => (typeof s === "string" ? s : s?.uuid)).filter((u): u is string => Boolean(u)) : [];
         setClientRemnaSquads(uuids);
       }).catch(() => setClientRemnaSquads([]));
@@ -146,14 +147,20 @@ export function ClientsPage() {
   async function remnaAction(
     name: string,
     fn: () => Promise<unknown>
-  ) {
+  ): Promise<boolean> {
+    if (remnaActionBusy) return false;
+    setRemnaActionBusy(true);
     setActionMessage(null);
     try {
       await fn();
       setActionMessage(name + " — ок");
       loadClients();
+      return true;
     } catch (e) {
       setActionMessage(name + ": " + (e instanceof Error ? e.message : "ошибка"));
+      return false;
+    } finally {
+      setRemnaActionBusy(false);
     }
   }
 
@@ -182,14 +189,14 @@ export function ClientsPage() {
 
   async function squadAdd(squadUuid: string) {
     if (!editing) return;
-    await remnaAction("Сквад добавлен", () => api.clientRemnaSquadAdd(token, editing.id, squadUuid));
-    setClientRemnaSquads((prev) => (prev.includes(squadUuid) ? prev : [...prev, squadUuid]));
+    const ok = await remnaAction("Сквад добавлен", () => api.clientRemnaSquadAdd(token, editing.id, squadUuid));
+    if (ok) setClientRemnaSquads((prev) => (prev.includes(squadUuid) ? prev : [...prev, squadUuid]));
   }
 
   async function squadRemove(squadUuid: string) {
     if (!editing) return;
-    await remnaAction("Сквад снят", () => api.clientRemnaSquadRemove(token, editing.id, squadUuid));
-    setClientRemnaSquads((prev) => prev.filter((u) => u !== squadUuid));
+    const ok = await remnaAction("Сквад снят", () => api.clientRemnaSquadRemove(token, editing.id, squadUuid));
+    if (ok) setClientRemnaSquads((prev) => prev.filter((u) => u !== squadUuid));
   }
 
   if (loading && !data) return <div className="text-muted-foreground">Загрузка…</div>;
@@ -310,6 +317,7 @@ export function ClientsPage() {
           editForm={editForm}
           setEditForm={setEditForm}
           saving={saving}
+          remnaActionBusy={remnaActionBusy}
           actionMessage={actionMessage}
           remnaData={remnaData}
           clientRemnaSquads={clientRemnaSquads}
@@ -342,6 +350,7 @@ function ClientEditModal({
   editForm,
   setEditForm,
   saving,
+  remnaActionBusy,
   actionMessage,
   remnaData,
   onClose,
@@ -364,6 +373,7 @@ function ClientEditModal({
   editForm: UpdateClientPayload & Partial<UpdateClientRemnaPayload>;
   setEditForm: React.Dispatch<React.SetStateAction<UpdateClientPayload & Partial<UpdateClientRemnaPayload>>>;
   saving: boolean;
+  remnaActionBusy: boolean;
   actionMessage: string | null;
   remnaData: { squads: { uuid: string; name?: string }[] };
   clientRemnaSquads: string[];
@@ -372,7 +382,7 @@ function ClientEditModal({
   onClose: () => void;
   onSave: () => Promise<void>;
   onSaveRemnaLimits: () => Promise<void>;
-  onRemnaAction: (name: string, fn: () => Promise<unknown>) => Promise<void>;
+  onRemnaAction: (name: string, fn: () => Promise<unknown>) => Promise<boolean>;
   onSquadAdd: (squadUuid: string) => Promise<void>;
   onSquadRemove: (squadUuid: string) => Promise<void>;
   onSetPassword: () => Promise<void>;
@@ -622,7 +632,7 @@ function ClientEditModal({
                       />
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" className="mt-2" onClick={onSaveRemnaLimits} disabled={saving}>
+                  <Button variant="outline" size="sm" className="mt-2" onClick={onSaveRemnaLimits} disabled={saving || remnaActionBusy}>
                     Применить лимиты в Remna
                   </Button>
                 </div>
@@ -631,6 +641,7 @@ function ClientEditModal({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={remnaActionBusy}
                     onClick={() => onRemnaAction("Подписка отозвана", () => api.clientRemnaRevokeSubscription(token, editing.id))}
                   >
                     <Ticket className="h-4 w-4 mr-1" /> Отозвать тариф
@@ -638,6 +649,7 @@ function ClientEditModal({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={remnaActionBusy}
                     onClick={() => onRemnaAction("Отключён", () => api.clientRemnaDisable(token, editing.id))}
                   >
                     <Ban className="h-4 w-4 mr-1" /> Отключить в Remna
@@ -645,6 +657,7 @@ function ClientEditModal({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={remnaActionBusy}
                     onClick={() => onRemnaAction("Включён", () => api.clientRemnaEnable(token, editing.id))}
                   >
                     <ShieldCheck className="h-4 w-4 mr-1" /> Включить в Remna
@@ -652,6 +665,7 @@ function ClientEditModal({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={remnaActionBusy}
                     onClick={() => onRemnaAction("Трафик сброшен", () => api.clientRemnaResetTraffic(token, editing.id))}
                   >
                     <Wifi className="h-4 w-4 mr-1" /> Сбросить трафик
@@ -675,11 +689,11 @@ function ClientEditModal({
                             <span className="font-medium">{s.name || s.uuid}</span>
                             <span className="text-[10px]">{inSquad ? "в скваде" : "не в скваде"}</span>
                             {inSquad ? (
-                              <Button variant="ghost" size="sm" className="h-6 px-1 text-destructive" onClick={() => onSquadRemove(s.uuid)} title="Убрать из сквада">
+                              <Button variant="ghost" size="sm" className="h-6 px-1 text-destructive" disabled={remnaActionBusy} onClick={() => onSquadRemove(s.uuid)} title="Убрать из сквада">
                                 − Убрать
                               </Button>
                             ) : (
-                              <Button variant="ghost" size="sm" className="h-6 px-1" onClick={() => onSquadAdd(s.uuid)} title="Добавить в сквад">
+                              <Button variant="ghost" size="sm" className="h-6 px-1" disabled={remnaActionBusy} onClick={() => onSquadAdd(s.uuid)} title="Добавить в сквад">
                                 + Добавить
                               </Button>
                             )}

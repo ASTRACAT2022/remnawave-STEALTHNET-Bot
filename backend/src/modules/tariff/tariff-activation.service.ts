@@ -8,6 +8,7 @@ import {
   remnaCreateUser,
   remnaUpdateUser,
   remnaGetUser,
+  remnaEnsureUserInInternalSquads,
   isRemnaConfigured,
   remnaGetUserByTelegramId,
   remnaGetUserByEmail,
@@ -60,10 +61,14 @@ export async function activateTariffForClient(
 
   const trafficLimitBytes = tariff.trafficLimitBytes != null ? Number(tariff.trafficLimitBytes) : 0;
   const hwidDeviceLimit = tariff.deviceLimit ?? null;
+  const squadUuids = tariff.internalSquadUuids;
 
   if (client.remnawaveUuid) {
     // Получаем текущие данные пользователя из Remnawave, чтобы узнать его expireAt
     const userRes = await remnaGetUser(client.remnawaveUuid);
+    if (userRes.error) {
+      return { ok: false, error: userRes.error, status: userRes.status >= 400 ? userRes.status : 500 };
+    }
     const currentExpireAt = extractCurrentExpireAt(userRes.data);
     const expireAt = calculateExpireAt(currentExpireAt, tariff.durationDays);
 
@@ -72,10 +77,14 @@ export async function activateTariffForClient(
       expireAt,
       trafficLimitBytes,
       hwidDeviceLimit,
-      activeInternalSquads: tariff.internalSquadUuids,
+      activeInternalSquads: squadUuids,
     });
     if (updateRes.error) {
       return { ok: false, error: updateRes.error, status: updateRes.status >= 400 ? updateRes.status : 500 };
+    }
+    const ensureRes = await remnaEnsureUserInInternalSquads(client.remnawaveUuid, squadUuids);
+    if (ensureRes.error) {
+      return { ok: false, error: ensureRes.error, status: ensureRes.status >= 400 ? ensureRes.status : 500 };
     }
   } else {
     let existingUuid: string | null = null;
@@ -104,13 +113,20 @@ export async function activateTariffForClient(
         trafficLimitStrategy: "NO_RESET",
         expireAt,
         hwidDeviceLimit: hwidDeviceLimit ?? undefined,
-        activeInternalSquads: tariff.internalSquadUuids,
+        activeInternalSquads: squadUuids,
       });
       existingUuid = extractRemnaUuid(createRes.data);
     }
     if (!existingUuid) return { ok: false, error: "Ошибка создания пользователя VPN", status: 502 };
 
-    await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: tariff.internalSquadUuids });
+    const updateRes = await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: squadUuids });
+    if (updateRes.error) {
+      return { ok: false, error: updateRes.error, status: updateRes.status >= 400 ? updateRes.status : 500 };
+    }
+    const ensureRes = await remnaEnsureUserInInternalSquads(existingUuid, squadUuids);
+    if (ensureRes.error) {
+      return { ok: false, error: ensureRes.error, status: ensureRes.status >= 400 ? ensureRes.status : 500 };
+    }
     await prisma.client.update({ where: { id: client.id }, data: { remnawaveUuid: existingUuid } });
   }
   return { ok: true };

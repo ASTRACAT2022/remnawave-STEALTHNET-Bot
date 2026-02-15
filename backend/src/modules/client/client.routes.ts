@@ -13,7 +13,7 @@ import {
   getPublicConfig,
 } from "./client.service.js";
 import { requireClientAuth } from "./client.middleware.js";
-import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, extractRemnaUuid } from "../remna/remna.client.js";
+import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, remnaEnsureUserInInternalSquads, extractRemnaActiveInternalSquadUuids, extractRemnaUuid } from "../remna/remna.client.js";
 import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
 import { activateTariffForClient } from "../tariff/tariff-activation.service.js";
@@ -39,6 +39,19 @@ function extractCurrentExpireAt(data: unknown): Date | null {
 function calculateExpireAt(currentExpireAt: Date | null, durationDays: number): string {
   const base = currentExpireAt ?? new Date();
   return new Date(base.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function toHttpErrorStatus(status: number): number {
+  return status >= 400 ? status : 500;
+}
+
+async function ensureUserInSquadsOrError(res: import("express").Response, userUuid: string, squadUuids: string[]): Promise<boolean> {
+  const ensureRes = await remnaEnsureUserInInternalSquads(userUuid, squadUuids);
+  if (ensureRes.error) {
+    res.status(toHttpErrorStatus(ensureRes.status)).json({ message: ensureRes.error });
+    return false;
+  }
+  return true;
 }
 
 export const clientAuthRouter = Router();
@@ -544,6 +557,9 @@ clientRouter.post("/trial", async (req, res) => {
 
   if (client.remnawaveUuid) {
     const userRes = await remnaGetUser(client.remnawaveUuid);
+    if (userRes.error) {
+      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+    }
     const currentExpireAt = extractCurrentExpireAt(userRes.data);
     const expireAt = calculateExpireAt(currentExpireAt, trialDays);
 
@@ -557,6 +573,7 @@ clientRouter.post("/trial", async (req, res) => {
     if (updateRes.error) {
       return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
     }
+    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [trialSquadUuid])) return;
   } else {
     // Сначала ищем существующего пользователя в Remna (по Telegram ID, email, username), чтобы не получать "username already exists"
     let existingUuid: string | null = null;
@@ -601,13 +618,17 @@ clientRouter.post("/trial", async (req, res) => {
       return res.status(502).json({ message: "Ошибка создания пользователя" });
     }
 
-    await remnaUpdateUser({
+    const updateRes = await remnaUpdateUser({
       uuid: existingUuid,
       expireAt,
       trafficLimitBytes,
       hwidDeviceLimit,
       activeInternalSquads: [trialSquadUuid],
     });
+    if (updateRes.error) {
+      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+    }
+    if (!await ensureUserInSquadsOrError(res, existingUuid, [trialSquadUuid])) return;
     await prisma.client.update({
       where: { id: client.id },
       data: { remnawaveUuid: existingUuid, trialUsed: true },
@@ -653,6 +674,9 @@ clientRouter.post("/promo/activate", async (req, res) => {
   if (client.remnawaveUuid) {
     // Получаем текущий expireAt и добавляем дни
     const userRes = await remnaGetUser(client.remnawaveUuid);
+    if (userRes.error) {
+      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+    }
     const currentExpireAt = extractCurrentExpireAt(userRes.data);
     const expireAt = calculateExpireAt(currentExpireAt, group.durationDays);
 
@@ -666,6 +690,7 @@ clientRouter.post("/promo/activate", async (req, res) => {
     if (updateRes.error) {
       return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
     }
+    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [group.squadUuid])) return;
   } else {
     // Ищем существующего пользователя или создаём нового
     let existingUuid: string | null = null;
@@ -697,7 +722,11 @@ clientRouter.post("/promo/activate", async (req, res) => {
     }
     if (!existingUuid) return res.status(502).json({ message: "Ошибка создания пользователя VPN" });
 
-    await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: [group.squadUuid] });
+    const updateRes = await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: [group.squadUuid] });
+    if (updateRes.error) {
+      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+    }
+    if (!await ensureUserInSquadsOrError(res, existingUuid, [group.squadUuid])) return;
 
     await prisma.client.update({
       where: { id: client.id },
@@ -789,6 +818,9 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
 
   if (client.remnawaveUuid) {
     const userRes = await remnaGetUser(client.remnawaveUuid);
+    if (userRes.error) {
+      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+    }
     const currentExpireAt = extractCurrentExpireAt(userRes.data);
     const expireAt = calculateExpireAt(currentExpireAt, promo.durationDays);
 
@@ -802,6 +834,7 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
     if (updateRes.error) {
       return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
     }
+    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [promo.squadUuid])) return;
   } else {
     let existingUuid: string | null = null;
     let currentExpireAt: Date | null = null;
@@ -832,7 +865,11 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
     }
     if (!existingUuid) return res.status(502).json({ message: "Ошибка создания пользователя VPN" });
 
-    await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: [promo.squadUuid] });
+    const updateRes = await remnaUpdateUser({ uuid: existingUuid, expireAt, trafficLimitBytes, hwidDeviceLimit, activeInternalSquads: [promo.squadUuid] });
+    if (updateRes.error) {
+      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+    }
+    if (!await ensureUserInSquadsOrError(res, existingUuid, [promo.squadUuid])) return;
     await prisma.client.update({ where: { id: client.id }, data: { remnawaveUuid: existingUuid } });
   }
 
@@ -842,9 +879,7 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
 
 /** Определить отображаемое имя тарифа: Триал, название с сайта или «Тариф не выбран» */
 async function resolveTariffDisplayName(remnaUserData: unknown): Promise<string> {
-  const user = (remnaUserData as { response?: { activeInternalSquads?: { uuid?: string }[] }; activeInternalSquads?: { uuid?: string }[] })?.response
-    ?? (remnaUserData as { activeInternalSquads?: { uuid?: string }[] });
-  const squadUuid = user?.activeInternalSquads?.[0]?.uuid;
+  const squadUuid = extractRemnaActiveInternalSquadUuids(remnaUserData)[0];
   if (!squadUuid) return "Тариф не выбран";
   const config = await getSystemConfig();
   if (config.trialSquadUuid?.trim() === squadUuid) return "Триал";
