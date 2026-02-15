@@ -136,7 +136,12 @@ async function enforceSubscription(
 ): Promise<boolean> {
   if (!config?.forceSubscribeEnabled) return false;
   const channelId = config.forceSubscribeChannelId?.trim();
-  if (!channelId) return false;
+  if (!channelId) {
+    await ctx.reply(
+      "⚠️ Проверка подписки включена, но канал не настроен. Сообщите администратору: укажите @username или ID канала в настройках.",
+    );
+    return true;
+  }
   const userId = ctx.from?.id;
   if (!userId) return false;
   const result = await checkUserSubscription(userId, channelId);
@@ -455,6 +460,9 @@ bot.command("start", async (ctx) => {
     setToken(from.id, auth.token);
     const client = auth.client;
 
+    // Проверка подписки на канал до любых действий (включая promo-активацию)
+    if (await enforceSubscription(ctx, config)) return;
+
     // Если это промо-ссылка — активируем промокод
     if (promoCode) {
       try {
@@ -467,9 +475,6 @@ bot.command("start", async (ctx) => {
         return;
       }
     }
-
-    // Проверка подписки на канал
-    if (await enforceSubscription(ctx, config)) return;
 
     const subRes = await api.getSubscription(auth.token).catch(() => ({ subscription: null }));
     const vpnUrl = getSubscriptionUrl(subRes.subscription);
@@ -528,6 +533,18 @@ bot.on("callback_query:data", async (ctx) => {
     // Обработка кнопки «Я подписался»
     if (data === "check_subscribe") {
       const channelId = config?.forceSubscribeChannelId?.trim();
+      if (config?.forceSubscribeEnabled && !channelId) {
+        await ctx.answerCallbackQuery({
+          text: "⚠️ Канал не настроен. Сообщите администратору.",
+          show_alert: true,
+        }).catch(() => {});
+        await editMessageContent(
+          ctx,
+          "⚠️ Проверка подписки включена, но канал не настроен.\n\nУкажите корректный @username или ID канала в админ-панели.",
+          backToMenu(config?.botBackLabel ?? null)
+        );
+        return;
+      }
       if (channelId && config?.forceSubscribeEnabled) {
         const result = await checkUserSubscription(userId, channelId);
         if (result.state === "cannot_verify") {
@@ -554,8 +571,16 @@ bot.on("callback_query:data", async (ctx) => {
     }
 
     // Проверка подписки на канал для всех действий
-    if (config?.forceSubscribeEnabled && config.forceSubscribeChannelId?.trim()) {
-      const channelId = config.forceSubscribeChannelId.trim();
+    if (config?.forceSubscribeEnabled) {
+      const channelId = config.forceSubscribeChannelId?.trim();
+      if (!channelId) {
+        await editMessageContent(
+          ctx,
+          "⚠️ Проверка подписки включена, но канал не настроен.\n\nУкажите корректный @username или ID канала в админ-панели.",
+          backToMenu(config?.botBackLabel ?? null, "danger")
+        );
+        return;
+      }
       const result = await checkUserSubscription(userId, channelId);
       if (result.state !== "subscribed") {
         const msg = config.forceSubscribeMessage?.trim() || "Для использования бота подпишитесь на наш канал:";
