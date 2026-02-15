@@ -15,8 +15,9 @@ import {
 import { requireClientAuth } from "./client.middleware.js";
 import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, remnaEnsureUserInInternalSquads, extractRemnaActiveInternalSquadUuids, extractRemnaUuid } from "../remna/remna.client.js";
 import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
-import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
-import { activateTariffForClient } from "../tariff/tariff-activation.service.js";
+import { createPlategaTransaction, getPlategaTransactionState, isPlategaConfigured } from "../platega/platega.service.js";
+import { activateTariffByPaymentId, activateTariffForClient } from "../tariff/tariff-activation.service.js";
+import { distributeReferralRewards } from "../referral/referral.service.js";
 import { getAuthUrl, exchangeCodeForToken, requestPayment, processPayment } from "../yoomoney/yoomoney.service.js";
 
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
@@ -1049,6 +1050,134 @@ clientRouter.post("/payments/platega", async (req, res) => {
   });
 });
 
+const PLATEGA_SUCCESS_STATUSES = new Set(["CONFIRMED", "PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "SUCCESSFUL", "APPROVED"]);
+const PLATEGA_FAILED_STATUSES = new Set(["CANCELED", "CANCELLED", "FAILED", "DECLINED", "REJECTED", "ERROR", "EXPIRED", "CHARGEBACK", "CHARGEBACKED"]);
+
+const plategaRecheckSchema = z.object({
+  orderId: z.string().min(1).optional(),
+  paymentId: z.string().min(1).optional(),
+}).refine((v) => Boolean(v.orderId?.trim() || v.paymentId?.trim()), {
+  message: "orderId или paymentId обязателен",
+  path: ["orderId"],
+});
+
+clientRouter.post("/payments/platega/recheck", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const parsed = plategaRecheckSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+
+  const orderId = parsed.data.orderId?.trim();
+  const paymentId = parsed.data.paymentId?.trim();
+  const where = paymentId
+    ? { id: paymentId, clientId, provider: "platega" as const }
+    : { orderId: orderId as string, clientId, provider: "platega" as const };
+  const payment = await prisma.payment.findFirst({
+    where,
+    select: {
+      id: true,
+      orderId: true,
+      status: true,
+      amount: true,
+      currency: true,
+      tariffId: true,
+      externalId: true,
+      clientId: true,
+    },
+  });
+
+  if (!payment) return res.status(404).json({ message: "Платёж не найден" });
+  if (payment.status === "PAID" || payment.status === "FAILED") {
+    return res.json({ paymentId: payment.id, orderId: payment.orderId, status: payment.status });
+  }
+  if (!payment.externalId?.trim()) {
+    return res.json({ paymentId: payment.id, orderId: payment.orderId, status: payment.status, message: "Транзакция ещё создаётся" });
+  }
+
+  const config = await getSystemConfig();
+  const plategaConfig = {
+    merchantId: config.plategaMerchantId || "",
+    secret: config.plategaSecret || "",
+  };
+  if (!isPlategaConfigured(plategaConfig)) {
+    return res.status(503).json({ message: "Platega не настроен" });
+  }
+
+  const stateRes = await getPlategaTransactionState(plategaConfig, payment.externalId.trim());
+  if ("error" in stateRes) {
+    return res.status(toHttpErrorStatus(stateRes.status)).json({ message: stateRes.error });
+  }
+
+  const providerStatus = (stateRes.providerStatus ?? "").toUpperCase();
+  if (!providerStatus || (!PLATEGA_SUCCESS_STATUSES.has(providerStatus) && !PLATEGA_FAILED_STATUSES.has(providerStatus))) {
+    return res.json({
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      status: "PENDING",
+      providerStatus: providerStatus || null,
+    });
+  }
+
+  if (PLATEGA_FAILED_STATUSES.has(providerStatus)) {
+    await prisma.payment.updateMany({
+      where: { id: payment.id, status: "PENDING" },
+      data: { status: "FAILED", externalId: payment.externalId.trim() },
+    });
+    const latest = await prisma.payment.findUnique({ where: { id: payment.id }, select: { status: true } });
+    return res.json({
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      status: latest?.status ?? "FAILED",
+      providerStatus,
+    });
+  }
+
+  const paidNow = !payment.tariffId
+    ? await prisma.$transaction(async (tx) => {
+      const upd = await tx.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
+        data: { status: "PAID", paidAt: new Date(), externalId: payment.externalId!.trim() },
+      });
+      if (upd.count > 0) {
+        await tx.client.update({
+          where: { id: payment.clientId },
+          data: { balance: { increment: payment.amount } },
+        });
+      }
+      return upd.count > 0;
+    })
+    : (await prisma.payment.updateMany({
+      where: { id: payment.id, status: "PENDING" },
+      data: { status: "PAID", paidAt: new Date(), externalId: payment.externalId.trim() },
+    })).count > 0;
+
+  if (paidNow) {
+    if (payment.tariffId) {
+      const activation = await activateTariffByPaymentId(payment.id);
+      if (!activation.ok) {
+        console.error("[Platega Recheck] Tariff activation failed", {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          error: activation.error,
+        });
+      }
+    }
+    await distributeReferralRewards(payment.id).catch((e) => {
+      console.error("[Platega Recheck] Referral distribution error", { paymentId: payment.id, error: e });
+    });
+  }
+
+  const latest = await prisma.payment.findUnique({ where: { id: payment.id }, select: { status: true } });
+  return res.json({
+    paymentId: payment.id,
+    orderId: payment.orderId,
+    status: latest?.status ?? "PENDING",
+    providerStatus,
+    reconciled: paidNow,
+  });
+});
+
 // ——— Оплата тарифа балансом ———
 
 const payByBalanceSchema = z.object({
@@ -1128,7 +1257,6 @@ clientRouter.post("/payments/balance", async (req, res) => {
   }
 
   // Реферальные начисления
-  const { distributeReferralRewards } = await import("../referral/referral.service.js");
   await distributeReferralRewards(payment.id).catch(() => {});
 
   return res.json({

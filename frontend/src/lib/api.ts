@@ -416,6 +416,13 @@ export const api = {
     return request("/client/payments", { token });
   },
 
+  async clientRecheckPlategaPayment(
+    token: string,
+    data: { orderId?: string; paymentId?: string }
+  ): Promise<{ paymentId: string; orderId: string; status: "PENDING" | "PAID" | "FAILED"; providerStatus?: string | null; reconciled?: boolean; message?: string }> {
+    return request("/client/payments/platega/recheck", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async clientCreatePlategaPayment(
     token: string,
     data: { amount: number; currency: string; paymentMethod: number; description?: string; tariffId?: string; promoCode?: string }

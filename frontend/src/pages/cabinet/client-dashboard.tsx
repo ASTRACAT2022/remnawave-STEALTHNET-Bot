@@ -114,7 +114,7 @@ export function ClientDashboardPage() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [payments, setPayments] = useState<ClientPayment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [paymentMessage, setPaymentMessage] = useState<"success_topup" | "success_tariff" | "success" | "failed" | null>(null);
+  const [paymentMessage, setPaymentMessage] = useState<"success_topup" | "success_tariff" | "success" | "processing" | "failed" | null>(null);
   const [trialLoading, setTrialLoading] = useState(false);
   const [trialError, setTrialError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -130,16 +130,57 @@ export function ClientDashboardPage() {
     const payment = searchParams.get("payment");
     const yoomoneyForm = searchParams.get("yoomoney_form");
     const paymentKind = searchParams.get("payment_kind");
+    const oid = searchParams.get("oid");
     if (payment === "success") {
-      if (paymentKind === "topup") setPaymentMessage("success_topup");
-      else if (paymentKind === "tariff") setPaymentMessage("success_tariff");
-      else setPaymentMessage("success");
+      const optimisticMessage =
+        paymentKind === "topup" ? "success_topup"
+          : paymentKind === "tariff" ? "success_tariff"
+            : "success";
+      setPaymentMessage(optimisticMessage);
       setSearchParams({}, { replace: true });
-      if (token) refreshProfile().catch(() => {});
+      if (token && oid) {
+        api.clientRecheckPlategaPayment(token, { orderId: oid })
+          .then((r) => {
+            if (r.status === "FAILED") {
+              setPaymentMessage("failed");
+            } else if (r.status !== "PAID") {
+              setPaymentMessage("processing");
+            } else {
+              setPaymentMessage(optimisticMessage);
+            }
+            setRefreshKey((k) => k + 1);
+          })
+          .catch(() => {
+            setPaymentMessage("processing");
+          })
+          .finally(() => {
+            refreshProfile().catch(() => {});
+          });
+      } else if (token) {
+        refreshProfile().catch(() => {});
+      }
     } else if (payment === "failed") {
       setPaymentMessage("failed");
       setSearchParams({}, { replace: true });
-      if (token) refreshProfile().catch(() => {});
+      if (token && oid) {
+        api.clientRecheckPlategaPayment(token, { orderId: oid })
+          .then((r) => {
+            if (r.status === "PAID") {
+              if (paymentKind === "topup") setPaymentMessage("success_topup");
+              else if (paymentKind === "tariff") setPaymentMessage("success_tariff");
+              else setPaymentMessage("success");
+            } else if (r.status === "PENDING") {
+              setPaymentMessage("processing");
+            }
+            setRefreshKey((k) => k + 1);
+          })
+          .catch(() => {})
+          .finally(() => {
+            refreshProfile().catch(() => {});
+          });
+      } else if (token) {
+        refreshProfile().catch(() => {});
+      }
     } else if (yoomoneyForm === "success") {
       setSearchParams({}, { replace: true });
       if (token) refreshProfile().catch(() => {});
@@ -235,6 +276,11 @@ export function ClientDashboardPage() {
               : paymentMessage === "success_tariff"
                 ? "Оплата прошла успешно. Тариф активируется автоматически."
                 : "Оплата прошла успешно. Статус обновляется автоматически."}
+          </div>
+        )}
+        {paymentMessage === "processing" && (
+          <div className="rounded-lg bg-yellow-500/15 border border-yellow-500/30 px-3 py-2 text-sm font-medium text-yellow-700 dark:text-yellow-400">
+            Платёж создан. Ожидаем подтверждение от платёжного провайдера, статус обновится автоматически.
           </div>
         )}
         {paymentMessage === "failed" && (
@@ -488,6 +534,11 @@ export function ClientDashboardPage() {
                 : paymentMessage === "success_tariff"
                   ? "Оплата прошла успешно. Тариф активируется автоматически."
                   : "Оплата прошла успешно. Статус обновляется автоматически."}
+            </p>
+          )}
+          {paymentMessage === "processing" && (
+            <p className="text-sm text-yellow-600 font-medium">
+              Платёж создан. Ожидаем подтверждение от платёжного провайдера.
             </p>
           )}
           {paymentMessage === "failed" && (
