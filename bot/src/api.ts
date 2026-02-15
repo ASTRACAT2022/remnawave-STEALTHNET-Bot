@@ -14,11 +14,17 @@ function getHeaders(token?: string): HeadersInit {
 }
 
 async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string }): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method: opts?.method ?? "GET",
-    headers: getHeaders(opts?.token),
-    ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: opts?.method ?? "GET",
+      headers: getHeaders(opts?.token),
+      ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`NetworkError: API недоступен (${msg})`);
+  }
   const data = (await res.json().catch(() => ({}))) as T | { message?: string };
   if (!res.ok) {
     const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;

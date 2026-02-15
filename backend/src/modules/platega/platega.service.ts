@@ -4,6 +4,7 @@
  */
 
 const PLATEGA_API_BASE = "https://app.platega.io";
+const PLATEGA_TIMEOUT_MS = 20000;
 
 export type PlategaConfig = {
   merchantId: string;
@@ -12,6 +13,15 @@ export type PlategaConfig = {
 
 export function isPlategaConfigured(config: PlategaConfig | null): boolean {
   return Boolean(config?.merchantId?.trim() && config?.secret?.trim());
+}
+
+function pickString(...values: unknown[]): string {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    if (typeof v === "bigint") return String(v);
+  }
+  return "";
 }
 
 /**
@@ -48,11 +58,14 @@ export async function createPlategaTransaction(
   };
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PLATEGA_TIMEOUT_MS);
     const res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
 
     const text = await res.text();
     let data: Record<string, unknown>;
@@ -66,12 +79,12 @@ export async function createPlategaTransaction(
       return { error: "Platega: неверный Merchant ID или секрет" };
     }
     if (res.status !== 200) {
-      const msg = (data.message as string) || (data.error as string) || text?.slice(0, 200);
-      return { error: `Platega: ${msg}` };
+      const msg = pickString(data.message, data.error, data.details, text.slice(0, 200)) || `HTTP ${res.status}`;
+      return { error: `Platega (${res.status}): ${msg}` };
     }
 
-    const paymentUrl = (data.redirect as string) || (data.url as string) || (data.paymentUrl as string);
-    const transactionId = (data.transactionId as string) || (data.id as string);
+    const paymentUrl = pickString(data.redirect, data.url, data.paymentUrl, data.payment_url, data.link);
+    const transactionId = pickString(data.transactionId, data.transaction_id, data.id);
 
     if (!paymentUrl) {
       return { error: "Platega не вернул ссылку на оплату" };
@@ -79,6 +92,9 @@ export async function createPlategaTransaction(
 
     return { paymentUrl, transactionId: transactionId || "" };
   } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      return { error: "Platega: таймаут при создании транзакции" };
+    }
     const message = e instanceof Error ? e.message : String(e);
     return { error: `Platega: ${message}` };
   }

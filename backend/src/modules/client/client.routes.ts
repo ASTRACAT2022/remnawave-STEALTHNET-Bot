@@ -45,6 +45,26 @@ function toHttpErrorStatus(status: number): number {
   return status >= 400 ? status : 500;
 }
 
+function headerValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return typeof value === "string" ? value : "";
+}
+
+function resolveBaseAppUrl(req: import("express").Request, configuredPublicUrl: string | null | undefined): string {
+  const configured = (configuredPublicUrl ?? "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+
+  const forwardedHost = headerValue(req.headers["x-forwarded-host"]).split(",")[0]?.trim();
+  const host = forwardedHost || headerValue(req.headers.host).split(",")[0]?.trim();
+  if (!host) return "";
+
+  const forwardedProto = headerValue(req.headers["x-forwarded-proto"]).split(",")[0]?.trim().toLowerCase();
+  const proto = forwardedProto === "https" || forwardedProto === "http"
+    ? forwardedProto
+    : (req.secure ? "https" : "http");
+  return `${proto}://${host}`.replace(/\/$/, "");
+}
+
 async function ensureUserInSquadsOrError(res: import("express").Response, userUuid: string, squadUuids: string[]): Promise<boolean> {
   const ensureRes = await remnaEnsureUserInInternalSquads(userUuid, squadUuids);
   if (ensureRes.error) {
@@ -902,9 +922,9 @@ clientRouter.get("/subscription", async (req, res) => {
 });
 
 const createPlategaPaymentSchema = z.object({
-  amount: z.number().positive(),
+  amount: z.coerce.number().positive(),
   currency: z.string().min(1).max(10),
-  paymentMethod: z.number().int().min(2).max(13),
+  paymentMethod: z.coerce.number().int().min(2).max(13),
   description: z.string().max(500).optional(),
   tariffId: z.string().min(1).optional(),
   promoCode: z.string().max(50).optional(),
@@ -962,7 +982,10 @@ clientRouter.post("/payments/platega", async (req, res) => {
 
   const orderId = randomUUID();
   const paymentKind = tariffIdToStore ? "tariff" : "topup";
-  const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
+  const appUrl = resolveBaseAppUrl(req, config.publicAppUrl);
+  if (!appUrl) {
+    return res.status(503).json({ message: "Не удалось определить URL панели. Укажите URL приложения в настройках." });
+  }
   const returnUrl = appUrl
     ? `${appUrl}/cabinet/dashboard?payment=success&payment_kind=${paymentKind}&oid=${orderId}`
     : "";
@@ -994,6 +1017,15 @@ clientRouter.post("/payments/platega", async (req, res) => {
   });
 
   if ("error" in result) {
+    console.error("[Platega] create transaction failed", {
+      orderId,
+      paymentId: payment.id,
+      clientId,
+      paymentMethod,
+      amount: finalAmount,
+      currency: currency.toUpperCase(),
+      error: result.error,
+    });
     await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
     return res.status(502).json({ message: result.error });
   }

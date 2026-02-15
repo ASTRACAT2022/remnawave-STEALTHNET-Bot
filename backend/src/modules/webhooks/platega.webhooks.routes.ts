@@ -50,6 +50,8 @@ type Meta = Record<string, unknown> & {
 function pickFirstString(...values: unknown[]): string | null {
   for (const v of values) {
     if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    if (typeof v === "bigint") return String(v);
   }
   return null;
 }
