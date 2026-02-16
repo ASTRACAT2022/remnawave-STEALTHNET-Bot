@@ -234,7 +234,7 @@ adminRouter.patch("/payments/:id", asyncRoute(async (req, res) => {
     return res.json({ payment: { ...payment, status: "PAID" }, referral: result });
   }
   const now = new Date();
-  const isTopUp = (payment.provider === "yoomoney_form" || payment.provider === "platega") && !payment.tariffId;
+  const isTopUp = (payment.provider === "yoomoney_form" || payment.provider === "platega" || payment.provider === "yookassa") && !payment.tariffId;
   if (isTopUp) {
     await prisma.$transaction([
       prisma.payment.update({
@@ -894,6 +894,20 @@ const updateSettingsSchema = z.object({
   yoomoneyClientSecret: z.string().max(500).nullable().optional(),
   yoomoneyReceiverWallet: z.string().max(50).nullable().optional(),
   yoomoneyNotificationSecret: z.string().max(500).nullable().optional(),
+  yookassaShopId: z.string().max(200).nullable().optional(),
+  yookassaSecretKey: z.string().max(500).nullable().optional(),
+  yookassaReturnUrl: z.string().max(2000).nullable().optional(),
+  yookassaDefaultReceiptEmail: z.string().email().max(255).nullable().optional(),
+  yookassaVatCode: z.number().int().min(1).max(7).optional(),
+  yookassaSbpEnabled: z.boolean().optional(),
+  yookassaPaymentMode: z.string().max(50).nullable().optional(),
+  yookassaPaymentSubject: z.string().max(50).nullable().optional(),
+  yookassaTrustedProxyNetworks: z.string().max(2000).nullable().optional(),
+  nalogoEnabled: z.boolean().optional(),
+  nalogoInn: z.string().max(20).nullable().optional(),
+  nalogoPassword: z.string().max(500).nullable().optional(),
+  nalogoDeviceId: z.string().max(100).nullable().optional(),
+  nalogoTimeout: z.number().min(1).max(120).optional(),
   botButtons: z.string().max(10000).nullable().optional(),
   botEmojis: z.union([z.string().max(15000), z.record(z.object({ unicode: z.string().max(20).optional(), tgEmojiId: z.string().max(50).optional() }))]).nullable().optional(),
   botBackLabel: z.string().max(200).nullable().optional(),
@@ -1107,6 +1121,74 @@ adminRouter.patch("/settings", async (req, res) => {
   if (updates.yoomoneyNotificationSecret !== undefined) {
     const val = updates.yoomoneyNotificationSecret ?? "";
     await prisma.systemSetting.upsert({ where: { key: "yoomoney_notification_secret" }, create: { key: "yoomoney_notification_secret", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaShopId !== undefined) {
+    const val = updates.yookassaShopId ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_shop_id" }, create: { key: "yookassa_shop_id", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaSecretKey !== undefined) {
+    const val = updates.yookassaSecretKey ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_secret_key" }, create: { key: "yookassa_secret_key", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaReturnUrl !== undefined) {
+    const val = updates.yookassaReturnUrl ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_return_url" }, create: { key: "yookassa_return_url", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaDefaultReceiptEmail !== undefined) {
+    const val = updates.yookassaDefaultReceiptEmail ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_default_receipt_email" }, create: { key: "yookassa_default_receipt_email", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaVatCode !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "yookassa_vat_code" },
+      create: { key: "yookassa_vat_code", value: String(updates.yookassaVatCode) },
+      update: { value: String(updates.yookassaVatCode) },
+    });
+  }
+  if (updates.yookassaSbpEnabled !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "yookassa_sbp_enabled" },
+      create: { key: "yookassa_sbp_enabled", value: updates.yookassaSbpEnabled ? "true" : "false" },
+      update: { value: updates.yookassaSbpEnabled ? "true" : "false" },
+    });
+  }
+  if (updates.yookassaPaymentMode !== undefined) {
+    const val = updates.yookassaPaymentMode ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_payment_mode" }, create: { key: "yookassa_payment_mode", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaPaymentSubject !== undefined) {
+    const val = updates.yookassaPaymentSubject ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_payment_subject" }, create: { key: "yookassa_payment_subject", value: val }, update: { value: val } });
+  }
+  if (updates.yookassaTrustedProxyNetworks !== undefined) {
+    const val = updates.yookassaTrustedProxyNetworks ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "yookassa_trusted_proxy_networks" }, create: { key: "yookassa_trusted_proxy_networks", value: val }, update: { value: val } });
+  }
+  if (updates.nalogoEnabled !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "nalogo_enabled" },
+      create: { key: "nalogo_enabled", value: updates.nalogoEnabled ? "true" : "false" },
+      update: { value: updates.nalogoEnabled ? "true" : "false" },
+    });
+  }
+  if (updates.nalogoInn !== undefined) {
+    const val = updates.nalogoInn ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "nalogo_inn" }, create: { key: "nalogo_inn", value: val }, update: { value: val } });
+  }
+  if (updates.nalogoPassword !== undefined) {
+    const val = updates.nalogoPassword ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "nalogo_password" }, create: { key: "nalogo_password", value: val }, update: { value: val } });
+  }
+  if (updates.nalogoDeviceId !== undefined) {
+    const val = updates.nalogoDeviceId ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "nalogo_device_id" }, create: { key: "nalogo_device_id", value: val }, update: { value: val } });
+  }
+  if (updates.nalogoTimeout !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "nalogo_timeout" },
+      create: { key: "nalogo_timeout", value: String(updates.nalogoTimeout) },
+      update: { value: String(updates.nalogoTimeout) },
+    });
   }
   if (updates.botButtons !== undefined) {
     const val = updates.botButtons ?? "";
@@ -1598,7 +1680,16 @@ adminRouter.get("/analytics", async (_req, res) => {
 
   // ─── Доход по провайдерам ───
   const providerSeries = Object.entries(revenueByProvider).map(([provider, amount]) => ({
-    provider: provider === "balance" ? "Баланс" : provider === "platega" ? "Platega" : provider,
+    provider:
+      provider === "balance"
+        ? "Баланс"
+        : provider === "platega"
+          ? "Platega"
+          : provider === "yookassa"
+            ? "YooKassa"
+            : provider === "yoomoney_form"
+              ? "ЮMoney"
+              : provider,
     amount,
   }));
 

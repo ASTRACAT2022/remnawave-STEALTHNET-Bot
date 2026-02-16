@@ -6,6 +6,12 @@ const DEFAULTS: Array<[string, string]> = [
   ["default_referral_percent", "10"],
   ["trial_days", "3"],
   ["service_name", "STEALTHNET"],
+  ["yookassa_vat_code", "1"],
+  ["yookassa_sbp_enabled", "false"],
+  ["yookassa_payment_mode", "full_payment"],
+  ["yookassa_payment_subject", "service"],
+  ["nalogo_enabled", "false"],
+  ["nalogo_timeout", "30"],
   [
     "bot_inner_button_styles",
     '{"tariffPay":"success","topup":"primary","back":"danger","profile":"primary","trialConfirm":"success","lang":"primary","currency":"primary"}',

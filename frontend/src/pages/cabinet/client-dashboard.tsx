@@ -131,6 +131,7 @@ export function ClientDashboardPage() {
     const yoomoneyForm = searchParams.get("yoomoney_form");
     const paymentKind = searchParams.get("payment_kind");
     const oid = searchParams.get("oid");
+    const provider = searchParams.get("provider");
     if (payment === "success") {
       const optimisticMessage =
         paymentKind === "topup" ? "success_topup"
@@ -138,7 +139,7 @@ export function ClientDashboardPage() {
             : "success";
       setPaymentMessage(optimisticMessage);
       setSearchParams({}, { replace: true });
-      if (token && oid) {
+      if (token && oid && (provider === "platega" || !provider)) {
         api.clientRecheckPlategaPayment(token, { orderId: oid })
           .then((r) => {
             if (r.status === "FAILED") {
@@ -157,12 +158,13 @@ export function ClientDashboardPage() {
             refreshProfile().catch(() => {});
           });
       } else if (token) {
+        setRefreshKey((k) => k + 1);
         refreshProfile().catch(() => {});
       }
     } else if (payment === "failed") {
       setPaymentMessage("failed");
       setSearchParams({}, { replace: true });
-      if (token && oid) {
+      if (token && oid && (provider === "platega" || !provider)) {
         api.clientRecheckPlategaPayment(token, { orderId: oid })
           .then((r) => {
             if (r.status === "PAID") {
@@ -179,6 +181,7 @@ export function ClientDashboardPage() {
             refreshProfile().catch(() => {});
           });
       } else if (token) {
+        setRefreshKey((k) => k + 1);
         refreshProfile().catch(() => {});
       }
     } else if (yoomoneyForm === "success") {

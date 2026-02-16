@@ -734,6 +734,38 @@ bot.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    if (data.startsWith("pay_tariff_yookassa:")) {
+      const rest = data.slice("pay_tariff_yookassa:".length);
+      const [tariffId, methodRaw] = rest.split(":");
+      const method = methodRaw === "sbp" ? "sbp" : "bank_card";
+      const { items } = await api.getPublicTariffs();
+      const tariff = items?.flatMap((c: TariffCategory) => c.tariffs).find((t: TariffItem) => t.id === tariffId);
+      if (!tariff) {
+        await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (tariff.currency.toUpperCase() !== "RUB") {
+        await editMessageContent(ctx, "YooKassa принимает только RUB.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      try {
+        const payment = await api.createYookassaPayment(token, {
+          amount: tariff.price,
+          currency: "RUB",
+          paymentMethod: method,
+          description: `Тариф: ${tariff.name}`,
+          tariffId: tariff.id,
+        });
+        if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
+        const title = titleWithEmoji("CARD", `Оплата: ${tariff.name} — ${formatMoney(tariff.price, tariff.currency)}\n\nНажмите кнопку ниже для оплаты через YooKassa:`, config?.botEmojis);
+        await editMessageContent(ctx, title.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), title.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа YooKassa";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
     if (data.startsWith("pay_tariff:")) {
       const rest = data.slice("pay_tariff:".length);
       const parts = rest.split(":");
@@ -763,7 +795,23 @@ bot.on("callback_query:data", async (ctx) => {
       }
       // Показываем способы оплаты (всегда, чтобы была кнопка баланса)
       const pay2 = titleWithEmoji("CARD", `Оплата: ${tariff.name} — ${formatMoney(tariff.price, tariff.currency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
-      await editMessageContent(ctx, pay2.text, tariffPaymentMethodButtons(tariffId, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, balanceLabel, !!config?.yoomoneyEnabled, tariff.currency), pay2.entities);
+      await editMessageContent(
+        ctx,
+        pay2.text,
+        tariffPaymentMethodButtons(
+          tariffId,
+          methods,
+          config?.botBackLabel ?? null,
+          innerStyles?.back,
+          innerEmojiIds,
+          balanceLabel,
+          !!config?.yoomoneyEnabled,
+          !!config?.yookassaEnabled,
+          !!config?.yookassaSbpEnabled,
+          tariff.currency,
+        ),
+        pay2.entities,
+      );
       return;
     }
 
@@ -810,12 +858,40 @@ bot.on("callback_query:data", async (ctx) => {
       const client = await api.getMe(token);
       const methods = config?.plategaMethods ?? [];
       const yooEnabled = !!config?.yoomoneyEnabled;
-      if (!methods.length && !yooEnabled) {
+      const ykEnabled = !!config?.yookassaEnabled;
+      if (!methods.length && !yooEnabled && !ykEnabled) {
         await editMessageContent(ctx, "Пополнение временно недоступно.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
       }
       const topupTitle = titleWithEmoji("CARD", "Пополнить баланс\n\nВыберите сумму или введите свою (числом):", config?.botEmojis);
       await editMessageContent(ctx, topupTitle.text, topUpPresets(client.preferredCurrency, config?.botBackLabel ?? null, innerStyles, innerEmojiIds), topupTitle.entities);
+      return;
+    }
+
+    if (data.startsWith("topup_yookassa:")) {
+      const rest = data.slice("topup_yookassa:".length);
+      const [amountStr, methodRaw] = rest.split(":");
+      const amount = Number(amountStr);
+      const method = methodRaw === "sbp" ? "sbp" : "bank_card";
+      if (!Number.isFinite(amount) || amount <= 0) {
+        await editMessageContent(ctx, "Неверная сумма.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const client = await api.getMe(token);
+      try {
+        const payment = await api.createYookassaPayment(token, {
+          amount,
+          currency: "RUB",
+          paymentMethod: method,
+          description: "Пополнение баланса",
+        });
+        if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
+        const title = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты через YooKassa:`, config?.botEmojis);
+        await editMessageContent(ctx, title.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), title.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа YooKassa";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
       return;
     }
 
@@ -853,6 +929,8 @@ bot.on("callback_query:data", async (ctx) => {
       }
       const client = await api.getMe(token);
       const methods = config?.plategaMethods ?? [];
+      const ykEnabled = !!config?.yookassaEnabled;
+      const ykSbpEnabled = !!config?.yookassaSbpEnabled;
       if (methodIdFromBtn != null && Number.isFinite(methodIdFromBtn)) {
         const payment = await api.createPlategaPayment(token, {
           amount,
@@ -865,9 +943,41 @@ bot.on("callback_query:data", async (ctx) => {
         return;
       }
       const yooEnabled = !!config?.yoomoneyEnabled;
-      if (methods.length > 1 || (methods.length >= 1 && yooEnabled)) {
+      if (methods.length > 1 || (methods.length >= 1 && (yooEnabled || ykEnabled)) || (methods.length === 0 && ykEnabled && yooEnabled)) {
         const topupPay2 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
-        await editMessageContent(ctx, topupPay2.text, topupPaymentMethodButtons(amountStr, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, yooEnabled), topupPay2.entities);
+        await editMessageContent(
+          ctx,
+          topupPay2.text,
+          topupPaymentMethodButtons(
+            amountStr,
+            methods,
+            config?.botBackLabel ?? null,
+            innerStyles?.back,
+            innerEmojiIds,
+            yooEnabled,
+            ykEnabled,
+            ykSbpEnabled,
+          ),
+          topupPay2.entities,
+        );
+        return;
+      }
+      // Если только YooKassa — сразу создаём платёж по карте
+      if (methods.length === 0 && ykEnabled) {
+        try {
+          const payment = await api.createYookassaPayment(token, {
+            amount,
+            currency: "RUB",
+            paymentMethod: "bank_card",
+            description: "Пополнение баланса",
+          });
+          if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
+          const title = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты через YooKassa:`, config?.botEmojis);
+          await editMessageContent(ctx, title.text, payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), title.entities);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Ошибка создания платежа YooKassa";
+          await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        }
         return;
       }
       // Если ЮMoney единственный способ (нет platega methods) — сразу создаём платёж ЮMoney
@@ -1014,7 +1124,9 @@ bot.on("message:text", async (ctx) => {
     const config = publicConfig ?? await api.getPublicConfig();
     const methods = config?.plategaMethods ?? [];
     const yooEnabled = !!config?.yoomoneyEnabled;
-    if (!methods.length && !yooEnabled) {
+    const ykEnabled = !!config?.yookassaEnabled;
+    const ykSbpEnabled = !!config?.yookassaSbpEnabled;
+    if (!methods.length && !yooEnabled && !ykEnabled) {
       await ctx.reply("Пополнение временно недоступно.");
       return;
     }
@@ -1032,11 +1144,22 @@ bot.on("message:text", async (ctx) => {
           connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
         }
       : undefined;
-    if (methods.length > 1 || (methods.length >= 1 && yooEnabled)) {
+    if (methods.length > 1 || (methods.length >= 1 && (yooEnabled || ykEnabled)) || (methods.length === 0 && ykEnabled && yooEnabled)) {
       const topupMsg1 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
       await ctx.reply(topupMsg1.text, {
         entities: topupMsg1.entities.length ? topupMsg1.entities : undefined,
-        reply_markup: topupPaymentMethodButtons(String(num), methods, config?.botBackLabel ?? null, backStyle, msgEmojiIds, yooEnabled),
+        reply_markup: topupPaymentMethodButtons(String(num), methods, config?.botBackLabel ?? null, backStyle, msgEmojiIds, yooEnabled, ykEnabled, ykSbpEnabled),
+      });
+      return;
+    }
+    // Если только YooKassa (нет platega methods) — сразу создаём оплату картой
+    if (methods.length === 0 && ykEnabled) {
+      const payment = await api.createYookassaPayment(token, { amount: num, currency: "RUB", paymentMethod: "bank_card", description: "Пополнение баланса" });
+      if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
+      const topupMsgYk = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты через YooKassa:`, config?.botEmojis);
+      await ctx.reply(topupMsgYk.text, {
+        entities: topupMsgYk.entities.length ? topupMsgYk.entities : undefined,
+        reply_markup: payUrlMarkup(payment.paymentUrl, config?.botBackLabel ?? null, backStyle, msgEmojiIds),
       });
       return;
     }

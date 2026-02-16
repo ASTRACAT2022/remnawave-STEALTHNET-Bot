@@ -112,6 +112,12 @@ export function SettingsPage() {
         referralPercentLevel2: (data as AdminSettings).referralPercentLevel2 ?? 10,
         referralPercentLevel3: (data as AdminSettings).referralPercentLevel3 ?? 10,
         plategaMethods: (data as AdminSettings).plategaMethods ?? DEFAULT_PLATEGA_METHODS,
+        yookassaVatCode: (data as AdminSettings).yookassaVatCode ?? 1,
+        yookassaSbpEnabled: Boolean((data as AdminSettings).yookassaSbpEnabled),
+        yookassaPaymentMode: (data as AdminSettings).yookassaPaymentMode ?? "full_payment",
+        yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
+        nalogoEnabled: Boolean((data as AdminSettings).nalogoEnabled),
+        nalogoTimeout: (data as AdminSettings).nalogoTimeout ?? 30,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -244,6 +250,20 @@ export function SettingsPage() {
         yoomoneyClientSecret: settings.yoomoneyClientSecret && settings.yoomoneyClientSecret !== "********" ? settings.yoomoneyClientSecret : undefined,
         yoomoneyReceiverWallet: settings.yoomoneyReceiverWallet ?? null,
         yoomoneyNotificationSecret: settings.yoomoneyNotificationSecret && settings.yoomoneyNotificationSecret !== "********" ? settings.yoomoneyNotificationSecret : undefined,
+        yookassaShopId: settings.yookassaShopId ?? null,
+        yookassaSecretKey: settings.yookassaSecretKey && settings.yookassaSecretKey !== "********" ? settings.yookassaSecretKey : undefined,
+        yookassaReturnUrl: settings.yookassaReturnUrl ?? null,
+        yookassaDefaultReceiptEmail: settings.yookassaDefaultReceiptEmail ?? null,
+        yookassaVatCode: settings.yookassaVatCode ?? 1,
+        yookassaSbpEnabled: settings.yookassaSbpEnabled ?? false,
+        yookassaPaymentMode: settings.yookassaPaymentMode ?? "full_payment",
+        yookassaPaymentSubject: settings.yookassaPaymentSubject ?? "service",
+        yookassaTrustedProxyNetworks: settings.yookassaTrustedProxyNetworks ?? null,
+        nalogoEnabled: settings.nalogoEnabled ?? false,
+        nalogoInn: settings.nalogoInn ?? null,
+        nalogoPassword: settings.nalogoPassword && settings.nalogoPassword !== "********" ? settings.nalogoPassword : undefined,
+        nalogoDeviceId: settings.nalogoDeviceId ?? null,
+        nalogoTimeout: settings.nalogoTimeout ?? 30,
         botButtons: settings.botButtons != null ? JSON.stringify(settings.botButtons) : undefined,
         botEmojis: settings.botEmojis != null ? settings.botEmojis : undefined,
         botBackLabel: settings.botBackLabel ?? null,
@@ -1244,6 +1264,195 @@ export function SettingsPage() {
                           placeholder="Из настроек кошелька ЮMoney → Уведомления"
                         />
                         <p className="text-xs text-muted-foreground">Задаётся в <a href="https://yoomoney.ru/transfer/myservices/http-notification" target="_blank" rel="noreferrer" className="text-primary underline">настройках HTTP-уведомлений</a> кошелька.</p>
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <Button type="submit" disabled={saving} className="min-w-[140px]">
+                        {saving ? "Сохранение…" : "Сохранить"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible defaultOpen={false} className="group mt-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-t-lg text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <CardHeader className="pointer-events-none [&_.chevron]:transition-transform [&_.chevron]:duration-200 group-data-[state=open]:[&_.chevron]:rotate-180">
+                      <div className="flex items-center justify-between pr-2">
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="h-5 w-5 text-primary" />
+                          <CardTitle>YooKassa</CardTitle>
+                          <span className="text-xs font-normal text-muted-foreground">— банковские карты и СБП</span>
+                        </div>
+                        <ChevronDown className="chevron h-5 w-5 shrink-0 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Webhook URL: <code className="text-xs bg-muted px-1 rounded">{settings.publicAppUrl ? `${String(settings.publicAppUrl).replace(/\/$/, "")}/api/webhooks/yookassa` : "—"}</code>
+                      </p>
+                    </CardHeader>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 border-t pt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Shop ID</Label>
+                        <Input
+                          value={settings.yookassaShopId ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaShopId: e.target.value || null } : s))}
+                          placeholder="123456"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Secret key</Label>
+                        <Input
+                          type="password"
+                          value={settings.yookassaSecretKey ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaSecretKey: e.target.value || null } : s))}
+                          placeholder="live_..."
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Return URL (опционально)</Label>
+                        <Input
+                          value={settings.yookassaReturnUrl ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaReturnUrl: e.target.value || null } : s))}
+                          placeholder="https://example.com/cabinet/dashboard"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Email для чека по умолчанию</Label>
+                        <Input
+                          type="email"
+                          value={settings.yookassaDefaultReceiptEmail ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaDefaultReceiptEmail: e.target.value || null } : s))}
+                          placeholder="billing@example.com"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>VAT code</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={7}
+                          value={settings.yookassaVatCode ?? 1}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaVatCode: Number(e.target.value) || 1 } : s))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>payment_mode</Label>
+                        <Input
+                          value={settings.yookassaPaymentMode ?? "full_payment"}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaPaymentMode: e.target.value || "full_payment" } : s))}
+                          placeholder="full_payment"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>payment_subject</Label>
+                        <Input
+                          value={settings.yookassaPaymentSubject ?? "service"}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, yookassaPaymentSubject: e.target.value || "service" } : s))}
+                          placeholder="service"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Доверенные proxy-сети (через запятую, CIDR)</Label>
+                      <Input
+                        value={settings.yookassaTrustedProxyNetworks ?? ""}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, yookassaTrustedProxyNetworks: e.target.value || null } : s))}
+                        placeholder="203.0.113.0/24,198.51.100.0/24"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="yookassa-sbp-enabled"
+                        checked={settings.yookassaSbpEnabled ?? false}
+                        onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, yookassaSbpEnabled: checked === true } : s))}
+                      />
+                      <Label htmlFor="yookassa-sbp-enabled">Включить СБП в YooKassa</Label>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <Button type="submit" disabled={saving} className="min-w-[140px]">
+                        {saving ? "Сохранение…" : "Сохранить"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible defaultOpen={false} className="group mt-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-t-lg text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <CardHeader className="pointer-events-none [&_.chevron]:transition-transform [&_.chevron]:duration-200 group-data-[state=open]:[&_.chevron]:rotate-180">
+                      <div className="flex items-center justify-between pr-2">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="h-5 w-5 text-primary" />
+                          <CardTitle>NaloGO (чеки в налоговую)</CardTitle>
+                        </div>
+                        <ChevronDown className="chevron h-5 w-5 shrink-0 text-muted-foreground" />
+                      </div>
+                    </CardHeader>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 border-t pt-4">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="nalogo-enabled"
+                        checked={settings.nalogoEnabled ?? false}
+                        onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoEnabled: checked === true } : s))}
+                      />
+                      <Label htmlFor="nalogo-enabled">Включить отправку чеков в налоговую</Label>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>ИНН самозанятого</Label>
+                        <Input
+                          value={settings.nalogoInn ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, nalogoInn: e.target.value || null } : s))}
+                          placeholder="123456789012"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Пароль NaloGO</Label>
+                        <Input
+                          type="password"
+                          value={settings.nalogoPassword ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, nalogoPassword: e.target.value || null } : s))}
+                          placeholder="Пароль от lknpd.nalog.ru"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Device ID (опционально)</Label>
+                        <Input
+                          value={settings.nalogoDeviceId ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, nalogoDeviceId: e.target.value || null } : s))}
+                          placeholder="stealthnet-backend-device"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Timeout (сек)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={120}
+                          value={settings.nalogoTimeout ?? 30}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, nalogoTimeout: Number(e.target.value) || 30 } : s))}
+                        />
                       </div>
                     </div>
                     <div className="pt-2 border-t">

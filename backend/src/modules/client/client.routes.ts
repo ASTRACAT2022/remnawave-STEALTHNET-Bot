@@ -16,6 +16,7 @@ import { requireClientAuth } from "./client.middleware.js";
 import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, remnaEnsureUserInInternalSquads, extractRemnaActiveInternalSquadUuids, extractRemnaUuid } from "../remna/remna.client.js";
 import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, getPlategaTransactionState, isPlategaConfigured } from "../platega/platega.service.js";
+import { createYookassaPayment, isYookassaConfigured } from "../yookassa/yookassa.service.js";
 import { activateTariffByPaymentId, activateTariffForClient } from "../tariff/tariff-activation.service.js";
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { getAuthUrl, exchangeCodeForToken, requestPayment, processPayment } from "../yoomoney/yoomoney.service.js";
@@ -900,13 +901,29 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
 
 /** Определить отображаемое имя тарифа: Триал, название с сайта или «Тариф не выбран» */
 async function resolveTariffDisplayName(remnaUserData: unknown): Promise<string> {
-  const squadUuid = extractRemnaActiveInternalSquadUuids(remnaUserData)[0];
-  if (!squadUuid) return "Тариф не выбран";
+  const squadUuids = extractRemnaActiveInternalSquadUuids(remnaUserData);
+  if (!squadUuids.length) return "Тариф не выбран";
+
   const config = await getSystemConfig();
-  if (config.trialSquadUuid?.trim() === squadUuid) return "Триал";
+  const trialSquadUuid = config.trialSquadUuid?.trim() || "";
   const tariffs = await prisma.tariff.findMany({ select: { name: true, internalSquadUuids: true } });
-  const match = tariffs.find((t) => t.internalSquadUuids.includes(squadUuid));
-  return match?.name ?? "Тариф не выбран";
+
+  // Если активны и trial, и платный squad — приоритет у платного.
+  const nonTrialSquads = trialSquadUuid
+    ? squadUuids.filter((uuid) => uuid !== trialSquadUuid)
+    : squadUuids;
+  for (const uuid of nonTrialSquads) {
+    const match = tariffs.find((t) => t.internalSquadUuids.includes(uuid));
+    if (match?.name?.trim()) return match.name;
+  }
+
+  if (trialSquadUuid && squadUuids.includes(trialSquadUuid)) return "Триал";
+
+  for (const uuid of squadUuids) {
+    const match = tariffs.find((t) => t.internalSquadUuids.includes(uuid));
+    if (match?.name?.trim()) return match.name;
+  }
+  return "Тариф не выбран";
 }
 
 clientRouter.get("/subscription", async (req, res) => {
@@ -930,6 +947,166 @@ const createPlategaPaymentSchema = z.object({
   tariffId: z.string().min(1).optional(),
   promoCode: z.string().max(50).optional(),
 });
+
+const createYookassaPaymentSchema = z.object({
+  amount: z.coerce.number().positive().max(1e7),
+  currency: z.string().min(1).max(10),
+  paymentMethod: z.enum(["bank_card", "sbp"]).default("bank_card"),
+  description: z.string().max(500).optional(),
+  tariffId: z.string().min(1).optional(),
+  promoCode: z.string().max(50).optional(),
+});
+
+clientRouter.post("/payments/yookassa", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const parsed = createYookassaPaymentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+
+  const {
+    amount: originalAmount,
+    currency: inputCurrency,
+    paymentMethod,
+    description,
+    tariffId,
+    promoCode: promoCodeStr,
+  } = parsed.data;
+
+  if (inputCurrency.toUpperCase() !== "RUB") {
+    return res.status(400).json({ message: "YooKassa принимает только RUB" });
+  }
+
+  let tariffIdToStore: string | null = null;
+  let finalAmount = originalAmount;
+  let tariffName = "";
+  if (tariffId) {
+    const tariff = await prisma.tariff.findUnique({ where: { id: tariffId } });
+    if (!tariff) return res.status(400).json({ message: "Тариф не найден" });
+    tariffIdToStore = tariffId;
+    tariffName = tariff.name;
+  }
+
+  let promoCodeRecord: { id: string } | null = null;
+  if (promoCodeStr?.trim()) {
+    const result = await validatePromoCode(promoCodeStr.trim(), clientId);
+    if (!result.ok) return res.status(result.status).json({ message: result.error });
+    const promo = result.promo;
+    if (promo.type !== "DISCOUNT") return res.status(400).json({ message: "Этот промокод не даёт скидку на оплату" });
+
+    if (promo.discountPercent && promo.discountPercent > 0) {
+      finalAmount = Math.max(0, finalAmount - finalAmount * promo.discountPercent / 100);
+    }
+    if (promo.discountFixed && promo.discountFixed > 0) {
+      finalAmount = Math.max(0, finalAmount - promo.discountFixed);
+    }
+    finalAmount = Math.round(finalAmount * 100) / 100;
+    if (finalAmount <= 0) return res.status(400).json({ message: "Итоговая сумма не может быть 0" });
+    promoCodeRecord = promo;
+  }
+
+  const config = await getSystemConfig();
+  if (paymentMethod === "sbp" && !config.yookassaSbpEnabled) {
+    return res.status(400).json({ message: "Оплата через СБП YooKassa отключена" });
+  }
+
+  const appUrl = resolveBaseAppUrl(req, config.publicAppUrl);
+  const paymentKind = tariffIdToStore ? "tariff" : "topup";
+  const orderId = randomUUID();
+  const fallbackReturnUrl = appUrl
+    ? `${appUrl}/cabinet/dashboard?payment=success&payment_kind=${paymentKind}&provider=yookassa&oid=${orderId}`
+    : "";
+
+  const yookassaConfig = {
+    shopId: config.yookassaShopId || "",
+    secretKey: config.yookassaSecretKey || "",
+    returnUrl: config.yookassaReturnUrl?.trim() || fallbackReturnUrl,
+    defaultReceiptEmail: config.yookassaDefaultReceiptEmail || null,
+    vatCode: config.yookassaVatCode,
+    paymentMode: config.yookassaPaymentMode,
+    paymentSubject: config.yookassaPaymentSubject,
+  };
+  if (!isYookassaConfigured(yookassaConfig)) {
+    return res.status(503).json({ message: "YooKassa не настроена" });
+  }
+
+  const payment = await prisma.payment.create({
+    data: {
+      clientId,
+      orderId,
+      amount: finalAmount,
+      currency: "RUB",
+      status: "PENDING",
+      provider: "yookassa",
+      tariffId: tariffIdToStore,
+      metadata: JSON.stringify({
+        paymentMethod,
+        originalAmount,
+        ...(promoCodeRecord ? { promoCodeId: promoCodeRecord.id } : {}),
+      }),
+    },
+  });
+
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { email: true },
+  });
+
+  const yookassaResult = await createYookassaPayment(yookassaConfig, {
+    amount: finalAmount,
+    currency: "RUB",
+    description: description?.trim() || (tariffIdToStore ? `Тариф: ${tariffName || orderId}` : `Пополнение баланса #${orderId}`),
+    paymentMethodType: paymentMethod,
+    metadata: {
+      paymentId: payment.id,
+      orderId,
+      clientId,
+      paymentKind,
+      ...(tariffIdToStore ? { tariffId: tariffIdToStore } : {}),
+    },
+    receiptEmail: client?.email ?? null,
+  });
+
+  if ("error" in yookassaResult) {
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: "FAILED" },
+    });
+    return res.status(toHttpErrorStatus(yookassaResult.status)).json({ message: yookassaResult.error });
+  }
+
+  const metadata = {
+    paymentMethod,
+    originalAmount,
+    ...(promoCodeRecord ? { promoCodeId: promoCodeRecord.id } : {}),
+    yookassaPaymentId: yookassaResult.id,
+    yookassaStatus: yookassaResult.status,
+    yookassaIdempotenceKey: yookassaResult.idempotenceKey,
+    yookassaPaymentMethodType: yookassaResult.paymentMethodType,
+  };
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      externalId: yookassaResult.id,
+      metadata: JSON.stringify(metadata),
+    },
+  });
+
+  if (promoCodeRecord) {
+    await prisma.promoCodeUsage.create({ data: { promoCodeId: promoCodeRecord.id, clientId } });
+  }
+
+  return res.status(201).json({
+    paymentUrl: yookassaResult.confirmationUrl,
+    orderId,
+    paymentId: payment.id,
+    providerPaymentId: yookassaResult.id,
+    discountApplied: promoCodeRecord ? true : false,
+    finalAmount,
+    method: paymentMethod,
+  });
+});
+
 clientRouter.post("/payments/platega", async (req, res) => {
   const clientId = (req as unknown as { clientId: string }).clientId;
   const parsed = createPlategaPaymentSchema.safeParse(req.body);

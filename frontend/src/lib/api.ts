@@ -430,6 +430,13 @@ export const api = {
     return request("/client/payments/platega", { method: "POST", body: JSON.stringify(data), token });
   },
 
+  async clientCreateYookassaPayment(
+    token: string,
+    data: { amount: number; currency: string; paymentMethod?: "bank_card" | "sbp"; description?: string; tariffId?: string; promoCode?: string }
+  ): Promise<{ paymentUrl: string | null; orderId: string; paymentId: string; providerPaymentId: string; discountApplied?: boolean; finalAmount?: number; method: "bank_card" | "sbp" }> {
+    return request("/client/payments/yookassa", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async getPublicTariffs(): Promise<{ items: PublicTariffCategory[] }> {
     return request("/public/tariffs");
   },
@@ -600,6 +607,20 @@ export type UpdateSettingsPayload = {
   yoomoneyClientSecret?: string | null;
   yoomoneyReceiverWallet?: string | null;
   yoomoneyNotificationSecret?: string | null;
+  yookassaShopId?: string | null;
+  yookassaSecretKey?: string | null;
+  yookassaReturnUrl?: string | null;
+  yookassaDefaultReceiptEmail?: string | null;
+  yookassaVatCode?: number;
+  yookassaSbpEnabled?: boolean;
+  yookassaPaymentMode?: string | null;
+  yookassaPaymentSubject?: string | null;
+  yookassaTrustedProxyNetworks?: string | null;
+  nalogoEnabled?: boolean;
+  nalogoInn?: string | null;
+  nalogoPassword?: string | null;
+  nalogoDeviceId?: string | null;
+  nalogoTimeout?: number;
   botButtons?: string | null;
   botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | string | null;
   botBackLabel?: string | null;
@@ -684,6 +705,20 @@ export interface AdminSettings {
   yoomoneyClientSecret?: string | null;
   yoomoneyReceiverWallet?: string | null;
   yoomoneyNotificationSecret?: string | null;
+  yookassaShopId?: string | null;
+  yookassaSecretKey?: string | null;
+  yookassaReturnUrl?: string | null;
+  yookassaDefaultReceiptEmail?: string | null;
+  yookassaVatCode?: number;
+  yookassaSbpEnabled?: boolean;
+  yookassaPaymentMode?: string | null;
+  yookassaPaymentSubject?: string | null;
+  yookassaTrustedProxyNetworks?: string | null;
+  nalogoEnabled?: boolean;
+  nalogoInn?: string | null;
+  nalogoPassword?: string | null;
+  nalogoDeviceId?: string | null;
+  nalogoTimeout?: number;
   /** Кнопки главного меню бота: порядок, видимость, текст, стиль, ключ эмодзи (TRIAL, PACKAGE, …) */
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; emojiKey?: string }[];
   /** Эмодзи по ключам: Unicode и/или TG custom emoji ID (премиум). Ключи: TRIAL, PACKAGE, CARD, LINK, SERVERS, … */
@@ -1011,6 +1046,8 @@ export interface PublicConfig {
   telegramBotUsername?: string | null;
   plategaMethods?: { id: number; label: string }[];
   yoomoneyEnabled?: boolean;
+  yookassaEnabled?: boolean;
+  yookassaSbpEnabled?: boolean;
   trialEnabled?: boolean;
   trialDays?: number;
   themeAccent?: string;

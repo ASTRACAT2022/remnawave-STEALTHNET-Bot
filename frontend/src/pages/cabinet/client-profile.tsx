@@ -48,6 +48,8 @@ export function ClientProfilePage() {
   const [copiedRef, setCopiedRef] = useState<"site" | "bot" | null>(null);
   const [plategaMethods, setPlategaMethods] = useState<{ id: number; label: string }[]>([]);
   const [yoomoneyEnabled, setYoomoneyEnabled] = useState(false);
+  const [yookassaEnabled, setYookassaEnabled] = useState(false);
+  const [yookassaSbpEnabled, setYookassaSbpEnabled] = useState(false);
   const [activeLanguages, setActiveLanguages] = useState<string[]>([]);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([]);
   const [publicAppUrl, setPublicAppUrl] = useState<string | null>(null);
@@ -77,6 +79,8 @@ export function ClientProfilePage() {
     api.getPublicConfig().then((c) => {
       setPlategaMethods(c.plategaMethods ?? []);
       setYoomoneyEnabled(Boolean(c.yoomoneyEnabled));
+      setYookassaEnabled(Boolean(c.yookassaEnabled));
+      setYookassaSbpEnabled(Boolean(c.yookassaSbpEnabled));
       setActiveLanguages(c.activeLanguages?.length ? c.activeLanguages : ["ru", "en", "ua"]);
       setActiveCurrencies(c.activeCurrencies?.length ? c.activeCurrencies : ["usd", "rub", "uah"]);
       setPublicAppUrl(c.publicAppUrl ?? null);
@@ -133,6 +137,35 @@ export function ClientProfilePage() {
         window.location.href = res.paymentUrl;
       } else {
         navigate("/cabinet/yoomoney-pay", { state: { form: res.form } });
+      }
+    } catch (e) {
+      setTopUpError(e instanceof Error ? e.message : "Ошибка создания платежа");
+    } finally {
+      setTopUpLoading(false);
+    }
+  }
+
+  async function startTopUpYookassa(paymentMethod: "bank_card" | "sbp") {
+    if (!token || !client) return;
+    const amount = Number(topUpAmount?.replace(",", "."));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError("Укажите сумму (в рублях)");
+      return;
+    }
+    setTopUpError(null);
+    setTopUpLoading(true);
+    try {
+      const res = await api.clientCreateYookassaPayment(token, {
+        amount,
+        currency: "RUB",
+        paymentMethod,
+        description: "Пополнение баланса",
+      });
+      setTopUpModalOpen(false);
+      if (res.paymentUrl) {
+        window.location.href = res.paymentUrl;
+      } else {
+        setTopUpError("YooKassa не вернула ссылку на оплату");
       }
     } catch (e) {
       setTopUpError(e instanceof Error ? e.message : "Ошибка создания платежа");
@@ -305,7 +338,7 @@ export function ClientProfilePage() {
         </Card>
       </motion.div>
 
-      {(plategaMethods.length > 0 || yoomoneyEnabled) && (
+      {(plategaMethods.length > 0 || yoomoneyEnabled || yookassaEnabled) && (
         <Card id="topup" className={cardClass}>
           <CardHeader className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base min-w-0 truncate">
@@ -380,6 +413,28 @@ export function ClientProfilePage() {
               >
                 {topUpLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
                 ЮMoney — оплата картой
+              </Button>
+            )}
+            {yookassaEnabled && (
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={topUpLoading}
+                onClick={() => startTopUpYookassa("bank_card")}
+              >
+                {topUpLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
+                YooKassa — банковская карта
+              </Button>
+            )}
+            {yookassaEnabled && yookassaSbpEnabled && (
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={topUpLoading}
+                onClick={() => startTopUpYookassa("sbp")}
+              >
+                {topUpLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
+                YooKassa — СБП
               </Button>
             )}
             {plategaMethods.map((m) => (

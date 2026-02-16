@@ -277,6 +277,8 @@ export function tariffPaymentMethodButtons(
   emojiIds?: InnerEmojiIds,
   balanceLabel?: string | null,
   yoomoneyEnabled?: boolean,
+  yookassaEnabled?: boolean,
+  yookassaSbpEnabled?: boolean,
   tariffCurrency?: string,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
@@ -286,6 +288,13 @@ export function tariffPaymentMethodButtons(
   // Кнопка оплаты балансом (первая)
   if (balanceLabel) {
     rows.push([btn(balanceLabel, `pay_tariff_balance:${tariffId}`, "success", cardId)]);
+  }
+  // YooKassa — только для рублёвых тарифов
+  if (yookassaEnabled && (!tariffCurrency || tariffCurrency.toUpperCase() === "RUB")) {
+    rows.push([btn("💳 YooKassa — банковская карта", `pay_tariff_yookassa:${tariffId}:card`, "primary", cardId)]);
+    if (yookassaSbpEnabled) {
+      rows.push([btn("🏦 YooKassa — СБП", `pay_tariff_yookassa:${tariffId}:sbp`, "primary", cardId)]);
+    }
   }
   // ЮMoney — только для рублёвых тарифов
   if (yoomoneyEnabled && (!tariffCurrency || tariffCurrency.toUpperCase() === "RUB")) {
@@ -306,11 +315,19 @@ export function topupPaymentMethodButtons(
   backStyle?: string,
   emojiIds?: InnerEmojiIds,
   yoomoneyEnabled?: boolean,
+  yookassaEnabled?: boolean,
+  yookassaSbpEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = resolveStyle(toStyle(backStyle), "danger");
   const cardId = emojiIds?.card;
   const rows: InlineButton[][] = [];
+  if (yookassaEnabled) {
+    rows.push([btn("💳 YooKassa — банковская карта", `topup_yookassa:${amount}:card`, "primary", cardId)]);
+    if (yookassaSbpEnabled) {
+      rows.push([btn("🏦 YooKassa — СБП", `topup_yookassa:${amount}:sbp`, "primary", cardId)]);
+    }
+  }
   if (yoomoneyEnabled) {
     rows.push([btn("💳 ЮMoney — оплата картой", `topup_yoomoney:${amount}`, "primary", cardId)]);
   }

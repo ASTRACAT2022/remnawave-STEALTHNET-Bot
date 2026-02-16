@@ -43,6 +43,8 @@ export async function getPublicConfig(): Promise<{
   trialDays?: number;
   plategaMethods?: { id: number; label: string }[];
   yoomoneyEnabled?: boolean;
+  yookassaEnabled?: boolean;
+  yookassaSbpEnabled?: boolean;
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; iconCustomEmojiId?: string }[] | null;
   /** Тексты меню с уже подставленными эмодзи ({{BALANCE}} → unicode из bot_emojis) */
   resolvedBotMenuTexts?: Record<string, string>;
@@ -132,6 +134,14 @@ export async function createYoomoneyPayment(
   body: { amount: number; paymentType: "AC"; tariffId?: string }
 ): Promise<{ paymentId: string; paymentUrl: string }> {
   return fetchJson("/api/client/yoomoney/create-form-payment", { method: "POST", body, token });
+}
+
+/** Создать платёж YooKassa. Для тарифа передать tariffId. */
+export async function createYookassaPayment(
+  token: string,
+  body: { amount: number; currency: "RUB"; paymentMethod?: "bank_card" | "sbp"; description?: string; tariffId?: string }
+): Promise<{ paymentId: string; paymentUrl: string | null; providerPaymentId: string }> {
+  return fetchJson("/api/client/payments/yookassa", { method: "POST", body, token });
 }
 
 /** Обновить профиль (язык, валюта) */

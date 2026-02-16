@@ -48,6 +48,7 @@ const PROVIDERS = [
   { value: "", label: "Все" },
   { value: "balance", label: "Баланс" },
   { value: "platega", label: "Platega" },
+  { value: "yookassa", label: "YooKassa" },
   { value: "yoomoney_form", label: "ЮMoney" },
 ];
 
@@ -243,9 +244,15 @@ export function SalesReportPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          r.provider === "balance" ? "bg-blue-500/15 text-blue-700 dark:text-blue-400" : r.provider === "yoomoney" || r.provider === "yoomoney_form" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" : "bg-green-500/15 text-green-700 dark:text-green-400"
+                          r.provider === "balance"
+                            ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
+                            : r.provider === "yoomoney" || r.provider === "yoomoney_form"
+                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                              : r.provider === "yookassa"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                : "bg-green-500/15 text-green-700 dark:text-green-400"
                         }`}>
-                          {r.provider === "balance" ? "Баланс" : r.provider === "platega" ? "Platega" : r.provider === "yoomoney" || r.provider === "yoomoney_form" ? "ЮMoney" : r.provider}
+                          {r.provider === "balance" ? "Баланс" : r.provider === "platega" ? "Platega" : r.provider === "yookassa" ? "YooKassa" : r.provider === "yoomoney" || r.provider === "yoomoney_form" ? "ЮMoney" : r.provider}
                         </span>
                       </td>
                       <td className="px-4 py-3">

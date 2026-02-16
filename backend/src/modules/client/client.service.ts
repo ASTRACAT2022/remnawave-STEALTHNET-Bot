@@ -47,6 +47,10 @@ const SYSTEM_CONFIG_KEYS = [
   "telegram_bot_token", "telegram_bot_username",
   "platega_merchant_id", "platega_secret", "platega_methods",
   "yoomoney_client_id", "yoomoney_client_secret", "yoomoney_receiver_wallet", "yoomoney_notification_secret",
+  "yookassa_shop_id", "yookassa_secret_key", "yookassa_return_url", "yookassa_default_receipt_email",
+  "yookassa_vat_code", "yookassa_sbp_enabled", "yookassa_payment_mode", "yookassa_payment_subject",
+  "yookassa_trusted_proxy_networks",
+  "nalogo_enabled", "nalogo_inn", "nalogo_password", "nalogo_device_id", "nalogo_timeout",
   "bot_buttons", "bot_back_label", "bot_menu_texts", "bot_inner_button_styles",
   "bot_emojis", // JSON: { "TRIAL": { "unicode": "🎁", "tgEmojiId": "..." }, "PACKAGE": ... } — эмодзи кнопок/текста, TG ID для премиум
   "category_emojis", // JSON: { "ordinary": "📦", "premium": "⭐" } — эмодзи категорий по коду
@@ -258,6 +262,20 @@ export async function getSystemConfig() {
     yoomoneyClientSecret: map.yoomoney_client_secret || null,
     yoomoneyReceiverWallet: map.yoomoney_receiver_wallet || null,
     yoomoneyNotificationSecret: map.yoomoney_notification_secret || null,
+    yookassaShopId: map.yookassa_shop_id || null,
+    yookassaSecretKey: map.yookassa_secret_key || null,
+    yookassaReturnUrl: map.yookassa_return_url || null,
+    yookassaDefaultReceiptEmail: map.yookassa_default_receipt_email || null,
+    yookassaVatCode: Number.isFinite(parseInt(map.yookassa_vat_code || "1", 10)) ? parseInt(map.yookassa_vat_code || "1", 10) : 1,
+    yookassaSbpEnabled: map.yookassa_sbp_enabled === "true" || map.yookassa_sbp_enabled === "1",
+    yookassaPaymentMode: (map.yookassa_payment_mode || "full_payment").trim() || "full_payment",
+    yookassaPaymentSubject: (map.yookassa_payment_subject || "service").trim() || "service",
+    yookassaTrustedProxyNetworks: map.yookassa_trusted_proxy_networks || null,
+    nalogoEnabled: map.nalogo_enabled === "true" || map.nalogo_enabled === "1",
+    nalogoInn: map.nalogo_inn || null,
+    nalogoPassword: map.nalogo_password || null,
+    nalogoDeviceId: map.nalogo_device_id || null,
+    nalogoTimeout: Number.isFinite(parseFloat(map.nalogo_timeout || "30")) ? parseFloat(map.nalogo_timeout || "30") : 30,
     botButtons: parseBotButtons(map.bot_buttons),
     botEmojis: parseBotEmojis(map.bot_emojis),
     botBackLabel: (map.bot_back_label || "◀️ В меню").trim() || "◀️ В меню",
@@ -326,6 +344,7 @@ export type PublicBotButton = { id: string; visible: boolean; label: string; ord
 /** Публичный конфиг для сайта/бота (без паролей и секретов). botButtons с подставленными эмодзи. */
 export async function getPublicConfig() {
   const full = await getSystemConfig();
+  const yookassaEnabled = Boolean(full.yookassaShopId?.trim() && full.yookassaSecretKey?.trim());
   const trialDays = full.trialDays ?? 0;
   const trialEnabled = trialDays > 0 && Boolean(full.trialSquadUuid?.trim());
   const botEmojis = full.botEmojis ?? {};
@@ -376,6 +395,8 @@ export async function getPublicConfig() {
     telegramBotUsername: full.telegramBotUsername,
     plategaMethods: full.plategaMethods.filter((m) => m.enabled).map((m) => ({ id: m.id, label: m.label })),
     yoomoneyEnabled: Boolean(full.yoomoneyReceiverWallet?.trim()),
+    yookassaEnabled,
+    yookassaSbpEnabled: yookassaEnabled && Boolean(full.yookassaSbpEnabled),
     trialEnabled,
     trialDays,
     botButtons: resolvedButtons,
