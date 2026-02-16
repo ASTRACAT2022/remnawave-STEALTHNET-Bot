@@ -396,7 +396,8 @@ export async function getPublicConfig() {
     plategaMethods: full.plategaMethods.filter((m) => m.enabled).map((m) => ({ id: m.id, label: m.label })),
     yoomoneyEnabled: Boolean(full.yoomoneyReceiverWallet?.trim()),
     yookassaEnabled,
-    yookassaSbpEnabled: yookassaEnabled && Boolean(full.yookassaSbpEnabled),
+    // В проекте используется только YooKassa СБП.
+    yookassaSbpEnabled: yookassaEnabled,
     trialEnabled,
     trialDays,
     botButtons: resolvedButtons,

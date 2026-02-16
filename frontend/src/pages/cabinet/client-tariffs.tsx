@@ -35,7 +35,6 @@ export function ClientTariffsPage() {
   const [plategaMethods, setPlategaMethods] = useState<{ id: number; label: string }[]>([]);
   const [yoomoneyEnabled, setYoomoneyEnabled] = useState(false);
   const [yookassaEnabled, setYookassaEnabled] = useState(false);
-  const [yookassaSbpEnabled, setYookassaSbpEnabled] = useState(false);
   const [trialConfig, setTrialConfig] = useState<{ trialEnabled: boolean; trialDays: number }>({ trialEnabled: false, trialDays: 0 });
   const [payModal, setPayModal] = useState<{ tariff: TariffForPay } | null>(null);
   const [payLoading, setPayLoading] = useState(false);
@@ -63,7 +62,6 @@ export function ClientTariffsPage() {
       setPlategaMethods(c.plategaMethods ?? []);
       setYoomoneyEnabled(Boolean(c.yoomoneyEnabled));
       setYookassaEnabled(Boolean(c.yookassaEnabled));
-      setYookassaSbpEnabled(Boolean(c.yookassaSbpEnabled));
       setTrialConfig({ trialEnabled: !!c.trialEnabled, trialDays: c.trialDays ?? 0 });
     }).catch(() => {});
   }, []);
@@ -195,7 +193,7 @@ export function ClientTariffsPage() {
     }
   }
 
-  async function startYookassaPayment(tariff: TariffForPay, paymentMethod: "bank_card" | "sbp") {
+  async function startYookassaPayment(tariff: TariffForPay, paymentMethod: "sbp") {
     if (!token) return;
     if (tariff.currency.toUpperCase() !== "RUB") {
       setPayError("YooKassa принимает только рубли. Выберите тариф в RUB.");
@@ -413,18 +411,6 @@ export function ClientTariffsPage() {
             )}
 
             {payModal && yookassaEnabled && payModal.tariff.currency.toUpperCase() === "RUB" && (
-              <Button
-                variant="outline"
-                className="justify-start gap-2"
-                disabled={payLoading}
-                onClick={() => startYookassaPayment(payModal.tariff, "bank_card")}
-              >
-                {payLoading ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <CreditCard className="h-4 w-4 shrink-0" />}
-                YooKassa — банковская карта
-              </Button>
-            )}
-
-            {payModal && yookassaEnabled && yookassaSbpEnabled && payModal.tariff.currency.toUpperCase() === "RUB" && (
               <Button
                 variant="outline"
                 className="justify-start gap-2"

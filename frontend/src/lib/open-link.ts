@@ -10,12 +10,14 @@ export function openExternalLink(url: string): void {
   const tg = window.Telegram?.WebApp;
   if (tg?.openLink) {
     try {
-      tg.openLink(href, { try_instant_view: false, try_browser: true });
+      tg.openLink(href, { try_instant_view: false, try_browser: "external" });
       return;
     } catch {
       // fallback ниже
     }
   }
-
-  window.location.href = href;
+  const w = window.open(href, "_blank", "noopener,noreferrer");
+  if (!w) {
+    window.location.href = href;
+  }
 }

@@ -50,7 +50,6 @@ export function ClientProfilePage() {
   const [plategaMethods, setPlategaMethods] = useState<{ id: number; label: string }[]>([]);
   const [yoomoneyEnabled, setYoomoneyEnabled] = useState(false);
   const [yookassaEnabled, setYookassaEnabled] = useState(false);
-  const [yookassaSbpEnabled, setYookassaSbpEnabled] = useState(false);
   const [activeLanguages, setActiveLanguages] = useState<string[]>([]);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([]);
   const [publicAppUrl, setPublicAppUrl] = useState<string | null>(null);
@@ -81,7 +80,6 @@ export function ClientProfilePage() {
       setPlategaMethods(c.plategaMethods ?? []);
       setYoomoneyEnabled(Boolean(c.yoomoneyEnabled));
       setYookassaEnabled(Boolean(c.yookassaEnabled));
-      setYookassaSbpEnabled(Boolean(c.yookassaSbpEnabled));
       setActiveLanguages(c.activeLanguages?.length ? c.activeLanguages : ["ru", "en", "ua"]);
       setActiveCurrencies(c.activeCurrencies?.length ? c.activeCurrencies : ["usd", "rub", "uah"]);
       setPublicAppUrl(c.publicAppUrl ?? null);
@@ -146,7 +144,7 @@ export function ClientProfilePage() {
     }
   }
 
-  async function startTopUpYookassa(paymentMethod: "bank_card" | "sbp") {
+  async function startTopUpYookassa(paymentMethod: "sbp") {
     if (!token || !client) return;
     const amount = Number(topUpAmount?.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -417,17 +415,6 @@ export function ClientProfilePage() {
               </Button>
             )}
             {yookassaEnabled && (
-              <Button
-                variant="outline"
-                className="justify-start"
-                disabled={topUpLoading}
-                onClick={() => startTopUpYookassa("bank_card")}
-              >
-                {topUpLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" /> : null}
-                YooKassa — банковская карта
-              </Button>
-            )}
-            {yookassaEnabled && yookassaSbpEnabled && (
               <Button
                 variant="outline"
                 className="justify-start"

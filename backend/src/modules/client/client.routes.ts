@@ -951,7 +951,7 @@ const createPlategaPaymentSchema = z.object({
 const createYookassaPaymentSchema = z.object({
   amount: z.coerce.number().positive().max(1e7),
   currency: z.string().min(1).max(10),
-  paymentMethod: z.enum(["bank_card", "sbp"]).default("bank_card"),
+  paymentMethod: z.enum(["bank_card", "sbp"]).default("sbp"),
   description: z.string().max(500).optional(),
   tariffId: z.string().min(1).optional(),
   promoCode: z.string().max(50).optional(),
@@ -967,11 +967,12 @@ clientRouter.post("/payments/yookassa", async (req, res) => {
   const {
     amount: originalAmount,
     currency: inputCurrency,
-    paymentMethod,
+    paymentMethod: requestedPaymentMethod,
     description,
     tariffId,
     promoCode: promoCodeStr,
   } = parsed.data;
+  const paymentMethod: "sbp" = "sbp";
 
   if (inputCurrency.toUpperCase() !== "RUB") {
     return res.status(400).json({ message: "YooKassa принимает только RUB" });
@@ -1006,8 +1007,8 @@ clientRouter.post("/payments/yookassa", async (req, res) => {
   }
 
   const config = await getSystemConfig();
-  if (paymentMethod === "sbp" && !config.yookassaSbpEnabled) {
-    return res.status(400).json({ message: "Оплата через СБП YooKassa отключена" });
+  if (requestedPaymentMethod !== "sbp") {
+    console.warn("[YooKassa] bank_card requested, forcing sbp", { clientId });
   }
 
   const appUrl = resolveBaseAppUrl(req, config.publicAppUrl);

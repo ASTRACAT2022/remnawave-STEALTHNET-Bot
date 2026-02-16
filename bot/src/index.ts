@@ -736,8 +736,8 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (data.startsWith("pay_tariff_yookassa:")) {
       const rest = data.slice("pay_tariff_yookassa:".length);
-      const [tariffId, methodRaw] = rest.split(":");
-      const method = methodRaw === "sbp" ? "sbp" : "bank_card";
+      const [tariffId] = rest.split(":");
+      const method: "sbp" = "sbp";
       const { items } = await api.getPublicTariffs();
       const tariff = items?.flatMap((c: TariffCategory) => c.tariffs).find((t: TariffItem) => t.id === tariffId);
       if (!tariff) {
@@ -870,9 +870,9 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (data.startsWith("topup_yookassa:")) {
       const rest = data.slice("topup_yookassa:".length);
-      const [amountStr, methodRaw] = rest.split(":");
+      const [amountStr] = rest.split(":");
       const amount = Number(amountStr);
-      const method = methodRaw === "sbp" ? "sbp" : "bank_card";
+      const method: "sbp" = "sbp";
       if (!Number.isFinite(amount) || amount <= 0) {
         await editMessageContent(ctx, "Неверная сумма.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
@@ -962,13 +962,13 @@ bot.on("callback_query:data", async (ctx) => {
         );
         return;
       }
-      // Если только YooKassa — сразу создаём платёж по карте
+      // Если только YooKassa — сразу создаём платёж через СБП
       if (methods.length === 0 && ykEnabled) {
         try {
           const payment = await api.createYookassaPayment(token, {
             amount,
             currency: "RUB",
-            paymentMethod: "bank_card",
+            paymentMethod: "sbp",
             description: "Пополнение баланса",
           });
           if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
@@ -1152,9 +1152,9 @@ bot.on("message:text", async (ctx) => {
       });
       return;
     }
-    // Если только YooKassa (нет platega methods) — сразу создаём оплату картой
+    // Если только YooKassa (нет platega methods) — сразу создаём оплату через СБП
     if (methods.length === 0 && ykEnabled) {
-      const payment = await api.createYookassaPayment(token, { amount: num, currency: "RUB", paymentMethod: "bank_card", description: "Пополнение баланса" });
+      const payment = await api.createYookassaPayment(token, { amount: num, currency: "RUB", paymentMethod: "sbp", description: "Пополнение баланса" });
       if (!payment.paymentUrl) throw new Error("YooKassa не вернула ссылку на оплату");
       const topupMsgYk = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nНажмите кнопку ниже для оплаты через YooKassa:`, config?.botEmojis);
       await ctx.reply(topupMsgYk.text, {
