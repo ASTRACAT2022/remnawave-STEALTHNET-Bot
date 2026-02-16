@@ -17,7 +17,7 @@ import {
   isYookassaConfigured,
   type YookassaConfig,
 } from "../yookassa/yookassa.service.js";
-import { createNalogoReceipt } from "../nalogo/nalogo.service.js";
+import { processNalogoReceiptForPayment } from "../nalogo/nalogo-receipts.service.js";
 
 export const yookassaWebhooksRouter = Router();
 
@@ -324,124 +324,18 @@ async function ensureTariffActivation(paymentId: string): Promise<void> {
 }
 
 async function ensureNalogoReceipt(paymentId: string): Promise<void> {
-  const config = await getSystemConfig();
-  if (!config.nalogoEnabled) return;
-  if (!config.nalogoInn?.trim() || !config.nalogoPassword?.trim()) return;
-
-  const claim = await prisma.$transaction(async (tx) => {
-    const row = await tx.payment.findUnique({
-      where: { id: paymentId },
-      select: { id: true, provider: true, status: true, metadata: true },
+  const result = await processNalogoReceiptForPayment(paymentId);
+  if (result.status === "created") {
+    console.log("[YooKassa Webhook] NaloGO receipt created", {
+      paymentId,
+      receiptUuid: result.receiptUuid,
     });
-    if (!row || row.status !== "PAID" || row.provider !== "yookassa") {
-      return { claimed: false as const };
-    }
-
-    const meta = parseMeta(row.metadata);
-    if (typeof meta.nalogoReceiptUuid === "string" && meta.nalogoReceiptUuid.trim()) {
-      return { claimed: false as const };
-    }
-
-    const inProgressAt =
-      typeof meta.nalogoReceiptInProgressAt === "string"
-        ? new Date(meta.nalogoReceiptInProgressAt)
-        : null;
-    const freshInProgress =
-      inProgressAt &&
-      Number.isFinite(inProgressAt.getTime()) &&
-      Date.now() - inProgressAt.getTime() < 10 * 60 * 1000;
-    if (freshInProgress) {
-      return { claimed: false as const };
-    }
-
-    const next: Meta = {
-      ...meta,
-      nalogoReceiptInProgressAt: new Date().toISOString(),
-      nalogoReceiptAttempts: Number(meta.nalogoReceiptAttempts ?? 0) + 1,
-    };
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: { metadata: JSON.stringify(next) },
+  } else if (result.status === "failed") {
+    console.error("[YooKassa Webhook] NaloGO receipt failed", {
+      paymentId,
+      error: result.error,
     });
-    return { claimed: true as const };
-  });
-
-  if (!claim.claimed) return;
-
-  const payment = await prisma.payment.findUnique({
-    where: { id: paymentId },
-    select: {
-      id: true,
-      orderId: true,
-      amount: true,
-      tariffId: true,
-      metadata: true,
-      client: {
-        select: { telegramId: true, email: true },
-      },
-      tariff: {
-        select: { name: true },
-      },
-    },
-  });
-  if (!payment) return;
-
-  const description = payment.tariffId
-    ? `Оплата тарифа ${payment.tariff?.name ?? ""} #${payment.orderId}`.trim()
-    : `Пополнение баланса STEALTHNET #${payment.orderId}`;
-  const clientLabel = payment.client.telegramId
-    ? `TG:${payment.client.telegramId}`
-    : payment.client.email
-      ? payment.client.email
-      : "client";
-  const receiptName = `${description} (${clientLabel})`.slice(0, 128);
-
-  const result = await createNalogoReceipt(
-    {
-      enabled: Boolean(config.nalogoEnabled),
-      inn: config.nalogoInn,
-      password: config.nalogoPassword,
-      deviceId: config.nalogoDeviceId,
-      timeoutSeconds: config.nalogoTimeout,
-    },
-    {
-      name: receiptName,
-      amountRub: payment.amount,
-      quantity: 1,
-    },
-  );
-
-  await prisma.$transaction(async (tx) => {
-    const row = await tx.payment.findUnique({
-      where: { id: paymentId },
-      select: { metadata: true },
-    });
-    const meta = parseMeta(row?.metadata ?? null);
-    const next: Meta = { ...meta };
-    delete next.nalogoReceiptInProgressAt;
-    next.nalogoReceiptLastAttemptAt = new Date().toISOString();
-
-    if ("receiptUuid" in result) {
-      next.nalogoReceiptUuid = result.receiptUuid;
-      next.nalogoReceiptLastError = null;
-      console.log("[YooKassa Webhook] NaloGO receipt created", {
-        paymentId,
-        receiptUuid: result.receiptUuid,
-      });
-    } else {
-      next.nalogoReceiptLastError = result.error;
-      console.error("[YooKassa Webhook] NaloGO receipt failed", {
-        paymentId,
-        error: result.error,
-        status: result.status,
-      });
-    }
-
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: { metadata: JSON.stringify(next) },
-    });
-  });
+  }
 }
 
 async function findPayment(
