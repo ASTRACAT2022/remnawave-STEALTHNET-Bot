@@ -132,6 +132,34 @@ export function ClientDashboardPage() {
     const paymentKind = searchParams.get("payment_kind");
     const oid = searchParams.get("oid");
     const provider = searchParams.get("provider");
+    let cancelled = false;
+
+    const checkLocalPaymentByOrderId = async (orderId: string, successMessage: "success_topup" | "success_tariff" | "success") => {
+      if (!token) return;
+      let attempts = 0;
+      while (!cancelled && attempts < 6) {
+        attempts += 1;
+        try {
+          const payRes = await api.clientPayments(token);
+          const item = (payRes.items ?? []).find((p) => p.orderId === orderId);
+          if (item?.status === "PAID") {
+            setPaymentMessage(successMessage);
+            return;
+          }
+          if (item?.status === "FAILED") {
+            setPaymentMessage("failed");
+            return;
+          }
+          setPaymentMessage("processing");
+        } catch {
+          setPaymentMessage("processing");
+        }
+        if (attempts < 6) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+    };
+
     if (payment === "success") {
       const optimisticMessage =
         paymentKind === "topup" ? "success_topup"
@@ -157,6 +185,12 @@ export function ClientDashboardPage() {
           .finally(() => {
             refreshProfile().catch(() => {});
           });
+      } else if (token && oid && provider === "yookassa") {
+        checkLocalPaymentByOrderId(oid, optimisticMessage)
+          .finally(() => {
+            setRefreshKey((k) => k + 1);
+            refreshProfile().catch(() => {});
+          });
       } else if (token) {
         setRefreshKey((k) => k + 1);
         refreshProfile().catch(() => {});
@@ -180,6 +214,12 @@ export function ClientDashboardPage() {
           .finally(() => {
             refreshProfile().catch(() => {});
           });
+      } else if (token && oid && provider === "yookassa") {
+        checkLocalPaymentByOrderId(oid, paymentKind === "topup" ? "success_topup" : paymentKind === "tariff" ? "success_tariff" : "success")
+          .finally(() => {
+            setRefreshKey((k) => k + 1);
+            refreshProfile().catch(() => {});
+          });
       } else if (token) {
         setRefreshKey((k) => k + 1);
         refreshProfile().catch(() => {});
@@ -188,6 +228,7 @@ export function ClientDashboardPage() {
       setSearchParams({}, { replace: true });
       if (token) refreshProfile().catch(() => {});
     }
+    return () => { cancelled = true; };
   }, [searchParams, setSearchParams, token, refreshProfile]);
 
   useEffect(() => {

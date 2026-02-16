@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Package, Calendar, Wifi, Smartphone, CreditCard, Loader2, Gift, Tag, Check, Wallet } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api } from "@/lib/api";
+import { openExternalLink } from "@/lib/open-link";
 import type { PublicTariffCategory } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -215,7 +216,7 @@ export function ClientTariffsPage() {
       setPayModal(null);
       setPromoInput("");
       setPromoResult(null);
-      if (res.paymentUrl) window.location.href = res.paymentUrl;
+      if (res.paymentUrl) openExternalLink(res.paymentUrl);
       else setPayError("YooKassa не вернула ссылку на оплату");
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Ошибка создания платежа");

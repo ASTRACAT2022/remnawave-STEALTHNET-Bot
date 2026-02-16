@@ -5,6 +5,7 @@ import { User, Wallet, Copy, Check, CreditCard, Loader2 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetMiniapp } from "@/pages/cabinet/cabinet-layout";
 import { api } from "@/lib/api";
+import { openExternalLink } from "@/lib/open-link";
 import type { ClientPayment } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,7 +164,7 @@ export function ClientProfilePage() {
       });
       setTopUpModalOpen(false);
       if (res.paymentUrl) {
-        window.location.href = res.paymentUrl;
+        openExternalLink(res.paymentUrl);
       } else {
         setTopUpError("YooKassa не вернула ссылку на оплату");
       }

@@ -12,7 +12,10 @@ declare global {
         platform?: string;
         showPopup?: (params: { title?: string; message?: string }) => void;
         /** Открыть ссылку во внешнем браузере (кастомные URL-схемы не поддерживаются, только https) */
-        openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+        openLink?: (
+          url: string,
+          options?: { try_instant_view?: boolean; try_browser?: boolean | string }
+        ) => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
         themeParams?: Record<string, string>;
