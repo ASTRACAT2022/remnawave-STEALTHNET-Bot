@@ -19,6 +19,7 @@ export function BroadcastPage() {
   const [error, setError] = useState<string | null>(null);
 
   if (!token) return null;
+  const authToken: string = token;
 
   const trimmedText = text.trim();
 
@@ -31,7 +32,7 @@ export function BroadcastPage() {
     setResult(null);
     setPreviewing(true);
     try {
-      const res = await api.previewAdminBroadcast(token, trimmedText);
+      const res = await api.previewAdminBroadcast(authToken, trimmedText);
       setPreviewTotal(res.totalRecipients ?? 0);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Ошибка проверки аудитории");
@@ -51,7 +52,7 @@ export function BroadcastPage() {
     try {
       let recipients = previewTotal;
       if (recipients == null) {
-        const dry = await api.previewAdminBroadcast(token, trimmedText);
+        const dry = await api.previewAdminBroadcast(authToken, trimmedText);
         recipients = dry.totalRecipients ?? 0;
         setPreviewTotal(recipients);
       }
@@ -62,7 +63,7 @@ export function BroadcastPage() {
       const ok = window.confirm(`Отправить сообщение ${recipients} пользователям?`);
       if (!ok) return;
 
-      const res = await api.sendAdminBroadcast(token, trimmedText);
+      const res = await api.sendAdminBroadcast(authToken, trimmedText);
       setResult(res);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Ошибка отправки рассылки");
