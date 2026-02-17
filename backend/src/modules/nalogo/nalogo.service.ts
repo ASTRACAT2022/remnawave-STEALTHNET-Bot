@@ -217,6 +217,16 @@ function parseSocksProxyConfig(
   };
 }
 
+function resolveNalogoProxyRaw(config: NalogoConfig): string {
+  const fromSettings = (config.proxyUrl ?? "").trim();
+  if (fromSettings) return fromSettings;
+  return (process.env.NALOGO_PROXY_URL ?? "").trim();
+}
+
+function proxyModeLabel(proxy: SocksProxyConfig | null): string {
+  return proxy ? `proxy=${proxy.label}` : "proxy=off";
+}
+
 function writeSocket(socket: Socket, data: Buffer): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (err: Error) => {
@@ -715,10 +725,10 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const proxyParsed = parseSocksProxyConfig(config.proxyUrl);
+  const proxyParsed = parseSocksProxyConfig(resolveNalogoProxyRaw(config));
   if (proxyParsed.error) {
     return {
-      error: proxyParsed.error,
+      error: `${proxyParsed.error} (${proxyModeLabel(null)})`,
       status: 400,
       retryable: false,
     };
@@ -791,13 +801,14 @@ export async function createNalogoReceipt(
     if (isTimeoutError(e)) {
       const details = e instanceof Error && e.message ? `: ${e.message}` : "";
       return {
-        error: `NaloGO timeout${details}`.slice(0, 500),
+        error: `NaloGO timeout (${proxyModeLabel(proxy)})${details}`.slice(0, 500),
         status: 504,
         retryable: true,
       };
     }
+    const eMessage = e instanceof Error ? e.message : "NaloGO unknown error";
     return {
-      error: e instanceof Error ? e.message : "NaloGO unknown error",
+      error: `${eMessage} (${proxyModeLabel(proxy)})`.slice(0, 500),
       status: 502,
       retryable: true,
     };
