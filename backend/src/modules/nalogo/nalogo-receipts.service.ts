@@ -124,7 +124,7 @@ export async function processNalogoReceiptForPayment(
       inProgressAt &&
       Number.isFinite(inProgressAt.getTime()) &&
       Date.now() - inProgressAt.getTime() < IN_PROGRESS_TTL_MS;
-    if (freshInProgress) {
+    if (freshInProgress && !force) {
       return { status: "in_progress" as const };
     }
 
