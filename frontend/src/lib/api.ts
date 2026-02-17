@@ -226,6 +226,14 @@ export const api = {
     return request("/admin/settings", { token });
   },
 
+  async previewAdminBroadcast(token: string, text: string): Promise<AdminBroadcastResult> {
+    return request("/admin/broadcast", { method: "POST", body: JSON.stringify({ text, dryRun: true }), token });
+  },
+
+  async sendAdminBroadcast(token: string, text: string): Promise<AdminBroadcastResult> {
+    return request("/admin/broadcast", { method: "POST", body: JSON.stringify({ text, dryRun: false }), token });
+  },
+
   /** Базовый конфиг страницы подписки для визуального редактора (subpage-*.json) */
   async getDefaultSubscriptionPageConfig(token: string): Promise<SubscriptionPageConfig | null> {
     return request("/admin/default-subscription-page-config", { token });
@@ -572,6 +580,14 @@ export interface SyncCreateRemnaForMissingResult {
   created: number;
   linked: number;
   errors: string[];
+}
+
+export interface AdminBroadcastResult {
+  dryRun: boolean;
+  totalRecipients: number;
+  sent?: number;
+  failed?: number;
+  errorSamples?: string[];
 }
 
 export type UpdateSettingsPayload = {

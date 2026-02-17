@@ -18,6 +18,7 @@ import { TariffsPage } from "@/pages/tariffs";
 import { SettingsPage } from "@/pages/settings";
 import { PromoPage } from "@/pages/promo";
 import { PromoCodesPage } from "@/pages/promo-codes";
+import { BroadcastPage } from "@/pages/broadcast";
 import { AnalyticsPage } from "@/pages/analytics";
 import { SalesReportPage } from "@/pages/sales-report";
 import { BackupPage } from "@/pages/backup";
@@ -130,6 +131,7 @@ function AppRoutes() {
         <Route path="settings" element={<ForceChangePassword><SettingsPage /></ForceChangePassword>} />
         <Route path="promo" element={<ForceChangePassword><PromoPage /></ForceChangePassword>} />
         <Route path="promo-codes" element={<ForceChangePassword><PromoCodesPage /></ForceChangePassword>} />
+        <Route path="broadcast" element={<ForceChangePassword><BroadcastPage /></ForceChangePassword>} />
         <Route path="analytics" element={<ForceChangePassword><AnalyticsPage /></ForceChangePassword>} />
         <Route path="sales-report" element={<ForceChangePassword><SalesReportPage /></ForceChangePassword>} />
         <Route path="backup" element={<ForceChangePassword><BackupPage /></ForceChangePassword>} />

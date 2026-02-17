@@ -50,6 +50,48 @@ function asyncRoute(
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type TelegramSendResult = { ok: true } | { ok: false; error: string };
+
+async function sendTelegramMessageWithRetry(botToken: string, chatId: string, text: string): Promise<TelegramSendResult> {
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; description?: string; error_code?: number; parameters?: { retry_after?: number } }
+        | null;
+      if (response.ok && payload?.ok === true) {
+        return { ok: true };
+      }
+
+      const retryAfterSec = payload?.parameters?.retry_after;
+      const isRateLimit = payload?.error_code === 429 || response.status === 429;
+      if (isRateLimit && retryAfterSec && attempt < 2) {
+        await sleep((retryAfterSec + 1) * 1000);
+        continue;
+      }
+
+      return { ok: false, error: payload?.description || `HTTP ${response.status}` };
+    } catch (e: unknown) {
+      if (attempt >= 2) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+      await sleep(700);
+    }
+  }
+
+  return { ok: false, error: "unknown error" };
+}
+
 registerBackupRoutes(adminRouter, asyncRoute);
 
 adminRouter.get("/me", asyncRoute(async (req, res) => {
@@ -65,6 +107,68 @@ adminRouter.get("/me", asyncRoute(async (req, res) => {
 adminRouter.get("/remna/status", (_req, res) => {
   res.json({ configured: isRemnaConfigured() });
 });
+
+const adminBroadcastSchema = z.object({
+  text: z.string().min(1).max(3500),
+  dryRun: z.boolean().optional(),
+});
+
+adminRouter.post("/broadcast", asyncRoute(async (req, res) => {
+  const body = adminBroadcastSchema.safeParse(req.body);
+  if (!body.success) {
+    return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+  }
+
+  const config = await getSystemConfig();
+  const botToken = config.telegramBotToken?.trim();
+  if (!botToken) {
+    return res.status(400).json({ message: "Не задан Telegram Bot Token в настройках панели" });
+  }
+
+  const rawIds = await prisma.client.findMany({
+    where: { isBlocked: false, telegramId: { not: null } },
+    select: { telegramId: true },
+  });
+  const chatIds = Array.from(
+    new Set(
+      rawIds
+        .map((item) => item.telegramId?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+  if (body.data.dryRun) {
+    return res.json({
+      dryRun: true,
+      totalRecipients: chatIds.length,
+    });
+  }
+
+  let sent = 0;
+  let failed = 0;
+  const errorSamples: string[] = [];
+
+  for (const chatId of chatIds) {
+    const result = await sendTelegramMessageWithRetry(botToken, chatId, body.data.text);
+    if (result.ok) {
+      sent += 1;
+    } else {
+      failed += 1;
+      if (errorSamples.length < 15) {
+        errorSamples.push(`${chatId}: ${result.error}`);
+      }
+    }
+    await sleep(40);
+  }
+
+  return res.json({
+    dryRun: false,
+    totalRecipients: chatIds.length,
+    sent,
+    failed,
+    errorSamples,
+  });
+}));
 
 adminRouter.get("/remna/users", async (req, res) => {
   const page = req.query.page ? Number(req.query.page) : undefined;

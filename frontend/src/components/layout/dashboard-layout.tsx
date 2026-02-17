@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, LayoutDashboard, Users, CreditCard, Settings, LogOut, KeyRound,
   Megaphone, Tag, BarChart3, FileText, ExternalLink, Sun, Moon, Monitor,
-  Palette, Menu, X, Database,
+  Palette, Menu, X, Database, Send,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { useTheme, ACCENT_PALETTES, type ThemeMode, type ThemeAccent } from "@/contexts/theme";
@@ -21,6 +21,7 @@ const nav = [
   { to: "/admin/tariffs", label: "Тарифы", icon: CreditCard },
   { to: "/admin/promo", label: "Промо-ссылки", icon: Megaphone },
   { to: "/admin/promo-codes", label: "Промокоды", icon: Tag },
+  { to: "/admin/broadcast", label: "Рассылка", icon: Send },
   { to: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { to: "/admin/sales-report", label: "Отчёты продаж", icon: FileText },
   { to: "/admin/backup", label: "Бэкапы", icon: Database },
