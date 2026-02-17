@@ -6,7 +6,14 @@
  * Основано на рабочей логике из remnawave-bedolaga-telegram-bot-main.
  */
 
+import { randomBytes } from "crypto";
+
 const NALOGO_BASE = "https://lknpd.nalog.ru/api";
+const NALOGO_DEVICE_SOURCE_TYPE = "WEB";
+const NALOGO_APP_VERSION = "1.0.0";
+const NALOGO_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_2) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/88.0.4324.192 Safari/537.36";
 
 export type NalogoConfig = {
   enabled: boolean;
@@ -25,6 +32,7 @@ function defaultHeaders(): Record<string, string> {
     "Content-Type": "application/json",
     Accept: "application/json, text/plain, */*",
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "User-Agent": NALOGO_USER_AGENT,
     Referrer: "https://lknpd.nalog.ru/auth/login",
   };
 }
@@ -68,6 +76,62 @@ function isNalogoConfigured(config: NalogoConfig): boolean {
   return Boolean(config.enabled && config.inn?.trim() && config.password?.trim());
 }
 
+function generateDeviceId(): string {
+  return randomBytes(11).toString("hex").slice(0, 21).toLowerCase();
+}
+
+function normalizeDeviceId(raw: string | null | undefined): string {
+  const cleaned = (raw ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 21);
+  return cleaned.length >= 8 ? cleaned : generateDeviceId();
+}
+
+function buildDeviceInfo(deviceId: string): Record<string, unknown> {
+  return {
+    sourceType: NALOGO_DEVICE_SOURCE_TYPE,
+    sourceDeviceId: deviceId,
+    appVersion: NALOGO_APP_VERSION,
+    metaDetails: {
+      userAgent: NALOGO_USER_AGENT,
+    },
+  };
+}
+
+async function nalogoPostWithRetry(
+  path: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+  headers?: Record<string, string>,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${NALOGO_BASE}${path}`, {
+          method: "POST",
+          headers: { ...defaultHeaders(), ...(headers ?? {}) },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return res;
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (e: unknown) {
+      lastError = e;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        continue;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("NaloGO network error");
+}
+
 export async function createNalogoReceipt(
   config: NalogoConfig,
   params: {
@@ -95,22 +159,20 @@ export async function createNalogoReceipt(
   const timeoutMs = resolveTimeoutMs(config);
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
-  const deviceId = (config.deviceId ?? "").trim() || "stealthnet-backend-device";
+  const deviceId = normalizeDeviceId(config.deviceId);
+  const deviceInfo = buildDeviceInfo(deviceId);
 
   try {
     // 1) Авторизация
-    const authController = new AbortController();
-    const authTimeout = setTimeout(() => authController.abort(), timeoutMs);
-    const authRes = await fetch(`${NALOGO_BASE}/v1/auth/lkfl`, {
-      method: "POST",
-      headers: defaultHeaders(),
-      body: JSON.stringify({
+    const authRes = await nalogoPostWithRetry(
+      "/v1/auth/lkfl",
+      {
         username: inn,
         password,
-        deviceInfo: { sourceDeviceId: deviceId },
-      }),
-      signal: authController.signal,
-    }).finally(() => clearTimeout(authTimeout));
+        deviceInfo,
+      },
+      timeoutMs,
+    );
 
     const authData = await parseJsonSafe(authRes);
     if (!authRes.ok) {
@@ -156,17 +218,12 @@ export async function createNalogoReceipt(
       ignoreMaxTotalIncomeRestriction: false,
     };
 
-    const incomeController = new AbortController();
-    const incomeTimeout = setTimeout(() => incomeController.abort(), timeoutMs);
-    const incomeRes = await fetch(`${NALOGO_BASE}/v1/income`, {
-      method: "POST",
-      headers: {
-        ...defaultHeaders(),
-        Authorization: `Bearer ${tokenRaw}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: incomeController.signal,
-    }).finally(() => clearTimeout(incomeTimeout));
+    const incomeRes = await nalogoPostWithRetry(
+      "/v1/income",
+      requestBody,
+      timeoutMs,
+      { Authorization: `Bearer ${tokenRaw}` },
+    );
 
     const incomeData = await parseJsonSafe(incomeRes);
     if (!incomeRes.ok) {

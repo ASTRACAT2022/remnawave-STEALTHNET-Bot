@@ -39,7 +39,6 @@ import { activateTariffByPaymentId } from "../tariff/tariff-activation.service.j
 import { registerBackupRoutes } from "../backup/backup.routes.js";
 import {
   processNalogoReceiptForPayment,
-  processPendingNalogoReceipts,
 } from "../nalogo/nalogo-receipts.service.js";
 
 export const adminRouter = Router();
@@ -105,6 +104,14 @@ function resolveNalogoReceiptStatus(meta: NalogoReceiptMeta): "sent" | "in_progr
   if (hasError) return "failed";
   if (attempts > 0) return "in_progress";
   return "pending";
+}
+
+function isNalogoReady(config: Awaited<ReturnType<typeof getSystemConfig>>): boolean {
+  return Boolean(
+    config.nalogoEnabled &&
+      config.nalogoInn?.trim() &&
+      config.nalogoPassword?.trim(),
+  );
 }
 
 type TelegramSendResult = { ok: true } | { ok: false; error: string };
@@ -2176,7 +2183,7 @@ adminRouter.post("/nalogo-receipts/:paymentId/retry", asyncRoute(async (req, res
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid payment id" });
   }
-  const out = await processNalogoReceiptForPayment(parsed.data.paymentId);
+  const out = await processNalogoReceiptForPayment(parsed.data.paymentId, undefined, { force: true });
   return res.json(out);
 }));
 
@@ -2189,6 +2196,48 @@ adminRouter.post("/nalogo-receipts/retry-pending", asyncRoute(async (req, res) =
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
   }
-  const out = await processPendingNalogoReceipts({ limit: parsed.data.limit });
-  return res.json(out);
+  const config = await getSystemConfig();
+  if (!isNalogoReady(config)) {
+    return res.json({
+      configured: false,
+      scanned: 0,
+      created: 0,
+      failed: 0,
+      skipped: 0,
+    });
+  }
+
+  const limit = parsed.data.limit ?? 200;
+  const rows = await prisma.payment.findMany({
+    where: {
+      provider: "yookassa",
+      status: "PAID",
+      OR: [
+        { metadata: null },
+        { metadata: "" },
+        { metadata: { not: { contains: "\"nalogoReceiptUuid\"" } } },
+      ],
+    },
+    select: { id: true },
+    orderBy: [{ paidAt: "asc" }, { createdAt: "asc" }],
+    take: limit,
+  });
+
+  let created = 0;
+  let failed = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const out = await processNalogoReceiptForPayment(row.id, undefined, { force: true });
+    if (out.status === "created") created += 1;
+    else if (out.status === "failed") failed += 1;
+    else skipped += 1;
+  }
+
+  return res.json({
+    configured: true,
+    scanned: rows.length,
+    created,
+    failed,
+    skipped,
+  });
 }));

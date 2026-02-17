@@ -87,8 +87,10 @@ type LockedPaymentRow = {
 export async function processNalogoReceiptForPayment(
   paymentId: string,
   preparedConfig?: SystemConfig,
+  options?: { force?: boolean },
 ): Promise<NalogoReceiptProcessResult> {
   const config = preparedConfig ?? await getSystemConfig();
+  const force = options?.force === true;
   if (!isConfigReady(config)) {
     return { status: "not_configured", paymentId };
   }
@@ -126,16 +128,18 @@ export async function processNalogoReceiptForPayment(
       return { status: "in_progress" as const };
     }
 
-    const nextRetryAt =
-      typeof meta.nalogoReceiptNextRetryAt === "string"
-        ? new Date(meta.nalogoReceiptNextRetryAt)
-        : null;
-    const waitRetry =
-      nextRetryAt &&
-      Number.isFinite(nextRetryAt.getTime()) &&
-      nextRetryAt.getTime() > Date.now();
-    if (waitRetry) {
-      return { status: "retry_wait" as const };
+    if (!force) {
+      const nextRetryAt =
+        typeof meta.nalogoReceiptNextRetryAt === "string"
+          ? new Date(meta.nalogoReceiptNextRetryAt)
+          : null;
+      const waitRetry =
+        nextRetryAt &&
+        Number.isFinite(nextRetryAt.getTime()) &&
+        nextRetryAt.getTime() > Date.now();
+      if (waitRetry) {
+        return { status: "retry_wait" as const };
+      }
     }
 
     const next: ReceiptMeta = {
