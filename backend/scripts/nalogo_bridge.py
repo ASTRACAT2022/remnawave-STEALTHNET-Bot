@@ -77,6 +77,32 @@ def find_uuid_deep(value: Any) -> str | None:
     return None
 
 
+def classify_error(message: str) -> tuple[int, bool]:
+    msg = message.lower()
+    if (
+        "невер" in msg
+        or "wrong password" in msg
+        or "invalid password" in msg
+        or "invalid credentials" in msg
+        or "unauthorized" in msg
+        or "auth failed" in msg
+        or "401" in msg
+    ):
+        return 401, False
+    if "429" in msg or "too many" in msg or "rate limit" in msg:
+        return 429, True
+    if (
+        "timeout" in msg
+        or "timed out" in msg
+        or "connect" in msg
+        or "connection" in msg
+        or "network" in msg
+        or "socket" in msg
+    ):
+        return 504, True
+    return 502, True
+
+
 def main() -> None:
     try:
         from nalogapi import NalogAPI
@@ -121,12 +147,14 @@ def main() -> None:
         NalogAPI.configure(inn, password)
         result = NalogAPI.addIncome(op_time, amount_value, name)
     except Exception as exc:
+        msg = str(exc)
+        status, retryable = classify_error(msg)
         emit(
             {
                 "ok": False,
-                "error": f"nalogapi request failed: {exc}",
-                "status": 502,
-                "retryable": True,
+                "error": f"nalogapi request failed: {msg}",
+                "status": status,
+                "retryable": retryable,
             },
             1,
         )

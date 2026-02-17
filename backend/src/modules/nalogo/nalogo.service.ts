@@ -92,12 +92,30 @@ function isFalseLike(raw: string | undefined): boolean {
   return v === "0" || v === "false" || v === "no" || v === "off";
 }
 
+function isTrueLike(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 function normalizeHttpStatus(value: unknown, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   const status = Math.floor(n);
   if (status < 100 || status > 599) return fallback;
   return status;
+}
+
+function mergeBridgeAndNativeError(
+  bridgeError: Extract<NalogoCreateReceiptResult, { error: string }> | null,
+  nativeError: Extract<NalogoCreateReceiptResult, { error: string }>,
+): Extract<NalogoCreateReceiptResult, { error: string }> {
+  if (!bridgeError) return nativeError;
+  return {
+    status: nativeError.status,
+    retryable: bridgeError.retryable || nativeError.retryable,
+    error: `python-bridge: ${bridgeError.error}; native: ${nativeError.error}`.slice(0, 500),
+  };
 }
 
 async function createNalogoReceiptViaPythonBridge(
@@ -919,13 +937,21 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
+  const bridgeOnly = isTrueLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY);
+  let bridgeFailure: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
   const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
     config,
     params,
     timeoutMs,
   );
   if (pythonBridgeResult) {
-    return pythonBridgeResult;
+    if ("receiptUuid" in pythonBridgeResult) {
+      return pythonBridgeResult;
+    }
+    if (bridgeOnly) {
+      return pythonBridgeResult;
+    }
+    bridgeFailure = pythonBridgeResult;
   }
 
   const inn = String(config.inn).trim();
@@ -937,7 +963,7 @@ export async function createNalogoReceipt(
     // 1) Авторизация
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
     if ("error" in authResult) {
-      return authResult;
+      return mergeBridgeAndNativeError(bridgeFailure, authResult);
     }
 
     // 2) Создание чека
@@ -976,11 +1002,11 @@ export async function createNalogoReceipt(
 
     const incomeData = await parseJsonSafe(incomeRes);
     if (!incomeRes.ok) {
-      return {
+      return mergeBridgeAndNativeError(bridgeFailure, {
         error: `NaloGO income failed: ${extractErrorMessage(incomeData, `HTTP ${incomeRes.status}`)}`,
         status: incomeRes.status,
         retryable: isRetryableStatus(incomeRes.status),
-      };
+      });
     }
 
     const receiptUuidRaw =
@@ -988,28 +1014,28 @@ export async function createNalogoReceipt(
     const receiptUuid =
       typeof receiptUuidRaw === "string" ? receiptUuidRaw.trim() : "";
     if (!receiptUuid) {
-      return {
+      return mergeBridgeAndNativeError(bridgeFailure, {
         error: "NaloGO не вернул UUID чека",
         status: 502,
         retryable: true,
-      };
+      });
     }
 
     return { receiptUuid };
   } catch (e) {
     if (isTimeoutError(e)) {
       const details = e instanceof Error && e.message ? `: ${e.message}` : "";
-      return {
+      return mergeBridgeAndNativeError(bridgeFailure, {
         error: `NaloGO timeout (${proxyModeLabel(proxy)})${details}`.slice(0, 500),
         status: 504,
         retryable: true,
-      };
+      });
     }
     const eMessage = e instanceof Error ? e.message : "NaloGO unknown error";
-    return {
+    return mergeBridgeAndNativeError(bridgeFailure, {
       error: `${eMessage} (${proxyModeLabel(proxy)})`.slice(0, 500),
       status: 502,
       retryable: true,
-    };
+    });
   }
 }
