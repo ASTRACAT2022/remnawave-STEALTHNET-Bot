@@ -341,6 +341,10 @@ docker compose logs -f api
 docker compose logs -f bot
 docker compose logs -f nginx
 
+# Health-check API и бота
+curl -fsS http://127.0.0.1:5000/api/health | jq
+docker compose exec bot wget -q -O - http://127.0.0.1:3001/health
+
 # Перезапуск API и бота
 docker compose restart api bot
 
@@ -392,6 +396,12 @@ docker compose restart api bot
 | `REMNA_API_URL` | да | URL панели Remnawave |
 | `REMNA_ADMIN_TOKEN` | да | API-токен Remnawave |
 | `BOT_TOKEN` | нет | Токен Telegram-бота |
+| `BOT_HEALTH_PORT` | нет | Порт health-check бота (по умолчанию `3001`) |
+| `BOT_WATCHDOG_ENABLED` | нет | Включить авто-проверку и авто-перезапуск бота (`true/false`) |
+| `BOT_WATCHDOG_INTERVAL_MS` | нет | Интервал проверки API/Telegram (мс, по умолчанию `30000`) |
+| `BOT_WATCHDOG_TIMEOUT_MS` | нет | Таймаут одной проверки (мс, по умолчанию `8000`) |
+| `BOT_WATCHDOG_MAX_API_FAILURES` | нет | Сколько подряд падений API до перезапуска бота (по умолчанию `5`) |
+| `BOT_WATCHDOG_MAX_TELEGRAM_FAILURES` | нет | Сколько подряд падений Telegram до перезапуска бота (по умолчанию `5`) |
 | `USE_BUILTIN_NGINX` | нет | `true` для встроенного nginx |
 | `CERTBOT_EMAIL` | нет | Email для Let's Encrypt |
 

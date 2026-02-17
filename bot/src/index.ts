@@ -5,6 +5,7 @@
  */
 
 import "dotenv/config";
+import { createServer } from "node:http";
 import { Bot, InputFile } from "grammy";
 import * as api from "./api.js";
 import {
@@ -35,6 +36,197 @@ if (!BOT_TOKEN) {
 const bot = new Bot(BOT_TOKEN);
 
 let BOT_USERNAME = "";
+const API_BASE_URL = (process.env.API_URL || "").replace(/\/$/, "");
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  return fallback;
+}
+
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const BOT_HEALTH_PORT = parsePositiveIntEnv("BOT_HEALTH_PORT", 3001);
+const BOT_WATCHDOG_ENABLED = parseBooleanEnv("BOT_WATCHDOG_ENABLED", true);
+const BOT_WATCHDOG_INTERVAL_MS = parsePositiveIntEnv("BOT_WATCHDOG_INTERVAL_MS", 30_000);
+const BOT_WATCHDOG_TIMEOUT_MS = parsePositiveIntEnv("BOT_WATCHDOG_TIMEOUT_MS", 8_000);
+const BOT_WATCHDOG_MAX_API_FAILURES = parsePositiveIntEnv("BOT_WATCHDOG_MAX_API_FAILURES", 5);
+const BOT_WATCHDOG_MAX_TELEGRAM_FAILURES = parsePositiveIntEnv("BOT_WATCHDOG_MAX_TELEGRAM_FAILURES", 5);
+
+type WatchdogState = {
+  startedAt: number;
+  lastUpdateAt: number | null;
+  lastApiOkAt: number | null;
+  lastTelegramOkAt: number | null;
+  consecutiveApiFailures: number;
+  consecutiveTelegramFailures: number;
+  restartScheduled: boolean;
+};
+
+const watchdogState: WatchdogState = {
+  startedAt: Date.now(),
+  lastUpdateAt: null,
+  lastApiOkAt: null,
+  lastTelegramOkAt: null,
+  consecutiveApiFailures: 0,
+  consecutiveTelegramFailures: 0,
+  restartScheduled: false,
+};
+
+let watchdogTimer: NodeJS.Timeout | null = null;
+
+function formatIso(ts: number | null): string | null {
+  return ts ? new Date(ts).toISOString() : null;
+}
+
+function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function scheduleRestart(reason: string): void {
+  if (watchdogState.restartScheduled) return;
+  watchdogState.restartScheduled = true;
+  console.error(`[watchdog] ${reason}. Exiting to trigger auto-restart.`);
+  stopWatchdog();
+  setTimeout(() => process.exit(1), 500).unref();
+}
+
+async function probeApiHealth(): Promise<void> {
+  if (!API_BASE_URL) throw new Error("API_URL is empty");
+  const { signal, cleanup } = withTimeoutSignal(BOT_WATCHDOG_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/health`, { method: "GET", signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } finally {
+    cleanup();
+  }
+}
+
+async function probeTelegramHealth(): Promise<void> {
+  const me = await withTimeout(bot.api.getMe(), BOT_WATCHDOG_TIMEOUT_MS, "Telegram getMe");
+  if (!me.username) throw new Error("Telegram getMe returned empty username");
+}
+
+async function runWatchdogIteration(): Promise<void> {
+  if (watchdogState.restartScheduled) return;
+
+  try {
+    await probeApiHealth();
+    watchdogState.lastApiOkAt = Date.now();
+    watchdogState.consecutiveApiFailures = 0;
+  } catch (e: unknown) {
+    watchdogState.consecutiveApiFailures += 1;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[watchdog] API probe failed (${watchdogState.consecutiveApiFailures}/${BOT_WATCHDOG_MAX_API_FAILURES}): ${msg}`);
+    if (watchdogState.consecutiveApiFailures >= BOT_WATCHDOG_MAX_API_FAILURES) {
+      scheduleRestart("API is unavailable for too long");
+      return;
+    }
+  }
+
+  try {
+    await probeTelegramHealth();
+    watchdogState.lastTelegramOkAt = Date.now();
+    watchdogState.consecutiveTelegramFailures = 0;
+  } catch (e: unknown) {
+    watchdogState.consecutiveTelegramFailures += 1;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[watchdog] Telegram probe failed (${watchdogState.consecutiveTelegramFailures}/${BOT_WATCHDOG_MAX_TELEGRAM_FAILURES}): ${msg}`);
+    if (watchdogState.consecutiveTelegramFailures >= BOT_WATCHDOG_MAX_TELEGRAM_FAILURES) {
+      scheduleRestart("Telegram API is unavailable for too long");
+    }
+  }
+}
+
+function startWatchdog(): void {
+  if (!BOT_WATCHDOG_ENABLED) {
+    console.log("[watchdog] disabled by BOT_WATCHDOG_ENABLED=false");
+    return;
+  }
+  if (!API_BASE_URL) {
+    console.warn("[watchdog] API_URL is empty, watchdog disabled");
+    return;
+  }
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    void runWatchdogIteration();
+  }, BOT_WATCHDOG_INTERVAL_MS);
+  watchdogTimer.unref();
+  void runWatchdogIteration();
+  console.log(`[watchdog] started, interval=${BOT_WATCHDOG_INTERVAL_MS}ms, timeout=${BOT_WATCHDOG_TIMEOUT_MS}ms`);
+}
+
+function stopWatchdog(): void {
+  if (!watchdogTimer) return;
+  clearInterval(watchdogTimer);
+  watchdogTimer = null;
+}
+
+function startHealthServer(): void {
+  const server = createServer((req, res) => {
+    const url = req.url || "/";
+    if (url !== "/health" && url !== "/healthz") {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+    const unhealthy =
+      watchdogState.restartScheduled ||
+      watchdogState.consecutiveApiFailures >= BOT_WATCHDOG_MAX_API_FAILURES ||
+      watchdogState.consecutiveTelegramFailures >= BOT_WATCHDOG_MAX_TELEGRAM_FAILURES;
+    res.statusCode = unhealthy ? 503 : 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(
+      JSON.stringify({
+        status: unhealthy ? "unhealthy" : "ok",
+        botUsername: BOT_USERNAME || null,
+        startedAt: formatIso(watchdogState.startedAt),
+        uptimeSec: Math.floor((Date.now() - watchdogState.startedAt) / 1000),
+        lastUpdateAt: formatIso(watchdogState.lastUpdateAt),
+        lastApiOkAt: formatIso(watchdogState.lastApiOkAt),
+        lastTelegramOkAt: formatIso(watchdogState.lastTelegramOkAt),
+        consecutiveApiFailures: watchdogState.consecutiveApiFailures,
+        consecutiveTelegramFailures: watchdogState.consecutiveTelegramFailures,
+        watchdogEnabled: BOT_WATCHDOG_ENABLED,
+        watchdogActive: watchdogTimer != null,
+      }),
+    );
+  });
+
+  server.listen(BOT_HEALTH_PORT, "0.0.0.0", () => {
+    console.log(`Bot health endpoint listening on port ${BOT_HEALTH_PORT}`);
+  });
+}
+
+bot.use(async (ctx, next) => {
+  watchdogState.lastUpdateAt = Date.now();
+  await next();
+});
 
 // ——— Принудительная подписка на канал ———
 
@@ -1193,9 +1385,22 @@ bot.catch((err) => {
   console.error("Bot error:", err);
 });
 
+startHealthServer();
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+  scheduleRestart("Unhandled promise rejection");
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+  scheduleRestart("Uncaught exception");
+});
+
 bot.start({
   onStart: async (info) => {
     BOT_USERNAME = info.username || "";
     console.log(`Bot @${BOT_USERNAME} started`);
+    startWatchdog();
   },
 });

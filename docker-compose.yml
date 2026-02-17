@@ -49,6 +49,12 @@ services:
       REMNA_ADMIN_TOKEN: "${REMNA_ADMIN_TOKEN:-}"
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,8 +71,21 @@ services:
     environment:
       BOT_TOKEN: "${BOT_TOKEN:-}"
       API_URL: "http://api:5000"
+      BOT_HEALTH_PORT: "${BOT_HEALTH_PORT:-3001}"
+      BOT_WATCHDOG_ENABLED: "${BOT_WATCHDOG_ENABLED:-true}"
+      BOT_WATCHDOG_INTERVAL_MS: "${BOT_WATCHDOG_INTERVAL_MS:-30000}"
+      BOT_WATCHDOG_TIMEOUT_MS: "${BOT_WATCHDOG_TIMEOUT_MS:-8000}"
+      BOT_WATCHDOG_MAX_API_FAILURES: "${BOT_WATCHDOG_MAX_API_FAILURES:-5}"
+      BOT_WATCHDOG_MAX_TELEGRAM_FAILURES: "${BOT_WATCHDOG_MAX_TELEGRAM_FAILURES:-5}"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${BOT_HEALTH_PORT:-3001}/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 35s
     networks:
       - stealthnet
 

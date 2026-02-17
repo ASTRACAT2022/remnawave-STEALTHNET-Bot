@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { env } from "./config/index.js";
+import { prisma } from "./db.js";
 import { authRouter } from "./modules/auth/index.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
 import { clientRouter, publicConfigRouter } from "./modules/client/client.routes.js";
@@ -40,8 +41,14 @@ const limiter = rateLimit({
 });
 app.use("/api/", limiter);
 
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", version: "3.0.0" });
+app.get("/api/health", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: "ok", version: "3.1.0", database: "ok" });
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e.message : String(e);
+    res.status(503).json({ status: "degraded", version: "3.1.0", database: "down", error });
+  }
 });
 
 app.use("/api/auth", authRouter);
