@@ -118,6 +118,7 @@ export function SettingsPage() {
         yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
         nalogoEnabled: Boolean((data as AdminSettings).nalogoEnabled),
         nalogoTimeout: (data as AdminSettings).nalogoTimeout ?? 30,
+        nalogoProxyUrl: (data as AdminSettings).nalogoProxyUrl ?? null,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -264,6 +265,7 @@ export function SettingsPage() {
         nalogoPassword: settings.nalogoPassword && settings.nalogoPassword !== "********" ? settings.nalogoPassword : undefined,
         nalogoDeviceId: settings.nalogoDeviceId ?? null,
         nalogoTimeout: settings.nalogoTimeout ?? 30,
+        nalogoProxyUrl: settings.nalogoProxyUrl ?? null,
         botButtons: settings.botButtons != null ? JSON.stringify(settings.botButtons) : undefined,
         botEmojis: settings.botEmojis != null ? settings.botEmojis : undefined,
         botBackLabel: settings.botBackLabel ?? null,
@@ -1454,6 +1456,17 @@ export function SettingsPage() {
                           onChange={(e) => setSettings((s) => (s ? { ...s, nalogoTimeout: Number(e.target.value) || 30 } : s))}
                         />
                       </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>SOCKS5 прокси (опционально)</Label>
+                      <Input
+                        value={settings.nalogoProxyUrl ?? ""}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, nalogoProxyUrl: e.target.value || null } : s))}
+                        placeholder="socks5h://user:pass@ru-proxy.example:1080"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Для обхода региональных блокировок NaloGO. Рекомендуется формат `socks5h://` (DNS через прокси).
+                      </p>
                     </div>
                     <div className="pt-2 border-t">
                       <Button type="submit" disabled={saving} className="min-w-[140px]">

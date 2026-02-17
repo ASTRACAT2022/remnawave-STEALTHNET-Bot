@@ -50,7 +50,7 @@ const SYSTEM_CONFIG_KEYS = [
   "yookassa_shop_id", "yookassa_secret_key", "yookassa_return_url", "yookassa_default_receipt_email",
   "yookassa_vat_code", "yookassa_sbp_enabled", "yookassa_payment_mode", "yookassa_payment_subject",
   "yookassa_trusted_proxy_networks",
-  "nalogo_enabled", "nalogo_inn", "nalogo_password", "nalogo_device_id", "nalogo_timeout",
+  "nalogo_enabled", "nalogo_inn", "nalogo_password", "nalogo_device_id", "nalogo_timeout", "nalogo_proxy_url",
   "bot_buttons", "bot_back_label", "bot_menu_texts", "bot_inner_button_styles",
   "bot_emojis", // JSON: { "TRIAL": { "unicode": "🎁", "tgEmojiId": "..." }, "PACKAGE": ... } — эмодзи кнопок/текста, TG ID для премиум
   "category_emojis", // JSON: { "ordinary": "📦", "premium": "⭐" } — эмодзи категорий по коду
@@ -276,6 +276,7 @@ export async function getSystemConfig() {
     nalogoPassword: map.nalogo_password || null,
     nalogoDeviceId: map.nalogo_device_id || null,
     nalogoTimeout: Number.isFinite(parseFloat(map.nalogo_timeout || "30")) ? parseFloat(map.nalogo_timeout || "30") : 30,
+    nalogoProxyUrl: map.nalogo_proxy_url || null,
     botButtons: parseBotButtons(map.bot_buttons),
     botEmojis: parseBotEmojis(map.bot_emojis),
     botBackLabel: (map.bot_back_label || "◀️ В меню").trim() || "◀️ В меню",

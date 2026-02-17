@@ -197,6 +197,7 @@ export async function processNalogoReceiptForPayment(
       password: config.nalogoPassword,
       deviceId: config.nalogoDeviceId,
       timeoutSeconds: config.nalogoTimeout,
+      proxyUrl: config.nalogoProxyUrl,
     },
     {
       name: receiptName,

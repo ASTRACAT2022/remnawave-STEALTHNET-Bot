@@ -9,6 +9,8 @@
 import { createHash, randomBytes } from "crypto";
 import { lookup, resolve4 } from "dns/promises";
 import { request as httpsRequest } from "https";
+import { connect as netConnect, type Socket } from "net";
+import { connect as tlsConnect, type TLSSocket } from "tls";
 
 const NALOGO_BASE = (process.env.NALOGO_BASE_URL ?? "https://lknpd.nalog.ru/api")
   .trim()
@@ -26,6 +28,7 @@ export type NalogoConfig = {
   password?: string | null;
   deviceId?: string | null;
   timeoutSeconds?: number;
+  proxyUrl?: string | null;
 };
 
 export type NalogoCreateReceiptResult =
@@ -157,6 +160,262 @@ function formatNetworkError(error: unknown, label: string): string {
   return code ? `${label}: ${message} (${code})` : `${label}: ${message}`;
 }
 
+type SocksProxyConfig = {
+  host: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  label: string;
+};
+
+function parseSocksProxyConfig(
+  raw: string | null | undefined,
+): { proxy: SocksProxyConfig | null; error?: string } {
+  const input = (raw ?? "").trim();
+  if (!input) return { proxy: null };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return { proxy: null, error: "NaloGO proxy: некорректный URL" };
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  const allowed = new Set(["socks:", "socks5:", "socks5h:"]);
+  if (!allowed.has(protocol)) {
+    return { proxy: null, error: "NaloGO proxy: поддерживаются только socks5:// или socks5h://" };
+  }
+  if (!parsed.hostname) {
+    return { proxy: null, error: "NaloGO proxy: не указан хост" };
+  }
+
+  const rawPort = parsed.port ? Number(parsed.port) : 1080;
+  if (!Number.isFinite(rawPort) || rawPort <= 0 || rawPort > 65535) {
+    return { proxy: null, error: "NaloGO proxy: некорректный порт" };
+  }
+
+  const decodeSafe = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  const username = parsed.username ? decodeSafe(parsed.username) : null;
+  const password = parsed.password ? decodeSafe(parsed.password) : null;
+  const authMask = username || password ? "***:***@" : "";
+
+  return {
+    proxy: {
+      host: parsed.hostname,
+      port: Math.floor(rawPort),
+      username,
+      password,
+      label: `${protocol}//${authMask}${parsed.hostname}:${Math.floor(rawPort)}`,
+    },
+  };
+}
+
+function writeSocket(socket: Socket, data: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: Error) => {
+      socket.off("error", onError);
+      reject(err);
+    };
+    socket.on("error", onError);
+    socket.write(data, () => {
+      socket.off("error", onError);
+      resolve();
+    });
+  });
+}
+
+async function readExact(socket: Socket, size: number, timeoutMs: number): Promise<Buffer> {
+  const state = socket as Socket & { __nalogoReadBuf?: Buffer };
+  let buf = state.__nalogoReadBuf ?? Buffer.alloc(0);
+  const deadline = Date.now() + timeoutMs;
+
+  const readChunk = (ms: number) => new Promise<Buffer>((resolve, reject) => {
+    const onData = (chunk: Buffer) => cleanup(() => resolve(chunk));
+    const onError = (err: Error) => cleanup(() => reject(err));
+    const onEnd = () => cleanup(() => reject(new Error("Socket ended before enough data")));
+    const onClose = () => cleanup(() => reject(new Error("Socket closed before enough data")));
+    const timer = setTimeout(() => cleanup(() => reject(new Error("Socket read timeout"))), Math.max(1, ms));
+
+    const cleanup = (fn: () => void) => {
+      clearTimeout(timer);
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("end", onEnd);
+      socket.off("close", onClose);
+      fn();
+    };
+
+    socket.on("data", onData);
+    socket.on("error", onError);
+    socket.on("end", onEnd);
+    socket.on("close", onClose);
+  });
+
+  while (buf.length < size) {
+    const left = deadline - Date.now();
+    if (left <= 0) throw new Error("Socket read timeout");
+    const chunk = await readChunk(left);
+    buf = Buffer.concat([buf, chunk]);
+  }
+
+  const out = buf.subarray(0, size);
+  state.__nalogoReadBuf = buf.subarray(size);
+  return out;
+}
+
+function buildSocksAddress(host: string): Buffer {
+  const hostBytes = Buffer.from(host, "utf8");
+  if (hostBytes.length === 0 || hostBytes.length > 255) {
+    throw new Error("NaloGO proxy: target host length is invalid");
+  }
+  return Buffer.concat([Buffer.from([0x03, hostBytes.length]), hostBytes]);
+}
+
+function socksReplyToError(code: number): string {
+  switch (code) {
+    case 0x01:
+      return "general SOCKS server failure";
+    case 0x02:
+      return "connection not allowed by ruleset";
+    case 0x03:
+      return "network unreachable";
+    case 0x04:
+      return "host unreachable";
+    case 0x05:
+      return "connection refused";
+    case 0x06:
+      return "TTL expired";
+    case 0x07:
+      return "command not supported";
+    case 0x08:
+      return "address type not supported";
+    default:
+      return `unknown reply code ${code}`;
+  }
+}
+
+async function createSocksTlsConnection(
+  proxy: SocksProxyConfig,
+  targetHost: string,
+  targetPort: number,
+  timeoutMs: number,
+): Promise<TLSSocket> {
+  const socket = netConnect({ host: proxy.host, port: proxy.port });
+  socket.setNoDelay(true);
+  socket.setTimeout(timeoutMs, () => {
+    socket.destroy(new Error(`SOCKS proxy timeout (${proxy.label})`));
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onConnect = () => cleanup(() => resolve());
+      const onError = (err: Error) => cleanup(() => reject(err));
+      const onClose = () => cleanup(() => reject(new Error(`SOCKS proxy closed (${proxy.label})`)));
+      const timer = setTimeout(
+        () => cleanup(() => reject(new Error(`SOCKS connect timeout (${proxy.label})`))),
+        timeoutMs,
+      );
+      const cleanup = (fn: () => void) => {
+        clearTimeout(timer);
+        socket.off("connect", onConnect);
+        socket.off("error", onError);
+        socket.off("close", onClose);
+        fn();
+      };
+      socket.once("connect", onConnect);
+      socket.once("error", onError);
+      socket.once("close", onClose);
+    });
+
+    const methods = proxy.username || proxy.password ? Buffer.from([0x00, 0x02]) : Buffer.from([0x00]);
+    await writeSocket(socket, Buffer.concat([Buffer.from([0x05, methods.length]), methods]));
+    const methodResponse = await readExact(socket, 2, timeoutMs);
+    if (methodResponse[0] !== 0x05 || methodResponse[1] === 0xff) {
+      throw new Error(`SOCKS auth method rejected (${proxy.label})`);
+    }
+
+    if (methodResponse[1] === 0x02) {
+      const username = proxy.username ?? "";
+      const password = proxy.password ?? "";
+      const userBytes = Buffer.from(username, "utf8");
+      const passBytes = Buffer.from(password, "utf8");
+      if (userBytes.length > 255 || passBytes.length > 255) {
+        throw new Error("SOCKS credentials are too long");
+      }
+      await writeSocket(
+        socket,
+        Buffer.concat([
+          Buffer.from([0x01, userBytes.length]),
+          userBytes,
+          Buffer.from([passBytes.length]),
+          passBytes,
+        ]),
+      );
+      const authResponse = await readExact(socket, 2, timeoutMs);
+      if (authResponse[0] !== 0x01 || authResponse[1] !== 0x00) {
+        throw new Error(`SOCKS auth failed (${proxy.label})`);
+      }
+    }
+
+    const hostPart = buildSocksAddress(targetHost);
+    const portPart = Buffer.from([(targetPort >> 8) & 0xff, targetPort & 0xff]);
+    await writeSocket(socket, Buffer.concat([Buffer.from([0x05, 0x01, 0x00]), hostPart, portPart]));
+
+    const responseHead = await readExact(socket, 4, timeoutMs);
+    if (responseHead[0] !== 0x05) {
+      throw new Error(`SOCKS invalid version response (${proxy.label})`);
+    }
+    if (responseHead[1] !== 0x00) {
+      throw new Error(`SOCKS connect failed: ${socksReplyToError(responseHead[1])} (${proxy.label})`);
+    }
+    if (responseHead[3] === 0x01) {
+      await readExact(socket, 4 + 2, timeoutMs);
+    } else if (responseHead[3] === 0x04) {
+      await readExact(socket, 16 + 2, timeoutMs);
+    } else if (responseHead[3] === 0x03) {
+      const domainLen = await readExact(socket, 1, timeoutMs);
+      await readExact(socket, domainLen[0] + 2, timeoutMs);
+    } else {
+      throw new Error(`SOCKS unsupported BND address type ${responseHead[3]} (${proxy.label})`);
+    }
+
+    const tlsSocket = tlsConnect({
+      socket,
+      servername: targetHost,
+      timeout: timeoutMs,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const onSecure = () => cleanup(() => resolve());
+      const onError = (err: Error) => cleanup(() => reject(err));
+      const onClose = () => cleanup(() => reject(new Error(`TLS tunnel closed (${proxy.label})`)));
+      const timer = setTimeout(() => cleanup(() => reject(new Error("TLS handshake timeout"))), timeoutMs);
+      const cleanup = (fn: () => void) => {
+        clearTimeout(timer);
+        tlsSocket.off("secureConnect", onSecure);
+        tlsSocket.off("error", onError);
+        tlsSocket.off("close", onClose);
+        fn();
+      };
+      tlsSocket.once("secureConnect", onSecure);
+      tlsSocket.once("error", onError);
+      tlsSocket.once("close", onClose);
+    });
+
+    return tlsSocket;
+  } catch (error) {
+    socket.destroy();
+    throw error;
+  }
+}
+
 async function resolveIpv4Candidates(hostname: string): Promise<string[]> {
   const unique = new Set<string>();
   try {
@@ -180,18 +439,25 @@ async function resolveIpv4Candidates(hostname: string): Promise<string[]> {
 
 async function nalogoPostViaHttpsAddress(
   target: URL,
-  address: string,
+  connectHost: string,
   bodyText: string,
   timeoutMs: number,
   headers: Record<string, string>,
+  proxy: SocksProxyConfig | null,
 ): Promise<Response> {
+  const targetPort = target.port ? Number(target.port) : 443;
+  const tlsSocket = proxy
+    ? await createSocksTlsConnection(proxy, target.hostname, targetPort, timeoutMs)
+    : null;
+
   return await new Promise<Response>((resolve, reject) => {
+    const reqHost = proxy ? target.hostname : connectHost;
     const req = httpsRequest(
       {
         protocol: target.protocol,
-        host: address,
+        host: reqHost,
         servername: target.hostname,
-        port: target.port ? Number(target.port) : 443,
+        port: targetPort,
         path: `${target.pathname}${target.search}`,
         method: "POST",
         headers: {
@@ -200,6 +466,12 @@ async function nalogoPostViaHttpsAddress(
           Connection: "close",
           "Content-Length": String(Buffer.byteLength(bodyText)),
         },
+        ...(tlsSocket
+          ? {
+              agent: false,
+              createConnection: () => tlsSocket,
+            }
+          : {}),
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -230,9 +502,13 @@ async function nalogoPostViaHttpsAddress(
     );
 
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`NaloGO fallback timeout (${address})`));
+      const timeoutLabel = proxy ? proxy.label : connectHost;
+      req.destroy(new Error(`NaloGO fallback timeout (${timeoutLabel})`));
     });
-    req.on("error", reject);
+    req.on("error", (error) => {
+      if (tlsSocket) tlsSocket.destroy();
+      reject(error);
+    });
     req.write(bodyText);
     req.end();
   });
@@ -243,8 +519,20 @@ async function nalogoPostViaHttpsFallback(
   bodyText: string,
   timeoutMs: number,
   headers: Record<string, string>,
+  proxy: SocksProxyConfig | null,
 ): Promise<Response> {
   const target = new URL(url);
+  if (proxy) {
+    return await nalogoPostViaHttpsAddress(
+      target,
+      target.hostname,
+      bodyText,
+      timeoutMs,
+      headers,
+      proxy,
+    );
+  }
+
   const addresses = await resolveIpv4Candidates(target.hostname);
   const perAddressTimeoutMs = Math.max(4000, Math.min(15000, Math.floor(timeoutMs / Math.max(1, addresses.length))));
 
@@ -257,6 +545,7 @@ async function nalogoPostViaHttpsFallback(
         bodyText,
         perAddressTimeoutMs,
         headers,
+        null,
       );
     } catch (error) {
       failures.push(formatNetworkError(error, `ip:${address}`));
@@ -270,6 +559,7 @@ async function authorizeNalogo(
   password: string,
   deviceId: string,
   timeoutMs: number,
+  proxy: SocksProxyConfig | null,
 ): Promise<{ token: string } | { error: string; status: number; retryable: boolean }> {
   const sourceTypeCandidates = Array.from(
     new Set([NALOGO_DEVICE_SOURCE_TYPE, ...NALOGO_DEVICE_SOURCE_TYPE_FALLBACKS]),
@@ -290,6 +580,8 @@ async function authorizeNalogo(
         },
       },
       timeoutMs,
+      undefined,
+      proxy,
     );
 
     const authData = await parseJsonSafe(authRes);
@@ -331,6 +623,7 @@ async function nalogoPostWithRetry(
   body: Record<string, unknown>,
   timeoutMs: number,
   headers?: Record<string, string>,
+  proxy?: SocksProxyConfig | null,
 ): Promise<Response> {
   const url = `${NALOGO_BASE}${path}`;
   const mergedHeaders = { ...defaultHeaders(), ...(headers ?? {}) };
@@ -339,6 +632,16 @@ async function nalogoPostWithRetry(
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
+      if (proxy) {
+        return await nalogoPostViaHttpsFallback(
+          url,
+          bodyText,
+          timeoutMs,
+          mergedHeaders,
+          proxy,
+        );
+      }
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), fetchTimeoutMs);
       try {
@@ -353,9 +656,24 @@ async function nalogoPostWithRetry(
         clearTimeout(timer);
       }
     } catch (e: unknown) {
+      if (proxy) {
+        lastError = new Error(formatNetworkError(e, "proxy-request"));
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          continue;
+        }
+        break;
+      }
+
       const fetchError = formatNetworkError(e, "fetch");
       try {
-        return await nalogoPostViaHttpsFallback(url, bodyText, timeoutMs, mergedHeaders);
+        return await nalogoPostViaHttpsFallback(
+          url,
+          bodyText,
+          timeoutMs,
+          mergedHeaders,
+          proxy ?? null,
+        );
       } catch (fallbackError) {
         const fallbackText = formatNetworkError(fallbackError, "https-fallback");
         lastError = new Error(`${fetchError}; ${fallbackText}`);
@@ -397,9 +715,18 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
+  const proxyParsed = parseSocksProxyConfig(config.proxyUrl);
+  if (proxyParsed.error) {
+    return {
+      error: proxyParsed.error,
+      status: 400,
+      retryable: false,
+    };
+  }
+  const proxy = proxyParsed.proxy;
   try {
     // 1) Авторизация
-    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs);
+    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
     if ("error" in authResult) {
       return authResult;
     }
@@ -435,6 +762,7 @@ export async function createNalogoReceipt(
       requestBody,
       timeoutMs,
       { Authorization: `Bearer ${authResult.token}` },
+      proxy,
     );
 
     const incomeData = await parseJsonSafe(incomeRes);

@@ -12,6 +12,7 @@ const DEFAULTS: Array<[string, string]> = [
   ["yookassa_payment_subject", "service"],
   ["nalogo_enabled", "false"],
   ["nalogo_timeout", "30"],
+  ["nalogo_proxy_url", ""],
   [
     "bot_inner_button_styles",
     '{"tariffPay":"success","topup":"primary","back":"danger","profile":"primary","trialConfirm":"success","lang":"primary","currency":"primary"}',
