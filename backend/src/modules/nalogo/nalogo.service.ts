@@ -10,6 +10,7 @@ import { randomBytes } from "crypto";
 
 const NALOGO_BASE = "https://lknpd.nalog.ru/api";
 const NALOGO_DEVICE_SOURCE_TYPE = "WEB";
+const NALOGO_DEVICE_SOURCE_TYPE_FALLBACKS = ["WEB", "APP", "WEB_SITE", "IOS", "ANDROID"];
 const NALOGO_APP_VERSION = "1.0.0";
 const NALOGO_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_2) AppleWebKit/537.36 " +
@@ -99,6 +100,78 @@ function buildDeviceInfo(deviceId: string): Record<string, unknown> {
   };
 }
 
+function extractErrorMessage(data: Record<string, unknown>, fallback: string): string {
+  const raw = data.message ?? data.error ?? fallback;
+  return typeof raw === "string" ? raw : fallback;
+}
+
+function shouldRetryAuthWithFallback(authStatus: number, authData: Record<string, unknown>): boolean {
+  if (isRetryableStatus(authStatus)) return true;
+  const message = extractErrorMessage(authData, "").toLowerCase();
+  return message.includes("тип устройства") || message.includes("device type") || message.includes("source");
+}
+
+async function authorizeNalogo(
+  inn: string,
+  password: string,
+  deviceId: string,
+  timeoutMs: number,
+): Promise<{ token: string } | { error: string; status: number; retryable: boolean }> {
+  const sourceTypeCandidates = Array.from(
+    new Set([NALOGO_DEVICE_SOURCE_TYPE, ...NALOGO_DEVICE_SOURCE_TYPE_FALLBACKS]),
+  );
+
+  let lastError: { error: string; status: number; retryable: boolean } | null = null;
+
+  for (let i = 0; i < sourceTypeCandidates.length; i += 1) {
+    const sourceType = sourceTypeCandidates[i];
+    const authRes = await nalogoPostWithRetry(
+      "/v1/auth/lkfl",
+      {
+        username: inn,
+        password,
+        deviceInfo: {
+          ...buildDeviceInfo(deviceId),
+          sourceType,
+        },
+      },
+      timeoutMs,
+    );
+
+    const authData = await parseJsonSafe(authRes);
+    if (authRes.ok) {
+      const tokenRaw = authData.token;
+      if (typeof tokenRaw === "string" && tokenRaw.trim()) {
+        return { token: tokenRaw.trim() };
+      }
+      return {
+        error: "NaloGO auth: token отсутствует в ответе",
+        status: 502,
+        retryable: true,
+      };
+    }
+
+    lastError = {
+      error: `NaloGO auth failed: ${extractErrorMessage(authData, `HTTP ${authRes.status}`)}`,
+      status: authRes.status,
+      retryable: isRetryableStatus(authRes.status),
+    };
+
+    const canTryNext = i < sourceTypeCandidates.length - 1;
+    if (!canTryNext || !shouldRetryAuthWithFallback(authRes.status, authData)) {
+      return lastError;
+    }
+  }
+
+  return (
+    lastError ?? {
+      error: "NaloGO auth failed: неизвестная ошибка",
+      status: 502,
+      retryable: true,
+    }
+  );
+}
+
 async function nalogoPostWithRetry(
   path: string,
   body: Record<string, unknown>,
@@ -160,36 +233,11 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId);
-  const deviceInfo = buildDeviceInfo(deviceId);
-
   try {
     // 1) Авторизация
-    const authRes = await nalogoPostWithRetry(
-      "/v1/auth/lkfl",
-      {
-        username: inn,
-        password,
-        deviceInfo,
-      },
-      timeoutMs,
-    );
-
-    const authData = await parseJsonSafe(authRes);
-    if (!authRes.ok) {
-      return {
-        error: `NaloGO auth failed: ${authData.message ?? authData.error ?? `HTTP ${authRes.status}`}`,
-        status: authRes.status,
-        retryable: isRetryableStatus(authRes.status),
-      };
-    }
-
-    const tokenRaw = authData.token;
-    if (typeof tokenRaw !== "string" || !tokenRaw.trim()) {
-      return {
-        error: "NaloGO auth: token отсутствует в ответе",
-        status: 502,
-        retryable: true,
-      };
+    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs);
+    if ("error" in authResult) {
+      return authResult;
     }
 
     // 2) Создание чека
@@ -222,13 +270,13 @@ export async function createNalogoReceipt(
       "/v1/income",
       requestBody,
       timeoutMs,
-      { Authorization: `Bearer ${tokenRaw}` },
+      { Authorization: `Bearer ${authResult.token}` },
     );
 
     const incomeData = await parseJsonSafe(incomeRes);
     if (!incomeRes.ok) {
       return {
-        error: `NaloGO income failed: ${incomeData.message ?? incomeData.error ?? `HTTP ${incomeRes.status}`}`,
+        error: `NaloGO income failed: ${extractErrorMessage(incomeData, `HTTP ${incomeRes.status}`)}`,
         status: incomeRes.status,
         retryable: isRetryableStatus(incomeRes.status),
       };
