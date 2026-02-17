@@ -52,6 +52,7 @@ export function NalogoReceiptsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -117,6 +118,31 @@ export function NalogoReceiptsPage() {
     }
   }
 
+  async function retryPendingReceipts() {
+    const authToken = token;
+    if (!authToken) return;
+    setBatchRunning(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const out = await api.retryPendingNalogoReceipts(authToken, 250);
+      if (!out.configured) {
+        setError("NaloGO не настроен в разделе Настройки.");
+        return;
+      }
+      setMessage(
+        `Массовая отправка: проверено ${out.scanned}, отправлено ${out.created}, ошибок ${out.failed}, пропущено ${out.skipped}.`,
+      );
+      const refreshed = await api.getNalogoReceipts(authToken, { page, limit: PAGE_LIMIT, search });
+      setItems(refreshed.items);
+      setTotal(refreshed.total);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Ошибка массовой отправки чеков");
+    } finally {
+      setBatchRunning(false);
+    }
+  }
+
   function onSearchSubmit(e: FormEvent) {
     e.preventDefault();
     setPage(1);
@@ -159,6 +185,16 @@ export function NalogoReceiptsPage() {
               Найти
             </Button>
           </form>
+          <div className="mt-3">
+            <Button onClick={retryPendingReceipts} disabled={batchRunning || loading}>
+              {batchRunning ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4 mr-2" />
+              )}
+              Отправить неотправленные чеки
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -232,13 +268,19 @@ export function NalogoReceiptsPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={retryingId === item.paymentId}
+                            disabled={retryingId === item.paymentId || batchRunning}
                             onClick={() => retryReceipt(item.paymentId)}
                           >
                             {retryingId === item.paymentId ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Повтор...
+                              </>
                             ) : (
-                              <RefreshCcw className="h-4 w-4" />
+                              <>
+                                <RefreshCcw className="h-4 w-4 mr-2" />
+                                Повторить
+                              </>
                             )}
                           </Button>
                         )}

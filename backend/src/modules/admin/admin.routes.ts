@@ -37,7 +37,10 @@ import { syncFromRemna, syncToRemna, createRemnaUsersForClientsWithoutUuid } fro
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
 import { registerBackupRoutes } from "../backup/backup.routes.js";
-import { processNalogoReceiptForPayment } from "../nalogo/nalogo-receipts.service.js";
+import {
+  processNalogoReceiptForPayment,
+  processPendingNalogoReceipts,
+} from "../nalogo/nalogo-receipts.service.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -2174,5 +2177,18 @@ adminRouter.post("/nalogo-receipts/:paymentId/retry", asyncRoute(async (req, res
     return res.status(400).json({ message: "Invalid payment id" });
   }
   const out = await processNalogoReceiptForPayment(parsed.data.paymentId);
+  return res.json(out);
+}));
+
+const nalogoRetryPendingSchema = z.object({
+  limit: z.number().int().min(1).max(500).optional(),
+});
+
+adminRouter.post("/nalogo-receipts/retry-pending", asyncRoute(async (req, res) => {
+  const parsed = nalogoRetryPendingSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+  const out = await processPendingNalogoReceipts({ limit: parsed.data.limit });
   return res.json(out);
 }));

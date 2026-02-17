@@ -247,6 +247,17 @@ export const api = {
     return request(`/admin/nalogo-receipts/${paymentId}/retry`, { method: "POST", token });
   },
 
+  async retryPendingNalogoReceipts(
+    token: string,
+    limit = 200,
+  ): Promise<NalogoRetryBatchResult> {
+    return request("/admin/nalogo-receipts/retry-pending", {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+      token,
+    });
+  },
+
   async previewAdminBroadcast(token: string, text: string): Promise<AdminBroadcastResult> {
     return request("/admin/broadcast", { method: "POST", body: JSON.stringify({ text, dryRun: true }), token });
   },
@@ -632,6 +643,14 @@ export interface NalogoReceiptItem {
   inProgressAt: string | null;
   nextRetryAt: string | null;
   lastError: string | null;
+}
+
+export interface NalogoRetryBatchResult {
+  configured: boolean;
+  scanned: number;
+  created: number;
+  failed: number;
+  skipped: number;
 }
 
 export type UpdateSettingsPayload = {
