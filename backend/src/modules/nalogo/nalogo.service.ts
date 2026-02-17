@@ -432,6 +432,12 @@ async function createSocksTlsConnection(
       tlsSocket.once("close", onClose);
     });
 
+    // Таймаут нужен только на этапе установления туннеля.
+    // Дальше его контролирует HTTP-запрос, иначе возможен
+    // поздний timeout с необработанным error на TLSSocket.
+    socket.setTimeout(0);
+    tlsSocket.setTimeout(0);
+
     return tlsSocket;
   } catch (error) {
     socket.destroy();
@@ -480,6 +486,13 @@ async function nalogoPostViaHttpsAddress(
     : null;
 
   return await new Promise<Response>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (tlsSocket) tlsSocket.destroy();
+      reject(error);
+    };
     const reqHost = proxy ? target.hostname : connectHost;
     const req = httpsRequest(
       {
@@ -520,6 +533,7 @@ async function nalogoPostViaHttpsAddress(
               responseHeaders.set(key, value);
             }
           }
+          settled = true;
           resolve(
             new Response(Buffer.concat(chunks).toString("utf8"), {
               status: res.statusCode ?? 502,
@@ -534,10 +548,12 @@ async function nalogoPostViaHttpsAddress(
       const timeoutLabel = proxy ? proxy.label : connectHost;
       req.destroy(new Error(`NaloGO fallback timeout (${timeoutLabel})`));
     });
-    req.on("error", (error) => {
-      if (tlsSocket) tlsSocket.destroy();
-      reject(error);
-    });
+    req.on("error", fail);
+    if (tlsSocket) {
+      // В режиме createConnection сокет живёт отдельно.
+      // Без обработчика здесь Node может упасть на unhandled error.
+      tlsSocket.on("error", fail);
+    }
     req.write(bodyText);
     req.end();
   });
