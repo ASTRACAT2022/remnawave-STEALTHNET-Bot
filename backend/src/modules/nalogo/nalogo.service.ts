@@ -777,15 +777,8 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const proxyParsed = parseSocksProxyConfig(resolveNalogoProxyRaw(config));
-  if (proxyParsed.error) {
-    return {
-      error: `${proxyParsed.error} (${proxyModeLabel(null)})`,
-      status: 400,
-      retryable: false,
-    };
-  }
-  const proxy = proxyParsed.proxy;
+  // Прокси отключён принудительно по запросу: работаем только напрямую.
+  const proxy: SocksProxyConfig | null = null;
   try {
     // 1) Авторизация
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
