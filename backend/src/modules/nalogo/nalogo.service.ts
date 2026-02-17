@@ -7,7 +7,7 @@
  */
 
 import { createHash, randomBytes } from "crypto";
-import { lookup } from "dns/promises";
+import { lookup, resolve4 } from "dns/promises";
 import { request as httpsRequest } from "https";
 
 const NALOGO_BASE = (process.env.NALOGO_BASE_URL ?? "https://lknpd.nalog.ru/api")
@@ -157,20 +157,39 @@ function formatNetworkError(error: unknown, label: string): string {
   return code ? `${label}: ${message} (${code})` : `${label}: ${message}`;
 }
 
-async function nalogoPostViaHttpsFallback(
-  url: string,
+async function resolveIpv4Candidates(hostname: string): Promise<string[]> {
+  const unique = new Set<string>();
+  try {
+    const resolved = await resolve4(hostname);
+    for (const ip of resolved) {
+      if (typeof ip === "string" && ip.trim()) unique.add(ip.trim());
+    }
+  } catch {
+    // fallback below
+  }
+
+  if (unique.size === 0) {
+    const fallback = await lookup(hostname, { family: 4 });
+    if (typeof fallback.address === "string" && fallback.address.trim()) {
+      unique.add(fallback.address.trim());
+    }
+  }
+
+  return Array.from(unique);
+}
+
+async function nalogoPostViaHttpsAddress(
+  target: URL,
+  address: string,
   bodyText: string,
   timeoutMs: number,
   headers: Record<string, string>,
 ): Promise<Response> {
-  const target = new URL(url);
-  const resolved = await lookup(target.hostname, { family: 4 });
-
   return await new Promise<Response>((resolve, reject) => {
     const req = httpsRequest(
       {
         protocol: target.protocol,
-        host: resolved.address,
+        host: address,
         servername: target.hostname,
         port: target.port ? Number(target.port) : 443,
         path: `${target.pathname}${target.search}`,
@@ -211,12 +230,40 @@ async function nalogoPostViaHttpsFallback(
     );
 
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error("NaloGO fallback timeout"));
+      req.destroy(new Error(`NaloGO fallback timeout (${address})`));
     });
     req.on("error", reject);
     req.write(bodyText);
     req.end();
   });
+}
+
+async function nalogoPostViaHttpsFallback(
+  url: string,
+  bodyText: string,
+  timeoutMs: number,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const target = new URL(url);
+  const addresses = await resolveIpv4Candidates(target.hostname);
+  const perAddressTimeoutMs = Math.max(4000, Math.min(15000, Math.floor(timeoutMs / Math.max(1, addresses.length))));
+
+  const failures: string[] = [];
+  for (const address of addresses) {
+    try {
+      return await nalogoPostViaHttpsAddress(
+        target,
+        address,
+        bodyText,
+        perAddressTimeoutMs,
+        headers,
+      );
+    } catch (error) {
+      failures.push(formatNetworkError(error, `ip:${address}`));
+    }
+  }
+
+  throw new Error(`NaloGO fallback failed for ${target.hostname}: ${failures.join("; ")}`);
 }
 async function authorizeNalogo(
   inn: string,
@@ -288,11 +335,12 @@ async function nalogoPostWithRetry(
   const url = `${NALOGO_BASE}${path}`;
   const mergedHeaders = { ...defaultHeaders(), ...(headers ?? {}) };
   const bodyText = JSON.stringify(body);
+  const fetchTimeoutMs = Math.max(4000, Math.min(12000, timeoutMs));
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), fetchTimeoutMs);
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -413,8 +461,9 @@ export async function createNalogoReceipt(
     return { receiptUuid };
   } catch (e) {
     if (isTimeoutError(e)) {
+      const details = e instanceof Error && e.message ? `: ${e.message}` : "";
       return {
-        error: "NaloGO timeout",
+        error: `NaloGO timeout${details}`.slice(0, 500),
         status: 504,
         retryable: true,
       };
