@@ -22,6 +22,7 @@ const nav = [
   { to: "/admin/promo", label: "Промо-ссылки", icon: Megaphone },
   { to: "/admin/promo-codes", label: "Промокоды", icon: Tag },
   { to: "/admin/broadcast", label: "Рассылка", icon: Send },
+  { to: "/admin/nalogo-receipts", label: "Чеки в налоговую", icon: FileText },
   { to: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { to: "/admin/sales-report", label: "Отчёты продаж", icon: FileText },
   { to: "/admin/backup", label: "Бэкапы", icon: Database },

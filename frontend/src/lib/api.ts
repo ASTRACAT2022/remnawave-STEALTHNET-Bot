@@ -226,6 +226,27 @@ export const api = {
     return request("/admin/settings", { token });
   },
 
+  async getNalogoReceipts(
+    token: string,
+    params?: { page?: number; limit?: number; search?: string },
+  ): Promise<{ items: NalogoReceiptItem[]; total: number; page: number; limit: number }> {
+    const search = new URLSearchParams();
+    if (params?.page) search.set("page", String(params.page));
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.search?.trim()) search.set("search", params.search.trim());
+    const q = search.toString();
+    return request(`/admin/nalogo-receipts${q ? `?${q}` : ""}`, { token });
+  },
+
+  async retryNalogoReceipt(token: string, paymentId: string): Promise<{
+    status: string;
+    paymentId: string;
+    receiptUuid?: string;
+    error?: string;
+  }> {
+    return request(`/admin/nalogo-receipts/${paymentId}/retry`, { method: "POST", token });
+  },
+
   async previewAdminBroadcast(token: string, text: string): Promise<AdminBroadcastResult> {
     return request("/admin/broadcast", { method: "POST", body: JSON.stringify({ text, dryRun: true }), token });
   },
@@ -588,6 +609,29 @@ export interface AdminBroadcastResult {
   sent?: number;
   failed?: number;
   errorSamples?: string[];
+}
+
+export type NalogoReceiptStatus = "sent" | "in_progress" | "retry_wait" | "failed" | "pending";
+
+export interface NalogoReceiptItem {
+  paymentId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  provider: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  clientEmail: string | null;
+  clientTelegramId: string | null;
+  clientTelegramUsername: string | null;
+  tariffName: string | null;
+  status: NalogoReceiptStatus;
+  receiptUuid: string | null;
+  attempts: number;
+  lastAttemptAt: string | null;
+  inProgressAt: string | null;
+  nextRetryAt: string | null;
+  lastError: string | null;
 }
 
 export type UpdateSettingsPayload = {

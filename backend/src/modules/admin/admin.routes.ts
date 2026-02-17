@@ -37,6 +37,7 @@ import { syncFromRemna, syncToRemna, createRemnaUsersForClientsWithoutUuid } fro
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
 import { registerBackupRoutes } from "../backup/backup.routes.js";
+import { processNalogoReceiptForPayment } from "../nalogo/nalogo-receipts.service.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -52,6 +53,55 @@ function asyncRoute(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type NalogoReceiptMeta = Record<string, unknown> & {
+  nalogoReceiptUuid?: string;
+  nalogoReceiptLastError?: string | null;
+  nalogoReceiptLastAttemptAt?: string;
+  nalogoReceiptInProgressAt?: string;
+  nalogoReceiptAttempts?: number;
+  nalogoReceiptNextRetryAt?: string;
+};
+
+const NALOGO_IN_PROGRESS_TTL_MS = 10 * 60 * 1000;
+
+function parseNalogoReceiptMeta(raw: string | null): NalogoReceiptMeta {
+  if (!raw?.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as NalogoReceiptMeta;
+  } catch {
+    return {};
+  }
+}
+
+function parseIso(raw: string | undefined): Date | null {
+  if (!raw?.trim()) return null;
+  const d = new Date(raw);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function resolveNalogoReceiptStatus(meta: NalogoReceiptMeta): "sent" | "in_progress" | "retry_wait" | "failed" | "pending" {
+  const uuid = typeof meta.nalogoReceiptUuid === "string" ? meta.nalogoReceiptUuid.trim() : "";
+  if (uuid) return "sent";
+
+  const inProgressAt = parseIso(meta.nalogoReceiptInProgressAt);
+  const nextRetryAt = parseIso(meta.nalogoReceiptNextRetryAt);
+  const hasError = typeof meta.nalogoReceiptLastError === "string" && meta.nalogoReceiptLastError.trim().length > 0;
+  const attempts = Number(meta.nalogoReceiptAttempts ?? 0);
+  const now = Date.now();
+
+  if (inProgressAt && now - inProgressAt.getTime() < NALOGO_IN_PROGRESS_TTL_MS) {
+    return "in_progress";
+  }
+  if (nextRetryAt && nextRetryAt.getTime() > now) {
+    return "retry_wait";
+  }
+  if (hasError) return "failed";
+  if (attempts > 0) return "in_progress";
+  return "pending";
 }
 
 type TelegramSendResult = { ok: true } | { ok: false; error: string };
@@ -2044,3 +2094,85 @@ adminRouter.get("/sales-report", async (req, res) => {
     totalCount: agg._count,
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  ЧЕКИ В НАЛОГОВУЮ (NaloGO)
+// ═══════════════════════════════════════════════════════════════
+
+adminRouter.get("/nalogo-receipts", asyncRoute(async (req, res) => {
+  const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50));
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+  const where: Prisma.PaymentWhereInput = {
+    provider: "yookassa",
+    status: "PAID",
+  };
+
+  if (search) {
+    where.OR = [
+      { orderId: { contains: search, mode: "insensitive" } },
+      { externalId: { contains: search, mode: "insensitive" } },
+      { client: { is: { email: { contains: search, mode: "insensitive" } } } },
+      { client: { is: { telegramId: { contains: search } } } },
+      { client: { is: { telegramUsername: { contains: search, mode: "insensitive" } } } },
+    ];
+  }
+
+  const [total, rows] = await Promise.all([
+    prisma.payment.count({ where }),
+    prisma.payment.findMany({
+      where,
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+      include: {
+        client: { select: { email: true, telegramId: true, telegramUsername: true } },
+        tariff: { select: { name: true } },
+      },
+    }),
+  ]);
+
+  const items = rows.map((row) => {
+    const meta = parseNalogoReceiptMeta(row.metadata);
+    const status = resolveNalogoReceiptStatus(meta);
+    return {
+      paymentId: row.id,
+      orderId: row.orderId,
+      amount: row.amount,
+      currency: row.currency,
+      provider: row.provider,
+      paidAt: row.paidAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+      clientEmail: row.client?.email ?? null,
+      clientTelegramId: row.client?.telegramId ?? null,
+      clientTelegramUsername: row.client?.telegramUsername ?? null,
+      tariffName: row.tariff?.name ?? null,
+      status,
+      receiptUuid: typeof meta.nalogoReceiptUuid === "string" ? meta.nalogoReceiptUuid : null,
+      attempts: Number(meta.nalogoReceiptAttempts ?? 0),
+      lastAttemptAt: typeof meta.nalogoReceiptLastAttemptAt === "string" ? meta.nalogoReceiptLastAttemptAt : null,
+      inProgressAt: typeof meta.nalogoReceiptInProgressAt === "string" ? meta.nalogoReceiptInProgressAt : null,
+      nextRetryAt: typeof meta.nalogoReceiptNextRetryAt === "string" ? meta.nalogoReceiptNextRetryAt : null,
+      lastError: typeof meta.nalogoReceiptLastError === "string" ? meta.nalogoReceiptLastError : null,
+    };
+  });
+
+  return res.json({
+    items,
+    total,
+    page,
+    limit,
+  });
+}));
+
+const nalogoRetryParamsSchema = z.object({ paymentId: z.string().cuid() });
+
+adminRouter.post("/nalogo-receipts/:paymentId/retry", asyncRoute(async (req, res) => {
+  const parsed = nalogoRetryParamsSchema.safeParse(req.params);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid payment id" });
+  }
+  const out = await processNalogoReceiptForPayment(parsed.data.paymentId);
+  return res.json(out);
+}));
