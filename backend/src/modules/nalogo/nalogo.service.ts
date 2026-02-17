@@ -281,6 +281,18 @@ async function readExact(socket: Socket, size: number, timeoutMs: number): Promi
 }
 
 function buildSocksAddress(host: string): Buffer {
+  const ipv4Parts = host.split(".");
+  const isIpv4 =
+    ipv4Parts.length === 4 &&
+    ipv4Parts.every((part) => {
+      if (!/^\d{1,3}$/.test(part)) return false;
+      const n = Number(part);
+      return Number.isInteger(n) && n >= 0 && n <= 255;
+    });
+  if (isIpv4) {
+    return Buffer.from([0x01, ...ipv4Parts.map((part) => Number(part))]);
+  }
+
   const hostBytes = Buffer.from(host, "utf8");
   if (hostBytes.length === 0 || hostBytes.length > 255) {
     throw new Error("NaloGO proxy: target host length is invalid");
@@ -313,8 +325,9 @@ function socksReplyToError(code: number): string {
 
 async function createSocksTlsConnection(
   proxy: SocksProxyConfig,
-  targetHost: string,
+  connectHost: string,
   targetPort: number,
+  tlsServerName: string,
   timeoutMs: number,
 ): Promise<TLSSocket> {
   const socket = netConnect({ host: proxy.host, port: proxy.port });
@@ -374,7 +387,7 @@ async function createSocksTlsConnection(
       }
     }
 
-    const hostPart = buildSocksAddress(targetHost);
+    const hostPart = buildSocksAddress(connectHost);
     const portPart = Buffer.from([(targetPort >> 8) & 0xff, targetPort & 0xff]);
     await writeSocket(socket, Buffer.concat([Buffer.from([0x05, 0x01, 0x00]), hostPart, portPart]));
 
@@ -398,7 +411,7 @@ async function createSocksTlsConnection(
 
     const tlsSocket = tlsConnect({
       socket,
-      servername: targetHost,
+      servername: tlsServerName,
       timeout: timeoutMs,
     });
 
@@ -457,7 +470,13 @@ async function nalogoPostViaHttpsAddress(
 ): Promise<Response> {
   const targetPort = target.port ? Number(target.port) : 443;
   const tlsSocket = proxy
-    ? await createSocksTlsConnection(proxy, target.hostname, targetPort, timeoutMs)
+    ? await createSocksTlsConnection(
+        proxy,
+        connectHost,
+        targetPort,
+        target.hostname,
+        timeoutMs,
+      )
     : null;
 
   return await new Promise<Response>((resolve, reject) => {
@@ -533,13 +552,30 @@ async function nalogoPostViaHttpsFallback(
 ): Promise<Response> {
   const target = new URL(url);
   if (proxy) {
-    return await nalogoPostViaHttpsAddress(
-      target,
-      target.hostname,
-      bodyText,
-      timeoutMs,
-      headers,
-      proxy,
+    const candidates = Array.from(
+      new Set([target.hostname, ...(await resolveIpv4Candidates(target.hostname))]),
+    );
+    const perTargetTimeoutMs = Math.max(
+      4000,
+      Math.min(15000, Math.floor(timeoutMs / Math.max(1, candidates.length))),
+    );
+    const failures: string[] = [];
+    for (const connectHost of candidates) {
+      try {
+        return await nalogoPostViaHttpsAddress(
+          target,
+          connectHost,
+          bodyText,
+          perTargetTimeoutMs,
+          headers,
+          proxy,
+        );
+      } catch (error) {
+        failures.push(formatNetworkError(error, `proxy-target:${connectHost}`));
+      }
+    }
+    throw new Error(
+      `NaloGO proxy fallback failed for ${target.hostname}: ${failures.join("; ")}`,
     );
   }
 
