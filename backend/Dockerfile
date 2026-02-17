@@ -9,12 +9,15 @@ RUN npm run build
 
 FROM node:20-alpine
 
-RUN apk add --no-cache postgresql-client python3 py3-pip
-RUN pip3 install --no-cache-dir nalogapi
+RUN apk add --no-cache postgresql-client python3 py3-pip \
+  && python3 -m venv /opt/venv \
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+  && /opt/venv/bin/pip install --no-cache-dir nalogapi
 
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/venv/bin:${PATH}"
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./

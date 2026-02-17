@@ -52,7 +52,7 @@ services:
       BOT_INTERNAL_API_KEY: "${BOT_INTERNAL_API_KEY:-}"
       NALOGO_PYTHON_BRIDGE_ENABLED: "${NALOGO_PYTHON_BRIDGE_ENABLED:-true}"
       NALOGO_PYTHON_BRIDGE_ONLY: "${NALOGO_PYTHON_BRIDGE_ONLY:-false}"
-      NALOGO_PYTHON_BIN: "${NALOGO_PYTHON_BIN:-python3}"
+      NALOGO_PYTHON_BIN: "${NALOGO_PYTHON_BIN:-/opt/venv/bin/python}"
       NALOGO_PYTHON_BRIDGE_PATH: "${NALOGO_PYTHON_BRIDGE_PATH:-/app/scripts/nalogo_bridge.py}"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]
