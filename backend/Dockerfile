@@ -9,14 +9,17 @@ RUN npm run build
 
 FROM node:20-alpine
 
-RUN apk add --no-cache postgresql-client
+RUN apk add --no-cache postgresql-client python3 py3-pip
+RUN pip3 install --no-cache-dir nalogapi
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PYTHONUNBUFFERED=1
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/subpage-00000000-0000-0000-0000-000000000000.json ./
 
 RUN npx prisma generate

@@ -7,9 +7,11 @@
  */
 
 import { createHash, randomBytes } from "crypto";
+import { spawn } from "child_process";
 import { lookup, resolve4 } from "dns/promises";
 import { request as httpsRequest } from "https";
 import { connect as netConnect, type Socket } from "net";
+import path from "path";
 import { connect as tlsConnect, type TLSSocket } from "tls";
 
 const NALOGO_BASE = (process.env.NALOGO_BASE_URL ?? "https://lknpd.nalog.ru/api")
@@ -34,6 +36,14 @@ export type NalogoConfig = {
 export type NalogoCreateReceiptResult =
   | { receiptUuid: string }
   | { error: string; status: number; retryable: boolean };
+
+type NalogoPythonBridgeOutput = {
+  ok?: boolean;
+  receiptUuid?: unknown;
+  error?: unknown;
+  status?: unknown;
+  retryable?: unknown;
+};
 
 function defaultHeaders(): Record<string, string> {
   return {
@@ -74,6 +84,141 @@ async function parseJsonSafe(res: Response): Promise<Record<string, unknown>> {
   } catch {
     return { raw: text };
   }
+}
+
+function isFalseLike(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "0" || v === "false" || v === "no" || v === "off";
+}
+
+function normalizeHttpStatus(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const status = Math.floor(n);
+  if (status < 100 || status > 599) return fallback;
+  return status;
+}
+
+async function createNalogoReceiptViaPythonBridge(
+  config: NalogoConfig,
+  params: {
+    name: string;
+    amountRub: number;
+    quantity?: number;
+    clientPhone?: string | null;
+    clientName?: string | null;
+    clientInn?: string | null;
+  },
+  timeoutMs: number,
+): Promise<NalogoCreateReceiptResult | null> {
+  if (isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ENABLED)) {
+    return null;
+  }
+
+  const pythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
+  const scriptPath = (
+    process.env.NALOGO_PYTHON_BRIDGE_PATH ??
+    path.join(process.cwd(), "scripts", "nalogo_bridge.py")
+  ).trim();
+
+  const payload = {
+    inn: String(config.inn ?? "").trim(),
+    password: String(config.password ?? "").trim(),
+    name: params.name,
+    amountRub: params.amountRub,
+    quantity: params.quantity,
+    clientPhone: params.clientPhone ?? null,
+    clientName: params.clientName ?? null,
+    clientInn: params.clientInn ?? null,
+    operationTimeIso: new Date().toISOString(),
+  };
+
+  return await new Promise<NalogoCreateReceiptResult>((resolve) => {
+    const child = spawn(pythonBin, [scriptPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (result: NalogoCreateReceiptResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({
+        error: "NaloGO python bridge timeout",
+        status: 504,
+        retryable: true,
+      });
+    }, Math.max(timeoutMs, 3000));
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      finish({
+        error: `NaloGO python bridge start failed: ${error.message}`,
+        status: 502,
+        retryable: true,
+      });
+    });
+
+    child.on("close", (code) => {
+      const out = stdout.trim();
+      const err = stderr.trim();
+      let parsed: NalogoPythonBridgeOutput | null = null;
+      if (out) {
+        try {
+          parsed = JSON.parse(out) as NalogoPythonBridgeOutput;
+        } catch {
+          parsed = null;
+        }
+      }
+
+      const parsedUuid =
+        parsed && typeof parsed.receiptUuid === "string" && parsed.receiptUuid.trim()
+          ? parsed.receiptUuid.trim()
+          : null;
+      if (code === 0 && parsed?.ok === true && parsedUuid) {
+        finish({ receiptUuid: parsedUuid });
+        return;
+      }
+
+      const parsedError =
+        parsed && typeof parsed.error === "string" && parsed.error.trim()
+          ? parsed.error.trim()
+          : null;
+      const fallbackMsg = err || out || `python bridge exited with code ${code ?? -1}`;
+      const message = `NaloGO python bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
+      const status = normalizeHttpStatus(parsed?.status, 502);
+      const retryable =
+        parsed && typeof parsed.retryable === "boolean"
+          ? parsed.retryable
+          : true;
+
+      finish({
+        error: message,
+        status,
+        retryable,
+      });
+    });
+
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -774,6 +919,15 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
+  const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
+    config,
+    params,
+    timeoutMs,
+  );
+  if (pythonBridgeResult) {
+    return pythonBridgeResult;
+  }
+
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
