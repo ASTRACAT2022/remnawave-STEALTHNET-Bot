@@ -189,6 +189,7 @@ bash install.sh
 | `/start` | Регистрация и главное меню |
 | `/start ref_CODE` | Регистрация по реферальной ссылке |
 | `/start promo_CODE` | Активация промо-группы |
+| `/broadcast TEXT` | Массовая рассылка всем пользователям (только для ID из `BOT_BROADCAST_ADMIN_IDS`) |
 | **Главное меню** | Статус подписки, баланс, дни до истечения, трафик, лимит устройств |
 | **Тарифы** | Просмотр категорий и тарифов, покупка |
 | **Пополнение** | Пополнение баланса (пресеты и произвольная сумма) |
@@ -396,6 +397,8 @@ docker compose restart api bot
 | `REMNA_API_URL` | да | URL панели Remnawave |
 | `REMNA_ADMIN_TOKEN` | да | API-токен Remnawave |
 | `BOT_TOKEN` | нет | Токен Telegram-бота |
+| `BOT_INTERNAL_API_KEY` | нет | Секрет для внутреннего endpoint рассылки (должен совпадать в API и bot) |
+| `BOT_BROADCAST_ADMIN_IDS` | нет | Telegram ID админов рассылки через запятую (пример: `12345678,98765432`) |
 | `BOT_HEALTH_PORT` | нет | Порт health-check бота (по умолчанию `3001`) |
 | `BOT_WATCHDOG_ENABLED` | нет | Включить авто-проверку и авто-перезапуск бота (`true/false`) |
 | `BOT_WATCHDOG_INTERVAL_MS` | нет | Интервал проверки API/Telegram (мс, по умолчанию `30000`) |

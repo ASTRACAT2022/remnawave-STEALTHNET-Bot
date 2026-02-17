@@ -60,6 +60,20 @@ const BOT_WATCHDOG_INTERVAL_MS = parsePositiveIntEnv("BOT_WATCHDOG_INTERVAL_MS",
 const BOT_WATCHDOG_TIMEOUT_MS = parsePositiveIntEnv("BOT_WATCHDOG_TIMEOUT_MS", 8_000);
 const BOT_WATCHDOG_MAX_API_FAILURES = parsePositiveIntEnv("BOT_WATCHDOG_MAX_API_FAILURES", 5);
 const BOT_WATCHDOG_MAX_TELEGRAM_FAILURES = parsePositiveIntEnv("BOT_WATCHDOG_MAX_TELEGRAM_FAILURES", 5);
+const BOT_BROADCAST_ADMIN_IDS = new Set(
+  (process.env.BOT_BROADCAST_ADMIN_IDS || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean),
+);
+
+type PendingBroadcast = {
+  text: string;
+  createdAt: number;
+};
+
+const pendingBroadcastByAdmin = new Map<number, PendingBroadcast>();
+const broadcastRunningAdmins = new Set<number>();
 
 type WatchdogState = {
   startedAt: number;
@@ -367,6 +381,31 @@ function setToken(userId: number, token: string): void {
 // Пользователи, ожидающие ввода промокода
 const awaitingPromoCode = new Set<number>();
 
+function isBroadcastAdmin(userId: number): boolean {
+  return BOT_BROADCAST_ADMIN_IDS.has(String(userId));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function broadcastConfirmMarkup(): InlineMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Отправить", callback_data: "admin:broadcast:send" },
+        { text: "❌ Отмена", callback_data: "admin:broadcast:cancel" },
+      ],
+    ],
+  };
+}
+
+function trimBroadcastText(input: string): string {
+  const cleaned = input.trim();
+  if (cleaned.length <= 3500) return cleaned;
+  return `${cleaned.slice(0, 3497)}...`;
+}
+
 /** Достаём subscriptionUrl из ответа Remna */
 function getSubscriptionUrl(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
@@ -624,6 +663,52 @@ function formatMoney(amount: number, currency: string): string {
   return `${amount} ${sym}`;
 }
 
+async function performBroadcast(adminId: number, text: string): Promise<{ total: number; sent: number; failed: number }> {
+  const targets = await api.getBroadcastTargets();
+  const ids = targets.items ?? [];
+  let sent = 0;
+  let failed = 0;
+
+  for (const chatId of ids) {
+    try {
+      await bot.api.sendMessage(chatId, text);
+      sent += 1;
+    } catch {
+      failed += 1;
+    }
+    await sleep(40);
+  }
+
+  console.log(`[broadcast] admin=${adminId} total=${ids.length} sent=${sent} failed=${failed}`);
+  return { total: ids.length, sent, failed };
+}
+
+bot.command("broadcast", async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  if (!isBroadcastAdmin(userId)) {
+    await ctx.reply("⛔ Команда доступна только администраторам рассылки.");
+    return;
+  }
+  if (BOT_BROADCAST_ADMIN_IDS.size === 0) {
+    await ctx.reply("⛔ Рассылка отключена: не задан BOT_BROADCAST_ADMIN_IDS.");
+    return;
+  }
+
+  const raw = typeof ctx.match === "string" ? ctx.match : "";
+  const text = trimBroadcastText(raw);
+  if (!text) {
+    await ctx.reply("Использование: /broadcast Ваш текст рассылки");
+    return;
+  }
+
+  pendingBroadcastByAdmin.set(userId, { text, createdAt: Date.now() });
+  await ctx.reply(
+    `📣 Предпросмотр рассылки:\n\n${text}\n\nПодтвердите отправку всем пользователям.`,
+    { reply_markup: broadcastConfirmMarkup() },
+  );
+});
+
 // ——— /start с реферальным кодом (например /start ref_ABC123) или промо (/start promo_XXXX)
 bot.command("start", async (ctx) => {
   const from = ctx.from;
@@ -712,6 +797,46 @@ bot.on("callback_query:data", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
   await ctx.answerCallbackQuery().catch(() => {});
+
+  if (data === "admin:broadcast:cancel" || data === "admin:broadcast:send") {
+    if (!isBroadcastAdmin(userId)) {
+      await ctx.reply("⛔ Недостаточно прав для рассылки.");
+      return;
+    }
+    const pending = pendingBroadcastByAdmin.get(userId);
+    if (!pending) {
+      await ctx.reply("Нет активной рассылки. Используйте /broadcast <текст>.");
+      return;
+    }
+
+    if (data === "admin:broadcast:cancel") {
+      pendingBroadcastByAdmin.delete(userId);
+      await ctx.editMessageText("❌ Рассылка отменена.");
+      return;
+    }
+
+    if (broadcastRunningAdmins.has(userId)) {
+      await ctx.reply("⏳ Рассылка уже выполняется.");
+      return;
+    }
+
+    broadcastRunningAdmins.add(userId);
+    pendingBroadcastByAdmin.delete(userId);
+    await ctx.editMessageText("🚀 Запускаю рассылку, это может занять время...");
+
+    try {
+      const result = await performBroadcast(userId, pending.text);
+      await ctx.reply(
+        `✅ Рассылка завершена.\nПолучателей: ${result.total}\nОтправлено: ${result.sent}\nОшибок: ${result.failed}`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await ctx.reply(`❌ Ошибка рассылки: ${msg}`);
+    } finally {
+      broadcastRunningAdmins.delete(userId);
+    }
+    return;
+  }
 
   const token = getToken(userId);
   if (!token) {

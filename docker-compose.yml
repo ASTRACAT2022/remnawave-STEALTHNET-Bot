@@ -49,6 +49,7 @@ services:
       REMNA_ADMIN_TOKEN: "${REMNA_ADMIN_TOKEN:-}"
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
+      BOT_INTERNAL_API_KEY: "${BOT_INTERNAL_API_KEY:-}"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]
       interval: 15s
@@ -71,6 +72,8 @@ services:
     environment:
       BOT_TOKEN: "${BOT_TOKEN:-}"
       API_URL: "http://api:5000"
+      BOT_INTERNAL_API_KEY: "${BOT_INTERNAL_API_KEY:-}"
+      BOT_BROADCAST_ADMIN_IDS: "${BOT_BROADCAST_ADMIN_IDS:-}"
       BOT_HEALTH_PORT: "${BOT_HEALTH_PORT:-3001}"
       BOT_WATCHDOG_ENABLED: "${BOT_WATCHDOG_ENABLED:-true}"
       BOT_WATCHDOG_INTERVAL_MS: "${BOT_WATCHDOG_INTERVAL_MS:-30000}"

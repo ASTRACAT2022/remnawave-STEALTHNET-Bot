@@ -14,6 +14,7 @@ const envSchema = z.object({
   ),
   REMNA_ADMIN_TOKEN: z.string().optional(),
   CORS_ORIGIN: z.string().default("*"),
+  BOT_INTERNAL_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

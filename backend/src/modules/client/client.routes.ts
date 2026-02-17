@@ -1681,6 +1681,24 @@ publicConfigRouter.get("/config", async (_req, res) => {
   return res.json(config);
 });
 
+publicConfigRouter.get("/broadcast-targets", async (req, res) => {
+  const apiKey = env.BOT_INTERNAL_API_KEY?.trim();
+  if (!apiKey) {
+    return res.status(503).json({ message: "Broadcast API key is not configured" });
+  }
+  const received = headerValue(req.headers["x-bot-internal-key"]).trim();
+  if (!received || received !== apiKey) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const clients = await prisma.client.findMany({
+    where: { telegramId: { not: null }, isBlocked: false },
+    select: { telegramId: true },
+  });
+  const ids = Array.from(new Set(clients.map((c) => c.telegramId).filter((v): v is string => typeof v === "string" && v.trim().length > 0)));
+  return res.json({ items: ids, count: ids.length });
+});
+
 /**
  * Промежуточная страница для диплинков: открывается через Telegram.WebApp.openLink() в системном браузере,
  * который уже может обработать кастомную URL-схему (happ://, stash://, v2rayng:// и т.д.).

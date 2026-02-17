@@ -13,12 +13,12 @@ function getHeaders(token?: string): HeadersInit {
   return h;
 }
 
-async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string }): Promise<T> {
+async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string> }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
       method: opts?.method ?? "GET",
-      headers: getHeaders(opts?.token),
+      headers: { ...getHeaders(opts?.token), ...(opts?.extraHeaders ?? {}) },
       ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
     });
   } catch (e) {
@@ -175,4 +175,15 @@ export async function checkPromoCode(token: string, code: string): Promise<{ typ
 /** Активировать промокод FREE_DAYS */
 export async function activatePromoCode(token: string, code: string): Promise<{ message: string }> {
   return fetchJson("/api/client/promo-code/activate", { method: "POST", body: { code }, token });
+}
+
+/** Внутренний список telegramId для массовой рассылки (только по BOT_INTERNAL_API_KEY). */
+export async function getBroadcastTargets(): Promise<{ items: string[]; count: number }> {
+  const internalKey = (process.env.BOT_INTERNAL_API_KEY || "").trim();
+  if (!internalKey) {
+    throw new Error("BOT_INTERNAL_API_KEY is not set");
+  }
+  return fetchJson("/api/public/broadcast-targets", {
+    extraHeaders: { "X-Bot-Internal-Key": internalKey },
+  });
 }
