@@ -6,9 +6,13 @@
  * Основано на рабочей логике из remnawave-bedolaga-telegram-bot-main.
  */
 
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
+import { lookup } from "dns/promises";
+import { request as httpsRequest } from "https";
 
-const NALOGO_BASE = "https://lknpd.nalog.ru/api";
+const NALOGO_BASE = (process.env.NALOGO_BASE_URL ?? "https://lknpd.nalog.ru/api")
+  .trim()
+  .replace(/\/+$/, "");
 const NALOGO_DEVICE_SOURCE_TYPE = "WEB";
 const NALOGO_DEVICE_SOURCE_TYPE_FALLBACKS = ["WEB", "APP", "WEB_SITE", "IOS", "ANDROID"];
 const NALOGO_APP_VERSION = "1.0.0";
@@ -81,12 +85,22 @@ function generateDeviceId(): string {
   return randomBytes(11).toString("hex").slice(0, 21).toLowerCase();
 }
 
-function normalizeDeviceId(raw: string | null | undefined): string {
+function normalizeDeviceId(raw: string | null | undefined, stableSeed?: string): string {
   const cleaned = (raw ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .slice(0, 21);
-  return cleaned.length >= 8 ? cleaned : generateDeviceId();
+  if (cleaned.length >= 8) return cleaned;
+
+  const seed = (stableSeed ?? "").trim();
+  if (seed) {
+    return createHash("sha256")
+      .update(`nalogo:${seed}`)
+      .digest("hex")
+      .slice(0, 21)
+      .toLowerCase();
+  }
+  return generateDeviceId();
 }
 
 function buildDeviceInfo(deviceId: string): Record<string, unknown> {
@@ -111,6 +125,99 @@ function shouldRetryAuthWithFallback(authStatus: number, authData: Record<string
   return message.includes("тип устройства") || message.includes("device type") || message.includes("source");
 }
 
+function getErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "string" && code.trim()) return code.trim();
+  const cause = (error as { cause?: unknown }).cause;
+  if (!cause || typeof cause !== "object") return null;
+  const causeCode = (cause as { code?: unknown }).code;
+  if (typeof causeCode === "string" && causeCode.trim()) return causeCode.trim();
+  return null;
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "AbortError") return true;
+  const code = getErrorCode(error);
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT" || code === "UND_ERR_HEADERS_TIMEOUT") {
+    return true;
+  }
+  const msg = error instanceof Error ? error.message.toLowerCase() : "";
+  return msg.includes("timeout");
+}
+
+function formatNetworkError(error: unknown, label: string): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "unknown network error";
+  const code = getErrorCode(error);
+  return code ? `${label}: ${message} (${code})` : `${label}: ${message}`;
+}
+
+async function nalogoPostViaHttpsFallback(
+  url: string,
+  bodyText: string,
+  timeoutMs: number,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const target = new URL(url);
+  const resolved = await lookup(target.hostname, { family: 4 });
+
+  return await new Promise<Response>((resolve, reject) => {
+    const req = httpsRequest(
+      {
+        protocol: target.protocol,
+        host: resolved.address,
+        servername: target.hostname,
+        port: target.port ? Number(target.port) : 443,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        headers: {
+          ...headers,
+          Host: target.host,
+          Connection: "close",
+          "Content-Length": String(Buffer.byteLength(bodyText)),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => {
+          if (Buffer.isBuffer(chunk)) {
+            chunks.push(chunk);
+            return;
+          }
+          chunks.push(Buffer.from(String(chunk)));
+        });
+        res.on("end", () => {
+          const responseHeaders = new Headers();
+          for (const [key, value] of Object.entries(res.headers)) {
+            if (Array.isArray(value)) {
+              responseHeaders.set(key, value.join(", "));
+            } else if (typeof value === "string") {
+              responseHeaders.set(key, value);
+            }
+          }
+          resolve(
+            new Response(Buffer.concat(chunks).toString("utf8"), {
+              status: res.statusCode ?? 502,
+              headers: responseHeaders,
+            }),
+          );
+        });
+      },
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error("NaloGO fallback timeout"));
+    });
+    req.on("error", reject);
+    req.write(bodyText);
+    req.end();
+  });
+}
 async function authorizeNalogo(
   inn: string,
   password: string,
@@ -178,16 +285,19 @@ async function nalogoPostWithRetry(
   timeoutMs: number,
   headers?: Record<string, string>,
 ): Promise<Response> {
+  const url = `${NALOGO_BASE}${path}`;
+  const mergedHeaders = { ...defaultHeaders(), ...(headers ?? {}) };
+  const bodyText = JSON.stringify(body);
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`${NALOGO_BASE}${path}`, {
+        const res = await fetch(url, {
           method: "POST",
-          headers: { ...defaultHeaders(), ...(headers ?? {}) },
-          body: JSON.stringify(body),
+          headers: mergedHeaders,
+          body: bodyText,
           signal: controller.signal,
         });
         return res;
@@ -195,8 +305,14 @@ async function nalogoPostWithRetry(
         clearTimeout(timer);
       }
     } catch (e: unknown) {
-      lastError = e;
-      if (attempt < 2) {
+      const fetchError = formatNetworkError(e, "fetch");
+      try {
+        return await nalogoPostViaHttpsFallback(url, bodyText, timeoutMs, mergedHeaders);
+      } catch (fallbackError) {
+        const fallbackText = formatNetworkError(fallbackError, "https-fallback");
+        lastError = new Error(`${fetchError}; ${fallbackText}`);
+      }
+      if (attempt < 3) {
         await new Promise((resolve) => setTimeout(resolve, 800));
         continue;
       }
@@ -232,7 +348,7 @@ export async function createNalogoReceipt(
   const timeoutMs = resolveTimeoutMs(config);
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
-  const deviceId = normalizeDeviceId(config.deviceId);
+  const deviceId = normalizeDeviceId(config.deviceId, inn);
   try {
     // 1) Авторизация
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs);
@@ -296,7 +412,7 @@ export async function createNalogoReceipt(
 
     return { receiptUuid };
   } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
+    if (isTimeoutError(e)) {
       return {
         error: "NaloGO timeout",
         status: 504,
