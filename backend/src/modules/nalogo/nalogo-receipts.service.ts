@@ -168,27 +168,14 @@ export async function processNalogoReceiptForPayment(
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
     select: {
-      id: true,
-      orderId: true,
       amount: true,
-      tariffId: true,
-      client: { select: { telegramId: true, email: true } },
-      tariff: { select: { name: true } },
     },
   });
   if (!payment) {
     return { status: "not_found", paymentId };
   }
 
-  const description = payment.tariffId
-    ? `Оплата тарифа ${payment.tariff?.name ?? ""} #${payment.orderId}`.trim()
-    : `Пополнение баланса STEALTHNET #${payment.orderId}`;
-  const clientLabel = payment.client.telegramId
-    ? `TG:${payment.client.telegramId}`
-    : payment.client.email
-      ? payment.client.email
-      : "client";
-  const receiptName = `${description} (${clientLabel})`.slice(0, 128);
+  const receiptName = "Пополнение баланса";
 
   const result = await createNalogoReceipt(
     {
