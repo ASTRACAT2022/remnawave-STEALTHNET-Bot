@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import { createHash } from "node:crypto";
 import { env } from "./config/index.js";
 import { prisma } from "./db.js";
 import { authRouter } from "./modules/auth/index.js";
@@ -32,12 +33,33 @@ app.use(cors({
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
+function isTrustedBotRequest(req: express.Request): boolean {
+  const configuredKey = env.BOT_INTERNAL_API_KEY?.trim();
+  if (!configuredKey) return false;
+  const providedKey = req.header("X-Bot-Internal-Key")?.trim();
+  return Boolean(providedKey && providedKey === configuredKey);
+}
+
+function buildRateLimitKey(req: express.Request): string {
+  const auth = req.header("Authorization")?.trim() ?? "";
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    if (token) {
+      const digest = createHash("sha256").update(token).digest("hex").slice(0, 16);
+      return `bearer:${digest}`;
+    }
+  }
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === "development" ? 2000 : 500,
+  max: process.env.NODE_ENV === "development" ? 5000 : 3000,
   message: { message: "Too many requests" },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: buildRateLimitKey,
+  skip: isTrustedBotRequest,
 });
 app.use("/api/", limiter);
 

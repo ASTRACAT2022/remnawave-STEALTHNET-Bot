@@ -3,6 +3,9 @@
  */
 
 const API_URL = (process.env.API_URL || "").replace(/\/$/, "");
+const BOT_INTERNAL_API_KEY = (process.env.BOT_INTERNAL_API_KEY || "").trim();
+const PUBLIC_CONFIG_CACHE_MS = 5000;
+const API_RETRY_ATTEMPTS = 4;
 if (!API_URL) {
   console.warn("API_URL not set in .env — bot API calls will fail");
 }
@@ -10,31 +13,68 @@ if (!API_URL) {
 function getHeaders(token?: string): HeadersInit {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h["Authorization"] = `Bearer ${token}`;
+  if (BOT_INTERNAL_API_KEY) h["X-Bot-Internal-Key"] = BOT_INTERNAL_API_KEY;
   return h;
 }
 
-async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string> }): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}${path}`, {
-      method: opts?.method ?? "GET",
-      headers: { ...getHeaders(opts?.token), ...(opts?.extraHeaders ?? {}) },
-      ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`NetworkError: API недоступен (${msg})`);
-  }
-  const data = (await res.json().catch(() => ({}))) as T | { message?: string };
-  if (!res.ok) {
-    const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return data as T;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Публичный конфиг (тарифы, кнопки, способы оплаты, trial и т.д.) */
-export async function getPublicConfig(): Promise<{
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const sec = Number(value);
+  if (Number.isFinite(sec) && sec > 0) {
+    return Math.max(250, Math.floor(sec * 1000));
+  }
+  const when = Date.parse(value);
+  if (Number.isFinite(when)) {
+    const ms = when - Date.now();
+    if (ms > 0) return Math.max(250, ms);
+  }
+  return null;
+}
+
+async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string> }): Promise<T> {
+  let lastErr: Error | null = null;
+  for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS; attempt += 1) {
+    let res: Response;
+    try {
+      res = await fetch(`${API_URL}${path}`, {
+        method: opts?.method ?? "GET",
+        headers: { ...getHeaders(opts?.token), ...(opts?.extraHeaders ?? {}) },
+        ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastErr = new Error(`NetworkError: API недоступен (${msg})`);
+      if (attempt < API_RETRY_ATTEMPTS) {
+        await sleep(200 * attempt);
+        continue;
+      }
+      throw lastErr;
+    }
+
+    const data = (await res.json().catch(() => ({}))) as T | { message?: string };
+    if (res.ok) {
+      return data as T;
+    }
+
+    const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
+    if (res.status === 429 && attempt < API_RETRY_ATTEMPTS) {
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+      await sleep(retryAfterMs ?? 300 * attempt);
+      continue;
+    }
+
+    lastErr = new Error(msg);
+    break;
+  }
+
+  throw lastErr ?? new Error("API request failed");
+}
+
+export type PublicConfig = {
   serviceName?: string | null;
   logo?: string | null;
   publicAppUrl?: string | null;
@@ -67,8 +107,21 @@ export async function getPublicConfig(): Promise<{
   forceSubscribeEnabled?: boolean;
   forceSubscribeChannelId?: string | null;
   forceSubscribeMessage?: string | null;
-} | null> {
-  return fetchJson("/api/public/config");
+} | null;
+
+let publicConfigCacheValue: PublicConfig = null;
+let publicConfigCacheUntil = 0;
+
+/** Публичный конфиг (тарифы, кнопки, способы оплаты, trial и т.д.) */
+export async function getPublicConfig(): Promise<PublicConfig> {
+  const now = Date.now();
+  if (publicConfigCacheValue && now < publicConfigCacheUntil) {
+    return publicConfigCacheValue;
+  }
+  const next = await fetchJson<PublicConfig>("/api/public/config");
+  publicConfigCacheValue = next;
+  publicConfigCacheUntil = now + PUBLIC_CONFIG_CACHE_MS;
+  return next;
 }
 
 /** Регистрация / вход по Telegram */
@@ -179,11 +232,10 @@ export async function activatePromoCode(token: string, code: string): Promise<{ 
 
 /** Внутренний список telegramId для массовой рассылки (только по BOT_INTERNAL_API_KEY). */
 export async function getBroadcastTargets(): Promise<{ items: string[]; count: number }> {
-  const internalKey = (process.env.BOT_INTERNAL_API_KEY || "").trim();
-  if (!internalKey) {
+  if (!BOT_INTERNAL_API_KEY) {
     throw new Error("BOT_INTERNAL_API_KEY is not set");
   }
   return fetchJson("/api/public/broadcast-targets", {
-    extraHeaders: { "X-Bot-Internal-Key": internalKey },
+    extraHeaders: { "X-Bot-Internal-Key": BOT_INTERNAL_API_KEY },
   });
 }
