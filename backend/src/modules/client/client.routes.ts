@@ -477,6 +477,30 @@ async function findExistingRemnaUserForClient(client: { id: string; email: strin
   return { uuid: existingUuid, currentExpireAt };
 }
 
+function buildRemnaUsernameForClient(client: { id: string; email: string | null; telegramId: string | null }): string {
+  const rawName = client.email?.split("@")[0] || `tg${client.telegramId || client.id.slice(-6)}`;
+  const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "user_" + Date.now().toString(36);
+  return username.length >= 3 ? username : "u_" + username;
+}
+
+async function createInactiveRemnaUserForClient(client: { id: string; email: string | null; telegramId: string | null }): Promise<{ uuid: string | null; error?: string; status: number }> {
+  const remnaBody: Record<string, unknown> = {
+    username: buildRemnaUsernameForClient(client),
+    trafficLimitBytes: 0,
+    trafficLimitStrategy: "NO_RESET",
+    expireAt: new Date(Date.now() - 1000).toISOString(),
+  };
+
+  if (client.email?.trim()) remnaBody.email = client.email.trim();
+  if (client.telegramId?.trim()) {
+    const tid = Number.parseInt(client.telegramId, 10);
+    if (!Number.isNaN(tid)) remnaBody.telegramId = tid;
+  }
+
+  const createRes = await remnaCreateUser(remnaBody);
+  return { uuid: extractRemnaUuid(createRes.data), error: createRes.error, status: createRes.status };
+}
+
 // Единый роутер /api/client: /auth (логин, регистрация, me) + кабинет (подписка, платежи)
 export const clientRouter = Router();
 clientRouter.use("/auth", clientAuthRouter);
@@ -978,7 +1002,22 @@ clientRouter.get("/subscription", async (req, res) => {
 
   const found = await findExistingRemnaUserForClient(client);
   if (!found.uuid) {
-    return res.json({ subscription: null, tariffDisplayName: null, message: "Подписка не привязана" });
+    if (!isRemnaConfigured()) {
+      return res.json({ subscription: null, tariffDisplayName: null, message: "Подписка не привязана" });
+    }
+
+    const recreated = await createInactiveRemnaUserForClient(client);
+    if (recreated.error || !recreated.uuid) {
+      return res.json({ subscription: null, tariffDisplayName: null, message: recreated.error ?? "Подписка не привязана" });
+    }
+
+    await prisma.client.update({ where: { id: client.id }, data: { remnawaveUuid: recreated.uuid } });
+    const recreatedUser = await remnaGetUser(recreated.uuid);
+    if (recreatedUser.error) {
+      return res.json({ subscription: null, tariffDisplayName: null, message: recreatedUser.error });
+    }
+    const tariffDisplayName = await resolveTariffDisplayName(recreatedUser.data ?? null);
+    return res.json({ subscription: recreatedUser.data ?? null, tariffDisplayName });
   }
 
   if (found.uuid !== client.remnawaveUuid) {
