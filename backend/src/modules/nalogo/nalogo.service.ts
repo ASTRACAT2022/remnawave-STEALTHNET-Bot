@@ -143,19 +143,30 @@ async function createNalogoReceiptViaPythonBridge(
   const payload = {
     inn: String(config.inn ?? "").trim(),
     password: String(config.password ?? "").trim(),
+    deviceId: config.deviceId ?? null,
     name: params.name,
     amountRub: params.amountRub,
     quantity: params.quantity,
     clientPhone: params.clientPhone ?? null,
     clientName: params.clientName ?? null,
     clientInn: params.clientInn ?? null,
+    timeoutSeconds: config.timeoutSeconds,
+    proxyUrl: resolveNalogoProxyRaw(config) || null,
     operationTimeIso: new Date().toISOString(),
   };
 
   return await new Promise<NalogoCreateReceiptResult>((resolve) => {
+    const childEnv = {
+      ...process.env,
+      NALOGO_TIMEOUT_SECONDS:
+        Number.isFinite(config.timeoutSeconds) && Number(config.timeoutSeconds) > 0
+          ? String(config.timeoutSeconds)
+          : "",
+      NALOGO_PROXY_URL: resolveNalogoProxyRaw(config) || "",
+    };
     const child = spawn(pythonBin, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: childEnv,
     });
     let stdout = "";
     let stderr = "";
@@ -983,7 +994,7 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const bridgeOnly = isTrueLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY);
+  const bridgeOnly = !isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY ?? "true");
   let bridgeFailure: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
   const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
     config,
@@ -1003,7 +1014,15 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const proxy: SocksProxyConfig | null = null;
+  const proxyRaw = resolveNalogoProxyRaw(config);
+  const { proxy, error: proxyError } = parseSocksProxyConfig(proxyRaw);
+  if (proxyError) {
+    return mergeBridgeAndNativeError(bridgeFailure, {
+      error: proxyError,
+      status: 400,
+      retryable: false,
+    });
+  }
   try {
     // 1) Авторизация
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);

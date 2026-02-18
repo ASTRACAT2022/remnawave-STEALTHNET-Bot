@@ -48,6 +48,17 @@ function isConfigReady(config: SystemConfig): boolean {
   );
 }
 
+function onlyDigits(raw: string | null | undefined): string {
+  return (raw ?? "").replace(/\D/g, "");
+}
+
+function isSuspiciousReceiptUuid(receiptUuid: string, inn: string | null | undefined): boolean {
+  const uuidDigits = onlyDigits(receiptUuid);
+  const innDigits = onlyDigits(inn);
+  if (!uuidDigits || !innDigits) return false;
+  return uuidDigits === innDigits;
+}
+
 export type NalogoReceiptProcessStatus =
   | "created"
   | "failed"
@@ -109,11 +120,19 @@ export async function processNalogoReceiptForPayment(
     }
 
     const meta = parseMeta(row.metadata);
-    if (typeof meta.nalogoReceiptUuid === "string" && meta.nalogoReceiptUuid.trim()) {
-      return {
-        status: "already_created" as const,
-        receiptUuid: meta.nalogoReceiptUuid.trim(),
-      };
+    const existingReceiptUuid =
+      typeof meta.nalogoReceiptUuid === "string" ? meta.nalogoReceiptUuid.trim() : "";
+    if (existingReceiptUuid) {
+      if (!isSuspiciousReceiptUuid(existingReceiptUuid, config.nalogoInn)) {
+        return {
+          status: "already_created" as const,
+          receiptUuid: existingReceiptUuid,
+        };
+      }
+      delete meta.nalogoReceiptUuid;
+      delete meta.nalogoReceiptNextRetryAt;
+      meta.nalogoReceiptLastError =
+        "Сброшен некорректный UUID чека (совпадал с ИНН), запускаем повторную отправку.";
     }
 
     const inProgressAt =
@@ -247,6 +266,7 @@ export async function processPendingNalogoReceipts(options?: {
     ? Math.min(Math.floor(limitRaw), 500)
     : 100;
 
+  const suspiciousUuidValue = String(config.nalogoInn ?? "").trim();
   const rows = await prisma.payment.findMany({
     where: {
       provider: "yookassa",
@@ -255,6 +275,9 @@ export async function processPendingNalogoReceipts(options?: {
         { metadata: null },
         { metadata: "" },
         { metadata: { not: { contains: "\"nalogoReceiptUuid\"" } } },
+        ...(suspiciousUuidValue
+          ? [{ metadata: { contains: `"nalogoReceiptUuid":"${suspiciousUuidValue}"` } }]
+          : []),
       ],
     },
     select: { id: true },

@@ -2226,6 +2226,7 @@ adminRouter.post("/nalogo-receipts/retry-pending", asyncRoute(async (req, res) =
   }
 
   const limit = parsed.data.limit ?? 200;
+  const suspiciousUuidValue = String(config.nalogoInn ?? "").trim();
   const rows = await prisma.payment.findMany({
     where: {
       provider: "yookassa",
@@ -2234,6 +2235,9 @@ adminRouter.post("/nalogo-receipts/retry-pending", asyncRoute(async (req, res) =
         { metadata: null },
         { metadata: "" },
         { metadata: { not: { contains: "\"nalogoReceiptUuid\"" } } },
+        ...(suspiciousUuidValue
+          ? [{ metadata: { contains: `"nalogoReceiptUuid":"${suspiciousUuidValue}"` } }]
+          : []),
       ],
     },
     select: { id: true },

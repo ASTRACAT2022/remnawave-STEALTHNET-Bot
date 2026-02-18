@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 def emit(payload: dict[str, Any], code: int) -> None:
@@ -29,7 +33,56 @@ def parse_dt(raw: Any) -> datetime:
     return datetime.utcnow()
 
 
-def extract_uuid(value: Any) -> str | None:
+def parse_timeout_seconds(raw: Any) -> float:
+    candidates: list[Any] = [raw, os.environ.get("NALOGO_TIMEOUT_SECONDS")]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            value = float(candidate)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return max(3.0, min(120.0, value))
+    return 30.0
+
+
+def mask_proxy_url(raw: str) -> str:
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return "invalid"
+    if parsed.username or parsed.password:
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        netloc = f"***:***@{host}{port}"
+    else:
+        netloc = parsed.netloc
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def apply_proxy(raw: str | None) -> str:
+    value = (raw or "").strip() or os.environ.get("NALOGO_PROXY_URL", "").strip()
+    if not value:
+        return "off"
+
+    try:
+        parsed = urlsplit(value)
+    except Exception:
+        raise ValueError("invalid proxy url")
+
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https", "socks", "socks5", "socks5h"}:
+        raise ValueError("unsupported proxy scheme")
+    if not parsed.hostname:
+        raise ValueError("proxy host is missing")
+
+    for env_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        os.environ[env_key] = value
+    return mask_proxy_url(value)
+
+
+def extract_uuid(value: Any, *, allow_plain_any: bool = False) -> str | None:
     if not isinstance(value, str):
         return None
     s = value.strip()
@@ -42,7 +95,17 @@ def extract_uuid(value: Any) -> str | None:
     m = re.search(r"/receipt/([^/]+)$", s)
     if m:
         return m.group(1)
-    if re.fullmatch(r"[A-Za-z0-9_-]{8,}", s):
+
+    # Канонический UUID.
+    if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", s):
+        return s
+
+    # Из trusted-полей API допускаем короткие токены (например, не-UUID идентификаторы).
+    if allow_plain_any and re.fullmatch(r"[A-Za-z0-9_-]{8,}", s):
+        return s
+
+    # Для нетrusted-полей отсекаем короткие цифровые значения (например, ИНН).
+    if re.fullmatch(r"[A-Za-z0-9_-]{16,}", s):
         return s
     return None
 
@@ -55,25 +118,29 @@ def pick_first(data: dict[str, Any], keys: list[str]) -> Any:
 
 
 def find_uuid_deep(value: Any) -> str | None:
-    direct = extract_uuid(value)
-    if direct:
-        return direct
     if isinstance(value, dict):
-        for key in ("approvedReceiptUuid", "receiptUuid", "uuid", "receiptUrl", "printUrl", "url", "link"):
+        for key in ("approvedReceiptUuid", "receiptUuid", "uuid"):
             if key in value:
-                found = find_uuid_deep(value[key])
+                found = extract_uuid(value[key], allow_plain_any=True)
+                if found:
+                    return found
+        for key in ("receiptUrl", "printUrl", "url", "link"):
+            if key in value:
+                found = extract_uuid(value[key])
                 if found:
                     return found
         for nested in value.values():
-            found = find_uuid_deep(nested)
-            if found:
-                return found
+            if isinstance(nested, (dict, list)):
+                found = find_uuid_deep(nested)
+                if found:
+                    return found
         return None
     if isinstance(value, list):
         for item in value:
-            found = find_uuid_deep(item)
-            if found:
-                return found
+            if isinstance(item, (dict, list)):
+                found = find_uuid_deep(item)
+                if found:
+                    return found
     return None
 
 
@@ -131,6 +198,14 @@ def main() -> None:
     name = str(payload.get("name", "")).strip()
     amount = payload.get("amountRub")
     op_time = parse_dt(payload.get("operationTimeIso"))
+    timeout_seconds = parse_timeout_seconds(payload.get("timeoutSeconds"))
+
+    socket.setdefaulttimeout(timeout_seconds)
+
+    try:
+        proxy_label = apply_proxy(payload.get("proxyUrl"))
+    except ValueError as exc:
+        emit({"ok": False, "error": f"invalid proxy config: {exc}", "status": 400, "retryable": False}, 1)
 
     if not inn or not password:
         emit({"ok": False, "error": "missing inn/password", "status": 400, "retryable": False}, 1)
@@ -143,22 +218,32 @@ def main() -> None:
     if amount_value <= 0:
         emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
 
-
-    try:
-        NalogAPI.configure(inn, password)
-        result = NalogAPI.addIncome(op_time, amount_value, name)
-    except Exception as exc:
-        msg = str(exc)
-        status, retryable = classify_error(msg)
-        emit(
-            {
-                "ok": False,
-                "error": f"nalogapi request failed: {msg}",
-                "status": status,
-                "retryable": retryable,
-            },
-            1,
-        )
+    attempts = 3
+    result: Any = None
+    for attempt in range(1, attempts + 1):
+        try:
+            NalogAPI.configure(inn, password)
+            result = NalogAPI.addIncome(op_time, amount_value, name)
+            break
+        except Exception as exc:
+            msg = str(exc)
+            status, retryable = classify_error(msg)
+            is_last = attempt >= attempts or not retryable
+            if is_last:
+                emit(
+                    {
+                        "ok": False,
+                        "error": (
+                            "nalogapi request failed: "
+                            f"{msg}; timeout={timeout_seconds:.0f}s; proxy={proxy_label}; "
+                            f"attempt={attempt}/{attempts}"
+                        ),
+                        "status": status,
+                        "retryable": retryable,
+                    },
+                    1,
+                )
+            time.sleep(min(2.0 * attempt, 4.0))
 
     receipt_uuid = find_uuid_deep(result)
     receipt_url = None
@@ -166,7 +251,7 @@ def main() -> None:
     if isinstance(result, str):
         receipt_url = result.strip()
         if not receipt_uuid:
-            receipt_uuid = extract_uuid(receipt_url)
+            receipt_uuid = extract_uuid(receipt_url, allow_plain_any=True)
     elif isinstance(result, dict):
         raw_url = pick_first(result, ["receiptUrl", "printUrl", "url", "link"])
         if isinstance(raw_url, str) and raw_url.strip():
@@ -182,6 +267,17 @@ def main() -> None:
             {
                 "ok": False,
                 "error": f"nalogapi did not return receipt UUID: {snippet}",
+                "status": 502,
+                "retryable": True,
+            },
+            1,
+        )
+
+    if receipt_uuid == inn:
+        emit(
+            {
+                "ok": False,
+                "error": "nalogapi returned INN instead of receipt UUID",
                 "status": 502,
                 "retryable": True,
             },

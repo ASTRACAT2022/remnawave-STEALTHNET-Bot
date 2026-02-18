@@ -12,7 +12,7 @@ FROM node:20-alpine
 RUN apk add --no-cache postgresql-client python3 py3-pip \
   && python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir nalogapi
+  && /opt/venv/bin/pip install --no-cache-dir nalogapi pysocks
 
 WORKDIR /app
 ENV NODE_ENV=production
