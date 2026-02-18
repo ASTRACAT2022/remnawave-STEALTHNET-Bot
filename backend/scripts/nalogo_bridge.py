@@ -144,6 +144,26 @@ def find_uuid_deep(value: Any) -> str | None:
     return None
 
 
+def find_receipt_url_deep(value: Any) -> str | None:
+    if isinstance(value, str):
+        s = value.strip()
+        if "/receipt/" in s and "lknpd.nalog.ru" in s:
+            return s
+        return None
+    if isinstance(value, dict):
+        for nested in value.values():
+            found = find_receipt_url_deep(nested)
+            if found:
+                return found
+        return None
+    if isinstance(value, list):
+        for item in value:
+            found = find_receipt_url_deep(item)
+            if found:
+                return found
+    return None
+
+
 def classify_error(message: str) -> tuple[int, bool]:
     msg = message.lower()
     if (
@@ -258,6 +278,12 @@ def main() -> None:
             receipt_url = raw_url.strip()
         if not receipt_uuid and receipt_url:
             receipt_uuid = extract_uuid(receipt_url)
+    if not receipt_url:
+        receipt_url = find_receipt_url_deep(result)
+    if (not receipt_uuid or receipt_uuid == inn) and receipt_url:
+        maybe_uuid = extract_uuid(receipt_url, allow_plain_any=True)
+        if maybe_uuid:
+            receipt_uuid = maybe_uuid
 
     if not receipt_uuid:
         snippet = str(result)
@@ -274,10 +300,13 @@ def main() -> None:
         )
 
     if receipt_uuid == inn:
+        snippet = str(result)
+        if len(snippet) > 200:
+            snippet = snippet[:200] + "..."
         emit(
             {
                 "ok": False,
-                "error": "nalogapi returned INN instead of receipt UUID",
+                "error": f"nalogapi returned INN instead of receipt UUID: {snippet}",
                 "status": 502,
                 "retryable": True,
             },
