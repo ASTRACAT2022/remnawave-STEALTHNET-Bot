@@ -443,6 +443,40 @@ function toClientShape(c: {
   };
 }
 
+function isRemnaUserNotFoundError(status: number, error?: string): boolean {
+  if (status === 404) return true;
+  const msg = (error ?? "").toLowerCase();
+  return msg.includes("not found") || msg.includes("specified params");
+}
+
+async function findExistingRemnaUserForClient(client: { id: string; email: string | null; telegramId: string | null }): Promise<{ uuid: string | null; currentExpireAt: Date | null }> {
+  let existingUuid: string | null = null;
+  let currentExpireAt: Date | null = null;
+
+  if (client.telegramId?.trim()) {
+    const byTgRes = await remnaGetUserByTelegramId(client.telegramId.trim());
+    existingUuid = extractRemnaUuid(byTgRes.data);
+    if (existingUuid) currentExpireAt = extractCurrentExpireAt(byTgRes.data);
+  }
+
+  if (!existingUuid && client.email?.trim()) {
+    const byEmailRes = await remnaGetUserByEmail(client.email.trim());
+    existingUuid = extractRemnaUuid(byEmailRes.data);
+    if (existingUuid) currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
+  }
+
+  if (!existingUuid) {
+    const rawName = client.email?.split("@")[0] || `user${client.id.slice(-6)}`;
+    const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "u_" + Date.now().toString(36);
+    const finalUsername = username.length >= 3 ? username : "u_" + username;
+    const byUsernameRes = await remnaGetUserByUsername(finalUsername);
+    existingUuid = extractRemnaUuid(byUsernameRes.data);
+    if (existingUuid) currentExpireAt = extractCurrentExpireAt(byUsernameRes.data);
+  }
+
+  return { uuid: existingUuid, currentExpireAt };
+}
+
 // Единый роутер /api/client: /auth (логин, регистрация, me) + кабинет (подписка, платежи)
 export const clientRouter = Router();
 clientRouter.use("/auth", clientAuthRouter);
@@ -577,47 +611,41 @@ clientRouter.post("/trial", async (req, res) => {
   const trafficLimitBytes = config.trialTrafficLimitBytes ?? 0;
   const hwidDeviceLimit = config.trialDeviceLimit ?? null;
 
-  if (client.remnawaveUuid) {
-    const userRes = await remnaGetUser(client.remnawaveUuid);
-    if (userRes.error) {
-      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
-    }
-    const currentExpireAt = extractCurrentExpireAt(userRes.data);
-    const expireAt = calculateExpireAt(currentExpireAt, trialDays);
+  let effectiveRemnaUuid = client.remnawaveUuid;
 
-    const updateRes = await remnaUpdateUser({
-      uuid: client.remnawaveUuid,
-      expireAt,
-      trafficLimitBytes,
-      hwidDeviceLimit,
-      activeInternalSquads: [trialSquadUuid],
-    });
-    if (updateRes.error) {
-      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+  if (effectiveRemnaUuid) {
+    const userRes = await remnaGetUser(effectiveRemnaUuid);
+    if (userRes.error) {
+      if (isRemnaUserNotFoundError(userRes.status, userRes.error)) {
+        effectiveRemnaUuid = null;
+      } else {
+        return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+      }
     }
-    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [trialSquadUuid])) return;
-  } else {
+
+    if (effectiveRemnaUuid) {
+      const currentExpireAt = extractCurrentExpireAt(userRes.data);
+      const expireAt = calculateExpireAt(currentExpireAt, trialDays);
+
+      const updateRes = await remnaUpdateUser({
+        uuid: effectiveRemnaUuid,
+        expireAt,
+        trafficLimitBytes,
+        hwidDeviceLimit,
+        activeInternalSquads: [trialSquadUuid],
+      });
+      if (updateRes.error) {
+        return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+      }
+      if (!await ensureUserInSquadsOrError(res, effectiveRemnaUuid, [trialSquadUuid])) return;
+    }
+  }
+
+  if (!effectiveRemnaUuid) {
     // Сначала ищем существующего пользователя в Remna (по Telegram ID, email, username), чтобы не получать "username already exists"
-    let existingUuid: string | null = null;
-    let currentExpireAt: Date | null = null;
-    if (client.telegramId?.trim()) {
-      const byTgRes = await remnaGetUserByTelegramId(client.telegramId.trim());
-      existingUuid = extractRemnaUuid(byTgRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byTgRes.data);
-    }
-    if (!existingUuid && client.email?.trim()) {
-      const byEmailRes = await remnaGetUserByEmail(client.email.trim());
-      existingUuid = extractRemnaUuid(byEmailRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
-    }
-    if (!existingUuid) {
-      const rawName = client.email?.split("@")[0] || `user${client.id.slice(-6)}`;
-      const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "u_" + Date.now().toString(36);
-      const finalUsername = username.length >= 3 ? username : "u_" + username;
-      const byUsernameRes = await remnaGetUserByUsername(finalUsername);
-      existingUuid = extractRemnaUuid(byUsernameRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byUsernameRes.data);
-    }
+    const found = await findExistingRemnaUserForClient(client);
+    let existingUuid: string | null = found.uuid;
+    let currentExpireAt: Date | null = found.currentExpireAt;
 
     const expireAt = calculateExpireAt(currentExpireAt, trialDays);
 
@@ -693,40 +721,42 @@ clientRouter.post("/promo/activate", async (req, res) => {
   const trafficLimitBytes = Number(group.trafficLimitBytes);
   const hwidDeviceLimit = group.deviceLimit ?? null;
 
-  if (client.remnawaveUuid) {
-    // Получаем текущий expireAt и добавляем дни
-    const userRes = await remnaGetUser(client.remnawaveUuid);
-    if (userRes.error) {
-      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
-    }
-    const currentExpireAt = extractCurrentExpireAt(userRes.data);
-    const expireAt = calculateExpireAt(currentExpireAt, group.durationDays);
+  let effectiveRemnaUuid = client.remnawaveUuid;
 
-    const updateRes = await remnaUpdateUser({
-      uuid: client.remnawaveUuid,
-      expireAt,
-      trafficLimitBytes,
-      hwidDeviceLimit,
-      activeInternalSquads: [group.squadUuid],
-    });
-    if (updateRes.error) {
-      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+  if (effectiveRemnaUuid) {
+    // Получаем текущий expireAt и добавляем дни
+    const userRes = await remnaGetUser(effectiveRemnaUuid);
+    if (userRes.error) {
+      if (isRemnaUserNotFoundError(userRes.status, userRes.error)) {
+        effectiveRemnaUuid = null;
+      } else {
+        return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+      }
     }
-    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [group.squadUuid])) return;
-  } else {
+
+    if (effectiveRemnaUuid) {
+      const currentExpireAt = extractCurrentExpireAt(userRes.data);
+      const expireAt = calculateExpireAt(currentExpireAt, group.durationDays);
+
+      const updateRes = await remnaUpdateUser({
+        uuid: effectiveRemnaUuid,
+        expireAt,
+        trafficLimitBytes,
+        hwidDeviceLimit,
+        activeInternalSquads: [group.squadUuid],
+      });
+      if (updateRes.error) {
+        return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+      }
+      if (!await ensureUserInSquadsOrError(res, effectiveRemnaUuid, [group.squadUuid])) return;
+    }
+  }
+
+  if (!effectiveRemnaUuid) {
     // Ищем существующего пользователя или создаём нового
-    let existingUuid: string | null = null;
-    let currentExpireAt: Date | null = null;
-    if (client.telegramId?.trim()) {
-      const byTgRes = await remnaGetUserByTelegramId(client.telegramId.trim());
-      existingUuid = extractRemnaUuid(byTgRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byTgRes.data);
-    }
-    if (!existingUuid && client.email?.trim()) {
-      const byEmailRes = await remnaGetUserByEmail(client.email.trim());
-      existingUuid = extractRemnaUuid(byEmailRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
-    }
+    const found = await findExistingRemnaUserForClient(client);
+    let existingUuid: string | null = found.uuid;
+    let currentExpireAt: Date | null = found.currentExpireAt;
     const expireAt = calculateExpireAt(currentExpireAt, group.durationDays);
     if (!existingUuid) {
       const rawName = client.email?.split("@")[0] || `user${client.id.slice(-6)}`;
@@ -838,38 +868,40 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
   const trafficLimitBytes = Number(promo.trafficLimitBytes ?? 0);
   const hwidDeviceLimit = promo.deviceLimit ?? null;
 
-  if (client.remnawaveUuid) {
-    const userRes = await remnaGetUser(client.remnawaveUuid);
-    if (userRes.error) {
-      return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
-    }
-    const currentExpireAt = extractCurrentExpireAt(userRes.data);
-    const expireAt = calculateExpireAt(currentExpireAt, promo.durationDays);
+  let effectiveRemnaUuid = client.remnawaveUuid;
 
-    const updateRes = await remnaUpdateUser({
-      uuid: client.remnawaveUuid,
-      expireAt,
-      trafficLimitBytes,
-      hwidDeviceLimit,
-      activeInternalSquads: [promo.squadUuid],
-    });
-    if (updateRes.error) {
-      return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+  if (effectiveRemnaUuid) {
+    const userRes = await remnaGetUser(effectiveRemnaUuid);
+    if (userRes.error) {
+      if (isRemnaUserNotFoundError(userRes.status, userRes.error)) {
+        effectiveRemnaUuid = null;
+      } else {
+        return res.status(userRes.status >= 400 ? userRes.status : 500).json({ message: userRes.error });
+      }
     }
-    if (!await ensureUserInSquadsOrError(res, client.remnawaveUuid, [promo.squadUuid])) return;
-  } else {
-    let existingUuid: string | null = null;
-    let currentExpireAt: Date | null = null;
-    if (client.telegramId?.trim()) {
-      const byTgRes = await remnaGetUserByTelegramId(client.telegramId.trim());
-      existingUuid = extractRemnaUuid(byTgRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byTgRes.data);
+
+    if (effectiveRemnaUuid) {
+      const currentExpireAt = extractCurrentExpireAt(userRes.data);
+      const expireAt = calculateExpireAt(currentExpireAt, promo.durationDays);
+
+      const updateRes = await remnaUpdateUser({
+        uuid: effectiveRemnaUuid,
+        expireAt,
+        trafficLimitBytes,
+        hwidDeviceLimit,
+        activeInternalSquads: [promo.squadUuid],
+      });
+      if (updateRes.error) {
+        return res.status(updateRes.status >= 400 ? updateRes.status : 500).json({ message: updateRes.error });
+      }
+      if (!await ensureUserInSquadsOrError(res, effectiveRemnaUuid, [promo.squadUuid])) return;
     }
-    if (!existingUuid && client.email) {
-      const byEmailRes = await remnaGetUserByEmail(client.email.trim());
-      existingUuid = extractRemnaUuid(byEmailRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
-    }
+  }
+
+  if (!effectiveRemnaUuid) {
+    const found = await findExistingRemnaUserForClient(client);
+    let existingUuid: string | null = found.uuid;
+    let currentExpireAt: Date | null = found.currentExpireAt;
     const expireAt = calculateExpireAt(currentExpireAt, promo.durationDays);
     if (!existingUuid) {
       const rawName = client.email?.split("@")[0] || `user${client.id.slice(-6)}`;
@@ -927,16 +959,38 @@ async function resolveTariffDisplayName(remnaUserData: unknown): Promise<string>
 }
 
 clientRouter.get("/subscription", async (req, res) => {
-  const client = (req as unknown as { client: { id: string; remnawaveUuid: string | null } }).client;
-  if (!client.remnawaveUuid) {
+  const client = (req as unknown as { client: { id: string; remnawaveUuid: string | null; email: string | null; telegramId: string | null } }).client;
+
+  let effectiveRemnaUuid = client.remnawaveUuid;
+  if (effectiveRemnaUuid) {
+    const result = await remnaGetUser(effectiveRemnaUuid);
+    if (!result.error) {
+      const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null);
+      return res.json({ subscription: result.data ?? null, tariffDisplayName });
+    }
+
+    if (!isRemnaUserNotFoundError(result.status, result.error)) {
+      return res.json({ subscription: null, tariffDisplayName: null, message: result.error });
+    }
+
+    effectiveRemnaUuid = null;
+  }
+
+  const found = await findExistingRemnaUserForClient(client);
+  if (!found.uuid) {
     return res.json({ subscription: null, tariffDisplayName: null, message: "Подписка не привязана" });
   }
-  const result = await remnaGetUser(client.remnawaveUuid);
-  if (result.error) {
-    return res.json({ subscription: null, tariffDisplayName: null, message: result.error });
+
+  if (found.uuid !== client.remnawaveUuid) {
+    await prisma.client.update({ where: { id: client.id }, data: { remnawaveUuid: found.uuid } });
   }
-  const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null);
-  return res.json({ subscription: result.data ?? null, tariffDisplayName });
+
+  const relinked = await remnaGetUser(found.uuid);
+  if (relinked.error) {
+    return res.json({ subscription: null, tariffDisplayName: null, message: relinked.error });
+  }
+  const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null);
+  return res.json({ subscription: relinked.data ?? null, tariffDisplayName });
 });
 
 const createPlategaPaymentSchema = z.object({
