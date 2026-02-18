@@ -238,6 +238,10 @@ export const api = {
     return request(`/admin/nalogo-receipts${q ? `?${q}` : ""}`, { token });
   },
 
+  async testNalogoConnection(token: string): Promise<{ ok: boolean; message?: string; error?: string; status?: number; retryable?: boolean }> {
+    return request("/admin/nalogo-check", { method: "POST", token });
+  },
+
   async retryNalogoReceipt(token: string, paymentId: string): Promise<{
     status: string;
     paymentId: string;
@@ -700,7 +704,6 @@ export type UpdateSettingsPayload = {
   nalogoPassword?: string | null;
   nalogoDeviceId?: string | null;
   nalogoTimeout?: number;
-  nalogoProxyUrl?: string | null;
   botButtons?: string | null;
   botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | string | null;
   botBackLabel?: string | null;
@@ -799,7 +802,6 @@ export interface AdminSettings {
   nalogoPassword?: string | null;
   nalogoDeviceId?: string | null;
   nalogoTimeout?: number;
-  nalogoProxyUrl?: string | null;
   /** Кнопки главного меню бота: порядок, видимость, текст, стиль, ключ эмодзи (TRIAL, PACKAGE, …) */
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; emojiKey?: string }[];
   /** Эмодзи по ключам: Unicode и/или TG custom emoji ID (премиум). Ключи: TRIAL, PACKAGE, CARD, LINK, SERVERS, … */

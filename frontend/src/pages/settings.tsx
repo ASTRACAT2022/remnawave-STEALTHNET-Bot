@@ -94,6 +94,8 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [nalogoCheckLoading, setNalogoCheckLoading] = useState(false);
+  const [nalogoCheckMessage, setNalogoCheckMessage] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState<"from" | "to" | "missing" | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [squads, setSquads] = useState<{ uuid: string; name?: string }[]>([]);
@@ -118,7 +120,6 @@ export function SettingsPage() {
         yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
         nalogoEnabled: Boolean((data as AdminSettings).nalogoEnabled),
         nalogoTimeout: (data as AdminSettings).nalogoTimeout ?? 30,
-        nalogoProxyUrl: (data as AdminSettings).nalogoProxyUrl ?? null,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -208,6 +209,21 @@ export function SettingsPage() {
     }
   }
 
+  function checkNalogoConnection() {
+    setNalogoCheckLoading(true);
+    setNalogoCheckMessage(null);
+    api.testNalogoConnection(token)
+      .then((result) => {
+        if (result.ok) {
+          setNalogoCheckMessage(result.message ?? "Подключение к NaloGO успешно");
+          return;
+        }
+        setNalogoCheckMessage(result.error ?? "Не удалось подключиться к NaloGO");
+      })
+      .catch((e) => setNalogoCheckMessage(e instanceof Error ? e.message : "Ошибка проверки NaloGO"))
+      .finally(() => setNalogoCheckLoading(false));
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!settings) return;
@@ -265,7 +281,6 @@ export function SettingsPage() {
         nalogoPassword: settings.nalogoPassword && settings.nalogoPassword !== "********" ? settings.nalogoPassword : undefined,
         nalogoDeviceId: settings.nalogoDeviceId ?? null,
         nalogoTimeout: settings.nalogoTimeout ?? 30,
-        nalogoProxyUrl: settings.nalogoProxyUrl ?? null,
         botButtons: settings.botButtons != null ? JSON.stringify(settings.botButtons) : undefined,
         botEmojis: settings.botEmojis != null ? settings.botEmojis : undefined,
         botBackLabel: settings.botBackLabel ?? null,
@@ -1458,15 +1473,13 @@ export function SettingsPage() {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>SOCKS5 прокси (опционально)</Label>
-                      <Input
-                        value={settings.nalogoProxyUrl ?? ""}
-                        onChange={(e) => setSettings((s) => (s ? { ...s, nalogoProxyUrl: e.target.value || null } : s))}
-                        placeholder="socks5h://user:pass@ru-proxy.example:1080"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Для обхода региональных блокировок NaloGO. Рекомендуется формат `socks5h://` (DNS через прокси).
-                      </p>
+                      <Label>Проверка подключения к NaloGO</Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" onClick={checkNalogoConnection} disabled={nalogoCheckLoading}>
+                          {nalogoCheckLoading ? "Проверка…" : "Проверить подключение"}
+                        </Button>
+                        {nalogoCheckMessage ? <p className="text-xs text-muted-foreground">{nalogoCheckMessage}</p> : null}
+                      </div>
                     </div>
                     <div className="pt-2 border-t">
                       <Button type="submit" disabled={saving} className="min-w-[140px]">

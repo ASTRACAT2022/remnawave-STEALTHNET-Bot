@@ -40,6 +40,7 @@ import { registerBackupRoutes } from "../backup/backup.routes.js";
 import {
   processNalogoReceiptForPayment,
 } from "../nalogo/nalogo-receipts.service.js";
+import { testNalogoConnection } from "../nalogo/nalogo.service.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -1072,7 +1073,6 @@ const updateSettingsSchema = z.object({
   nalogoPassword: z.string().max(500).nullable().optional(),
   nalogoDeviceId: z.string().max(100).nullable().optional(),
   nalogoTimeout: z.number().min(1).max(120).optional(),
-  nalogoProxyUrl: z.string().max(2000).nullable().optional(),
   botButtons: z.string().max(10000).nullable().optional(),
   botEmojis: z.union([z.string().max(15000), z.record(z.object({ unicode: z.string().max(20).optional(), tgEmojiId: z.string().max(50).optional() }))]).nullable().optional(),
   botBackLabel: z.string().max(200).nullable().optional(),
@@ -1353,14 +1353,6 @@ adminRouter.patch("/settings", async (req, res) => {
       where: { key: "nalogo_timeout" },
       create: { key: "nalogo_timeout", value: String(updates.nalogoTimeout) },
       update: { value: String(updates.nalogoTimeout) },
-    });
-  }
-  if (updates.nalogoProxyUrl !== undefined) {
-    const val = updates.nalogoProxyUrl ?? "";
-    await prisma.systemSetting.upsert({
-      where: { key: "nalogo_proxy_url" },
-      create: { key: "nalogo_proxy_url", value: val },
-      update: { value: val },
     });
   }
   if (updates.botButtons !== undefined) {
@@ -2115,6 +2107,23 @@ adminRouter.get("/sales-report", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+adminRouter.post("/nalogo-check", asyncRoute(async (_req, res) => {
+  const config = await getSystemConfig();
+  const result = await testNalogoConnection({
+    enabled: Boolean(config.nalogoEnabled),
+    inn: config.nalogoInn,
+    password: config.nalogoPassword,
+    deviceId: config.nalogoDeviceId,
+    timeoutSeconds: config.nalogoTimeout,
+  });
+
+  if (!result.ok) {
+    return res.status(result.status).json(result);
+  }
+
+  return res.json(result);
+}));
+
 //  ЧЕКИ В НАЛОГОВУЮ (NaloGO)
 // ═══════════════════════════════════════════════════════════════
 
