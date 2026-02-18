@@ -34,6 +34,14 @@ def parse_dt(raw: Any) -> datetime:
     return datetime.utcnow()
 
 
+def normalize_operation_time(op_time: datetime) -> datetime:
+    """FNS rejects operation time from the future; clamp to current UTC."""
+    now = datetime.utcnow()
+    if op_time > now:
+        return now
+    return op_time
+
+
 def parse_timeout_seconds(raw: Any) -> float:
     candidates: list[Any] = [raw, os.environ.get("NALOGO_TIMEOUT_SECONDS")]
     for candidate in candidates:
@@ -300,7 +308,7 @@ def main() -> None:
     password = str(payload.get("password", "")).strip()
     name = str(payload.get("name", "")).strip()
     amount = payload.get("amountRub")
-    op_time = parse_dt(payload.get("operationTimeIso"))
+    op_time = normalize_operation_time(parse_dt(payload.get("operationTimeIso")))
     timeout_seconds = parse_timeout_seconds(payload.get("timeoutSeconds"))
 
     socket.setdefaulttimeout(timeout_seconds)
