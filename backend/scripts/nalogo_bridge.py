@@ -191,6 +191,27 @@ def classify_error(message: str) -> tuple[int, bool]:
     return 502, True
 
 
+def ensure_python_runtime() -> None:
+    """Prefer project venv python even when script is launched as plain `python`."""
+    venv_python = "/opt/venv/bin/python"
+    if not os.path.exists(venv_python):
+        return
+    current = os.path.realpath(sys.executable)
+    target = os.path.realpath(venv_python)
+    if current == target:
+        return
+    if os.environ.get("NALOGO_BRIDGE_REEXECED") == "1":
+        return
+    os.execve(
+        venv_python,
+        [venv_python, *sys.argv],
+        {
+            **os.environ,
+            "NALOGO_BRIDGE_REEXECED": "1",
+        },
+    )
+
+
 def ensure_nalogapi_available() -> tuple[Any | None, str | None]:
     try:
         from nalogapi import NalogAPI  # type: ignore
@@ -199,32 +220,47 @@ def ensure_nalogapi_available() -> tuple[Any | None, str | None]:
     except Exception as first_exc:
         # Кардинальный fallback: если образ/окружение без nalogapi,
         # пробуем доустановить пакет прямо в рантайме.
-        cmd = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "nalogapi", "pysocks"]
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env={
-                    **os.environ,
-                    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-                },
-            )
-        except Exception as install_exc:
-            return None, (
-                f"nalogapi import failed: {first_exc}; "
-                f"runtime install failed: {install_exc}"
-            )
+        commands = [
+            [sys.executable, "-m", "pip", "install", "--no-cache-dir", "nalogapi", "pysocks"],
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-cache-dir",
+                "--break-system-packages",
+                "nalogapi",
+                "pysocks",
+            ],
+        ]
+        last_error = ""
+        for cmd in commands:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    env={
+                        **os.environ,
+                        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                    },
+                )
+            except Exception as install_exc:
+                last_error = str(install_exc)
+                continue
 
-        if proc.returncode != 0:
+            if proc.returncode == 0:
+                last_error = ""
+                break
+
             tail = (proc.stderr or proc.stdout or "").strip()
             if len(tail) > 400:
                 tail = tail[-400:]
-            return None, (
-                f"nalogapi import failed: {first_exc}; "
-                f"runtime pip install exited with code {proc.returncode}: {tail}"
-            )
+            last_error = f"runtime pip install exited with code {proc.returncode}: {tail}"
+
+        if last_error:
+            return None, f"nalogapi import failed: {first_exc}; {last_error}"
 
         try:
             from nalogapi import NalogAPI  # type: ignore
@@ -237,6 +273,8 @@ def ensure_nalogapi_available() -> tuple[Any | None, str | None]:
 
 
 def main() -> None:
+    ensure_python_runtime()
+
     NalogAPI, import_error = ensure_nalogapi_available()
     if NalogAPI is None:
         emit(
