@@ -5,6 +5,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -190,14 +191,58 @@ def classify_error(message: str) -> tuple[int, bool]:
     return 502, True
 
 
-def main() -> None:
+def ensure_nalogapi_available() -> tuple[Any | None, str | None]:
     try:
-        from nalogapi import NalogAPI
-    except Exception as exc:
+        from nalogapi import NalogAPI  # type: ignore
+
+        return NalogAPI, None
+    except Exception as first_exc:
+        # Кардинальный fallback: если образ/окружение без nalogapi,
+        # пробуем доустановить пакет прямо в рантайме.
+        cmd = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "nalogapi", "pysocks"]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env={
+                    **os.environ,
+                    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                },
+            )
+        except Exception as install_exc:
+            return None, (
+                f"nalogapi import failed: {first_exc}; "
+                f"runtime install failed: {install_exc}"
+            )
+
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip()
+            if len(tail) > 400:
+                tail = tail[-400:]
+            return None, (
+                f"nalogapi import failed: {first_exc}; "
+                f"runtime pip install exited with code {proc.returncode}: {tail}"
+            )
+
+        try:
+            from nalogapi import NalogAPI  # type: ignore
+
+            return NalogAPI, None
+        except Exception as second_exc:
+            return None, (
+                f"nalogapi import failed after runtime install: {second_exc}"
+            )
+
+
+def main() -> None:
+    NalogAPI, import_error = ensure_nalogapi_available()
+    if NalogAPI is None:
         emit(
             {
                 "ok": False,
-                "error": f"nalogapi import failed: {exc}",
+                "error": str(import_error),
                 "status": 502,
                 "retryable": True,
             },
