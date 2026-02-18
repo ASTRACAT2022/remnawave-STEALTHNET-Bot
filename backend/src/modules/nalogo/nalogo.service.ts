@@ -912,6 +912,52 @@ async function nalogoPostWithRetry(
   throw lastError instanceof Error ? lastError : new Error("NaloGO network error");
 }
 
+export async function testNalogoConnection(
+  config: NalogoConfig,
+): Promise<{ ok: true; message: string } | { ok: false; error: string; status: number; retryable: boolean }> {
+  if (!isNalogoConfigured(config)) {
+    return {
+      ok: false,
+      error: "NaloGO не настроен (nalogo_enabled=false или пустые ИНН/пароль).",
+      status: 400,
+      retryable: false,
+    };
+  }
+
+  const timeoutMs = resolveTimeoutMs(config);
+  const inn = String(config.inn).trim();
+  const password = String(config.password).trim();
+  const deviceId = normalizeDeviceId(config.deviceId, inn);
+  const proxy: SocksProxyConfig | null = null;
+
+  try {
+    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
+    if ("error" in authResult) {
+      return { ok: false, ...authResult };
+    }
+
+    return { ok: true, message: "Авторизация в NaloGO успешна" };
+  } catch (e) {
+    if (isTimeoutError(e)) {
+      const details = e instanceof Error && e.message ? `: ${e.message}` : "";
+      return {
+        ok: false,
+        error: `NaloGO timeout (${proxyModeLabel(proxy)})${details}`.slice(0, 500),
+        status: 504,
+        retryable: true,
+      };
+    }
+
+    const eMessage = e instanceof Error ? e.message : "NaloGO unknown error";
+    return {
+      ok: false,
+      error: `${eMessage} (${proxyModeLabel(proxy)})`.slice(0, 500),
+      status: 502,
+      retryable: true,
+    };
+  }
+}
+
 export async function createNalogoReceipt(
   config: NalogoConfig,
   params: {
@@ -957,7 +1003,6 @@ export async function createNalogoReceipt(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  // Прокси отключён принудительно по запросу: работаем только напрямую.
   const proxy: SocksProxyConfig | null = null;
   try {
     // 1) Авторизация

@@ -143,6 +143,7 @@ def main() -> None:
     if amount_value <= 0:
         emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
 
+
     try:
         NalogAPI.configure(inn, password)
         result = NalogAPI.addIncome(op_time, amount_value, name)
