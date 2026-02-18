@@ -430,6 +430,37 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ---
 
+## Чеки в налоговую (Вариант 1: Python + nalogapi)
+
+В проекте используется именно Python-схема:
+
+1. После успешной оплаты backend вызывает Python-bridge с `nalogapi`.
+2. Bridge отправляет доход в `lknpd.nalog.ru` (`NalogAPI.addIncome(...)`).
+3. UUID чека сохраняется в `payments.metadata`.
+4. Фоновый воркер автоматически повторяет неотправленные чеки.
+
+Основные параметры (`docker-compose.yml`, сервис `api`):
+
+- `NALOGO_PYTHON_BRIDGE_ENABLED=true`
+- `NALOGO_PYTHON_BRIDGE_ONLY=true`
+- `NALOGO_PYTHON_BIN=/opt/venv/bin/python`
+- `NALOGO_PYTHON_BRIDGE_PATH=/app/scripts/nalogo_bridge.py`
+- `NALOGO_RETRY_INTERVAL_MS=60000`
+- `NALOGO_RETRY_BATCH_SIZE=100`
+- `NALOGO_RETRY_ITEM_DELAY_MS=3000`
+
+Проверка bridge вручную:
+
+```bash
+docker compose exec api sh -lc 'python /app/scripts/nalogo_bridge.py <<EOF
+{"inn":"YOUR_INN","password":"YOUR_PASSWORD","name":"Оплата услуг связи ASTRACAT #123","amountRub":1500.0,"operationTimeIso":"2026-02-18T12:00:00Z"}
+EOF'
+```
+
+Ожидаемый результат: JSON с `"ok": true` и `"receiptUuid"`.
+
+---
+
 ## Структура проекта
 
 ```

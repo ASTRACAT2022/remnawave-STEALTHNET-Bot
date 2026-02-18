@@ -54,6 +54,9 @@ services:
       NALOGO_PYTHON_BRIDGE_ONLY: "${NALOGO_PYTHON_BRIDGE_ONLY:-true}"
       NALOGO_PYTHON_BIN: "${NALOGO_PYTHON_BIN:-/opt/venv/bin/python}"
       NALOGO_PYTHON_BRIDGE_PATH: "${NALOGO_PYTHON_BRIDGE_PATH:-/app/scripts/nalogo_bridge.py}"
+      NALOGO_RETRY_INTERVAL_MS: "${NALOGO_RETRY_INTERVAL_MS:-60000}"
+      NALOGO_RETRY_BATCH_SIZE: "${NALOGO_RETRY_BATCH_SIZE:-100}"
+      NALOGO_RETRY_ITEM_DELAY_MS: "${NALOGO_RETRY_ITEM_DELAY_MS:-3000}"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]
       interval: 15s

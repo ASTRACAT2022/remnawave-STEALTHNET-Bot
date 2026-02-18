@@ -127,6 +127,7 @@ async function createNalogoReceiptViaPythonBridge(
     clientPhone?: string | null;
     clientName?: string | null;
     clientInn?: string | null;
+    operationTime?: Date;
   },
   timeoutMs: number,
 ): Promise<NalogoCreateReceiptResult | null> {
@@ -152,7 +153,10 @@ async function createNalogoReceiptViaPythonBridge(
     clientInn: params.clientInn ?? null,
     timeoutSeconds: config.timeoutSeconds,
     proxyUrl: resolveNalogoProxyRaw(config) || null,
-    operationTimeIso: new Date().toISOString(),
+    operationTimeIso:
+      params.operationTime instanceof Date && Number.isFinite(params.operationTime.getTime())
+        ? params.operationTime.toISOString()
+        : new Date().toISOString(),
   };
 
   return await new Promise<NalogoCreateReceiptResult>((resolve) => {
@@ -978,6 +982,7 @@ export async function createNalogoReceipt(
     clientPhone?: string | null;
     clientName?: string | null;
     clientInn?: string | null;
+    operationTime?: Date;
   },
 ): Promise<NalogoCreateReceiptResult> {
   if (!isNalogoConfigured(config)) {
@@ -1031,7 +1036,10 @@ export async function createNalogoReceipt(
     }
 
     // 2) Создание чека
-    const now = new Date();
+    const now =
+      params.operationTime instanceof Date && Number.isFinite(params.operationTime.getTime())
+        ? params.operationTime
+        : new Date();
     const quantity = Number.isFinite(params.quantity) && Number(params.quantity) > 0 ? Number(params.quantity) : 1;
     const opTime = toMoscowIso(now);
     const totalAmount = amount.toFixed(2);

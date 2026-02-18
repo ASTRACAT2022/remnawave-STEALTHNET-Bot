@@ -14,6 +14,7 @@ const RETRY_BATCH_SIZE = Math.min(
   readPositiveIntEnv("NALOGO_RETRY_BATCH_SIZE", 100),
   500,
 );
+const RETRY_ITEM_DELAY_MS = readPositiveIntEnv("NALOGO_RETRY_ITEM_DELAY_MS", 3000);
 
 export type NalogoRetryWorkerHandle = {
   stop: () => void;
@@ -29,6 +30,7 @@ export function startNalogoReceiptRetryWorker(): NalogoRetryWorkerHandle {
     try {
       const result: NalogoRetryBatchResult = await processPendingNalogoReceipts({
         limit: RETRY_BATCH_SIZE,
+        itemDelayMs: RETRY_ITEM_DELAY_MS,
       });
 
       if (!result.configured) {
@@ -52,6 +54,7 @@ export function startNalogoReceiptRetryWorker(): NalogoRetryWorkerHandle {
   console.log("[NaloGO Retry Worker] Started", {
     intervalMs: RETRY_INTERVAL_MS,
     batchSize: RETRY_BATCH_SIZE,
+    itemDelayMs: RETRY_ITEM_DELAY_MS,
   });
 
   return {

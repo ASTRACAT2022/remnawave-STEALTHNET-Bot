@@ -188,6 +188,7 @@ export async function processNalogoReceiptForPayment(
     where: { id: paymentId },
     select: {
       amount: true,
+      paidAt: true,
     },
   });
   if (!payment) {
@@ -203,11 +204,13 @@ export async function processNalogoReceiptForPayment(
       password: config.nalogoPassword,
       deviceId: config.nalogoDeviceId,
       timeoutSeconds: config.nalogoTimeout,
+      proxyUrl: config.nalogoProxyUrl,
     },
     {
       name: receiptName,
       amountRub: payment.amount,
       quantity: 1,
+      operationTime: payment.paidAt ?? undefined,
     },
   );
 
@@ -253,8 +256,14 @@ export type NalogoRetryBatchResult = {
   skipped: number;
 };
 
+function sleep(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function processPendingNalogoReceipts(options?: {
   limit?: number;
+  itemDelayMs?: number;
 }): Promise<NalogoRetryBatchResult> {
   const config = await getSystemConfig();
   if (!isConfigReady(config)) {
@@ -265,6 +274,10 @@ export async function processPendingNalogoReceipts(options?: {
   const limit = Number.isFinite(limitRaw) && limitRaw > 0
     ? Math.min(Math.floor(limitRaw), 500)
     : 100;
+  const itemDelayRaw = options?.itemDelayMs ?? 3000;
+  const itemDelayMs = Number.isFinite(itemDelayRaw) && itemDelayRaw >= 0
+    ? Math.min(Math.floor(itemDelayRaw), 120_000)
+    : 3000;
 
   const suspiciousUuidValue = String(config.nalogoInn ?? "").trim();
   const rows = await prisma.payment.findMany({
@@ -289,11 +302,17 @@ export async function processPendingNalogoReceipts(options?: {
   let created = 0;
   let failed = 0;
   let skipped = 0;
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]!;
     const out = await processNalogoReceiptForPayment(row.id, config);
     if (out.status === "created") created += 1;
     else if (out.status === "failed") failed += 1;
     else skipped += 1;
+
+    const hasMore = i < rows.length - 1;
+    if (hasMore && itemDelayMs > 0) {
+      await sleep(itemDelayMs);
+    }
   }
 
   return {
