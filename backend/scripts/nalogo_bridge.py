@@ -31,12 +31,12 @@ def parse_dt(raw: Any) -> datetime:
             return parsed
         except ValueError:
             pass
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def normalize_operation_time(op_time: datetime) -> datetime:
     """FNS rejects operation time from the future; clamp to current UTC."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if op_time > now:
         return now
     return op_time
@@ -98,6 +98,14 @@ def extract_uuid(value: Any, *, allow_plain_any: bool = False) -> str | None:
     if not s:
         return None
 
+    # Most common print URL: /receipt/<inn>/<receipt_uuid>/print
+    m = re.search(r"/receipt/[^/]+/([^/]+)/print(?:$|[/?#])", s)
+    if m:
+        return m.group(1)
+    # Alternative URL: /receipt/<receipt_uuid>/print
+    m = re.search(r"/receipt/([^/]+)/print(?:$|[/?#])", s)
+    if m:
+        return m.group(1)
     m = re.search(r"/receipt/([^/]+)/", s)
     if m:
         return m.group(1)
