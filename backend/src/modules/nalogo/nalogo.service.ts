@@ -45,6 +45,33 @@ type NalogoPythonBridgeOutput = {
   retryable?: unknown;
 };
 
+function sleep(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readPositiveIntEnv(name: string, fallback: number, max: number): number {
+  const raw = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.min(Math.floor(raw), max);
+}
+
+function resolvePythonBridgeBins(primary: string): string[] {
+  const candidates = [
+    primary,
+    "/opt/venv/bin/python",
+    "python3",
+    "python",
+  ];
+  const out: string[] = [];
+  for (const bin of candidates) {
+    const value = bin.trim();
+    if (!value) continue;
+    if (!out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
 function defaultHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -135,7 +162,9 @@ async function createNalogoReceiptViaPythonBridge(
     return null;
   }
 
-  const pythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
+  const configuredPythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
+  const pythonBins = resolvePythonBridgeBins(configuredPythonBin);
+  const bridgeAttempts = readPositiveIntEnv("NALOGO_PYTHON_BRIDGE_ATTEMPTS", 2, 5);
   const scriptPath = (
     process.env.NALOGO_PYTHON_BRIDGE_PATH ??
     path.join(process.cwd(), "scripts", "nalogo_bridge.py")
@@ -159,7 +188,8 @@ async function createNalogoReceiptViaPythonBridge(
         : new Date().toISOString(),
   };
 
-  return await new Promise<NalogoCreateReceiptResult>((resolve) => {
+  const runOnce = async (pythonBin: string): Promise<NalogoCreateReceiptResult> =>
+    await new Promise<NalogoCreateReceiptResult>((resolve) => {
     const childEnv = {
       ...process.env,
       NALOGO_TIMEOUT_SECONDS:
@@ -203,7 +233,7 @@ async function createNalogoReceiptViaPythonBridge(
 
     child.on("error", (error) => {
       finish({
-        error: `NaloGO python bridge start failed: ${error.message}`,
+        error: `NaloGO python bridge start failed (${pythonBin}): ${error.message}`,
         status: 502,
         retryable: true,
       });
@@ -235,7 +265,7 @@ async function createNalogoReceiptViaPythonBridge(
           ? parsed.error.trim()
           : null;
       const fallbackMsg = err || out || `python bridge exited with code ${code ?? -1}`;
-      const message = `NaloGO python bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
+      const message = `NaloGO python bridge failed (${pythonBin}): ${parsedError ?? fallbackMsg}`.slice(0, 500);
       const status = normalizeHttpStatus(parsed?.status, 502);
       const retryable =
         parsed && typeof parsed.retryable === "boolean"
@@ -252,6 +282,37 @@ async function createNalogoReceiptViaPythonBridge(
     child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
   });
+
+  const failures: string[] = [];
+  let lastFailure: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
+  for (let attempt = 1; attempt <= bridgeAttempts; attempt += 1) {
+    for (const pythonBin of pythonBins) {
+      const result = await runOnce(pythonBin);
+      if ("receiptUuid" in result) return result;
+
+      lastFailure = result;
+      failures.push(`[a${attempt}:${pythonBin}] ${result.error}`);
+      if (!result.retryable) {
+        return result;
+      }
+    }
+    if (attempt < bridgeAttempts) {
+      await sleep(Math.min(1200, 300 * attempt));
+    }
+  }
+
+  if (!lastFailure) {
+    return {
+      error: "NaloGO python bridge failed: no execution result",
+      status: 502,
+      retryable: true,
+    };
+  }
+  return {
+    error: `NaloGO python bridge failed after ${bridgeAttempts} attempts: ${failures.join(" | ")}`.slice(0, 500),
+    status: lastFailure.status,
+    retryable: lastFailure.retryable,
+  };
 }
 
 function isRetryableStatus(status: number): boolean {
