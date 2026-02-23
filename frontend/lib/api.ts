@@ -18,8 +18,19 @@ const DEFAULT_STATE: AuthState = {
   apiKey: "",
 };
 
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
 export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (configured && configured.trim()) {
+    return trimTrailingSlash(configured.trim());
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return trimTrailingSlash(window.location.origin);
+  }
+  return "http://localhost:8080";
 }
 
 export function loadAuthState(): AuthState {
@@ -94,6 +105,31 @@ async function parseApiError(resp: Response): Promise<string> {
   return `${resp.status} ${resp.statusText}`;
 }
 
+function buildApiBaseCandidates(): string[] {
+  const primary = getApiBaseUrl();
+  const candidates = [primary];
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    const originBase = trimTrailingSlash(window.location.origin);
+    let primaryHost = "";
+    try {
+      primaryHost = new URL(primary).hostname;
+    } catch {
+      primaryHost = "";
+    }
+    const shouldFallbackToOrigin =
+      primaryHost === "" ||
+      primaryHost === "localhost" ||
+      primaryHost === "127.0.0.1" ||
+      primaryHost === "0.0.0.0";
+    if (shouldFallbackToOrigin && !candidates.includes(originBase)) {
+      candidates.push(originBase);
+    }
+  }
+
+  return candidates;
+}
+
 export async function apiRequest<T>(
   path: string,
   init?: RequestInit,
@@ -102,26 +138,50 @@ export async function apiRequest<T>(
   const auth = authOverride ?? loadAuthState();
   const method = init?.method ?? "GET";
   const hasBody = Boolean(init?.body);
+  const candidates = buildApiBaseCandidates();
+  let lastNetworkError: unknown = null;
 
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    method,
-    headers: {
-      ...buildHeaders(auth, hasBody),
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  for (const baseUrl of candidates) {
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        method,
+        headers: {
+          ...buildHeaders(auth, hasBody),
+          ...(init?.headers ?? {}),
+        },
+        cache: "no-store",
+      });
+    } catch (err) {
+      lastNetworkError = err;
+      continue;
+    }
 
-  if (!response.ok) {
-    throw new Error(await parseApiError(response));
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("application/json")) {
+      return (await response.json()) as T;
+    }
+
+    const raw = await response.text();
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return raw as T;
+    }
   }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
+  const urlList = candidates.join(", ");
+  const reason = lastNetworkError instanceof Error ? lastNetworkError.message : "unknown network failure";
+  throw new Error(`NetworkError: failed to reach API (${urlList}). ${reason}`);
 }
 
 export function formatDate(value?: string | null): string {

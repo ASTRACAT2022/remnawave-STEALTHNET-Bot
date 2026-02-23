@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     nodes,
     protocols,
     reseller,
+    singbox,
     squads,
     subscription,
     users,
@@ -34,6 +35,8 @@ api_router.include_router(reseller.router)
 api_router.include_router(backup.router)
 api_router.include_router(analytics.router)
 api_router.include_router(audit.router)
+api_router.include_router(singbox.admin_router)
 
 agent_router = APIRouter()
 agent_router.include_router(nodes.agent_router)
+agent_router.include_router(singbox.agent_router)

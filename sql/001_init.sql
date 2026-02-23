@@ -70,6 +70,12 @@ CREATE TABLE IF NOT EXISTS plans (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS plan_squad_links (
+  plan_id VARCHAR(36) PRIMARY KEY REFERENCES plans(id),
+  squad_id VARCHAR(36) NOT NULL REFERENCES squads(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   id VARCHAR(36) PRIMARY KEY,
   user_id VARCHAR(36) NOT NULL REFERENCES users(id),

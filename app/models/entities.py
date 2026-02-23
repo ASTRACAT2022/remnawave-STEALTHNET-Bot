@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -100,6 +100,25 @@ class ConfigRevisionStatus(str, enum.Enum):
     rolled_back = "rolled_back"
 
 
+class SingboxNodeStatus(str, enum.Enum):
+    online = "ONLINE"
+    offline = "OFFLINE"
+    disabled = "DISABLED"
+
+
+class SingboxProtocol(str, enum.Enum):
+    vless = "VLESS"
+    shadowsocks = "SHADOWSOCKS"
+    trojan = "TROJAN"
+    hysteria2 = "HYSTERIA2"
+
+
+class SingboxSlotStatus(str, enum.Enum):
+    active = "ACTIVE"
+    expired = "EXPIRED"
+    revoked = "REVOKED"
+
+
 class Reseller(Base):
     __tablename__ = "resellers"
 
@@ -171,6 +190,7 @@ class User(Base):
     squad: Mapped["Squad"] = relationship(back_populates="users")
     reseller: Mapped["Reseller"] = relationship(back_populates="users")
     devices: Mapped[list["Device"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    singbox_slots: Mapped[list["SingboxSlot"]] = relationship(back_populates="client")
 
 
 class Device(Base):
@@ -256,6 +276,85 @@ class Node(Base):
     config_revisions: Mapped[list["ConfigRevision"]] = relationship(back_populates="node", cascade="all, delete-orphan")
 
 
+class SingboxNode(Base):
+    __tablename__ = "singbox_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(128))
+    token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[SingboxNodeStatus] = mapped_column(Enum(SingboxNodeStatus), default=SingboxNodeStatus.offline)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    public_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    port: Mapped[int] = mapped_column(Integer)
+    protocol: Mapped[SingboxProtocol] = mapped_column(Enum(SingboxProtocol))
+    tls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    current_connections: Mapped[int] = mapped_column(Integer, default=0)
+    traffic_in_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    traffic_out_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    custom_config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    slots: Mapped[list["SingboxSlot"]] = relationship(back_populates="node", cascade="all, delete-orphan")
+
+
+class SingboxCategory(Base):
+    __tablename__ = "singbox_categories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    tariffs: Mapped[list["SingboxTariff"]] = relationship(back_populates="category", cascade="all, delete-orphan")
+
+
+class SingboxTariff(Base):
+    __tablename__ = "singbox_tariffs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    category_id: Mapped[str] = mapped_column(ForeignKey("singbox_categories.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    slot_count: Mapped[int] = mapped_column(Integer, default=1)
+    duration_days: Mapped[int] = mapped_column(Integer, default=30)
+    traffic_limit_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    price: Mapped[float] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    category: Mapped["SingboxCategory"] = relationship(back_populates="tariffs")
+    slots: Mapped[list["SingboxSlot"]] = relationship(back_populates="tariff")
+
+
+class SingboxSlot(Base):
+    __tablename__ = "singbox_slots"
+    __table_args__ = (UniqueConstraint("node_id", "user_identifier", name="uq_singbox_slot_node_user_identifier"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    node_id: Mapped[str] = mapped_column(ForeignKey("singbox_nodes.id"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    singbox_tariff_id: Mapped[Optional[str]] = mapped_column(ForeignKey("singbox_tariffs.id"), nullable=True, index=True)
+    user_identifier: Mapped[str] = mapped_column(String(128))
+    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    traffic_limit_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    traffic_used_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    current_connections: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[SingboxSlotStatus] = mapped_column(Enum(SingboxSlotStatus), default=SingboxSlotStatus.active)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    node: Mapped["SingboxNode"] = relationship(back_populates="slots")
+    client: Mapped["User"] = relationship(back_populates="singbox_slots")
+    tariff: Mapped[Optional["SingboxTariff"]] = relationship(back_populates="slots")
+
+
 class ConfigRevision(Base):
     __tablename__ = "config_revisions"
 
@@ -285,12 +384,21 @@ class Plan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PlanSquadLink(Base):
+    __tablename__ = "plan_squad_links"
+
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), primary_key=True)
+    squad_id: Mapped[str] = mapped_column(ForeignKey("squads.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), index=True)
+    plan_id: Mapped[Optional[str]] = mapped_column(ForeignKey("plans.id"), index=True, nullable=True)
+    singbox_tariff_id: Mapped[Optional[str]] = mapped_column(ForeignKey("singbox_tariffs.id"), index=True, nullable=True)
     status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus), default=OrderStatus.pending)
     total_amount: Mapped[float] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
@@ -307,6 +415,7 @@ class Payment(Base):
     provider: Mapped[str] = mapped_column(String(64), default="manual")
     external_payment_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.pending)
+    singbox_tariff_id: Mapped[Optional[str]] = mapped_column(ForeignKey("singbox_tariffs.id"), index=True, nullable=True)
     amount: Mapped[float] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

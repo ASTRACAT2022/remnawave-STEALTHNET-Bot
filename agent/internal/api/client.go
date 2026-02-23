@@ -17,6 +17,9 @@ type Client struct {
 type DesiredConfigResponse struct {
 	NodeID                string                 `json:"node_id"`
 	DesiredConfigRevision int                    `json:"desired_config_revision"`
+	AppliedConfigRevision int                    `json:"applied_config_revision"`
+	EngineAwg2Enabled     bool                   `json:"engine_awg2_enabled"`
+	EngineSingboxEnabled  bool                   `json:"engine_singbox_enabled"`
 	DesiredConfig         map[string]interface{} `json:"desired_config"`
 }
 
@@ -26,8 +29,8 @@ func NewClient(baseURL string) *Client {
 
 func (c *Client) Heartbeat(nodeToken, awg2Version, singboxVersion string) error {
 	payload := map[string]string{
-		"node_token":            nodeToken,
-		"engine_awg2_version":   awg2Version,
+		"node_token":             nodeToken,
+		"engine_awg2_version":    awg2Version,
 		"engine_singbox_version": singboxVersion,
 	}
 	return c.postJSON("/agent/heartbeat", payload, nil)
@@ -53,10 +56,10 @@ func (c *Client) DesiredConfig(nodeToken string) (DesiredConfigResponse, error) 
 
 func (c *Client) ApplyResult(nodeToken string, revision int, status string, details map[string]interface{}) error {
 	payload := map[string]interface{}{
-		"node_token":             nodeToken,
+		"node_token":              nodeToken,
 		"applied_config_revision": revision,
-		"status":                 status,
-		"details":                details,
+		"status":                  status,
+		"details":                 details,
 	}
 	return c.postJSON("/agent/apply-result", payload, nil)
 }

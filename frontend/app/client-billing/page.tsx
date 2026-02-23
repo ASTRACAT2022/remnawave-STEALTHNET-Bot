@@ -7,6 +7,7 @@ import { Card, Notice, SmallButton } from "../../components/ui";
 import { apiRequest, formatDate } from "../../lib/api";
 
 type User = { id: string; short_id: string; status: string };
+type Squad = { id: string; name: string };
 
 type Plan = {
   id: string;
@@ -17,6 +18,7 @@ type Plan = {
   traffic_limit_bytes: number;
   max_devices: number;
   is_active: boolean;
+  squad_id?: string | null;
 };
 
 type Order = {
@@ -40,13 +42,25 @@ type Payment = {
   currency: string;
 };
 
+type ReconcileResult = {
+  dry_run: boolean;
+  total_users_checked: number;
+  eligible_users: number;
+  users_to_update: number;
+  users_updated: number;
+  skipped_without_plan_mapping: number;
+  changed_user_ids: string[];
+};
+
 export default function ClientBillingPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [squads, setSquads] = useState<Squad[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [reconcileResult, setReconcileResult] = useState<ReconcileResult | null>(null);
 
   const [planForm, setPlanForm] = useState({
     name: "",
@@ -55,6 +69,7 @@ export default function ClientBillingPage() {
     duration_days: "30",
     traffic_limit_bytes: "0",
     max_devices: "3",
+    squad_id: "",
   });
 
   const [orderForm, setOrderForm] = useState({ user_id: "", plan_id: "" });
@@ -63,13 +78,15 @@ export default function ClientBillingPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [userData, planData, orderData, paymentData] = await Promise.all([
+      const [userData, squadData, planData, orderData, paymentData] = await Promise.all([
         apiRequest<{ items: User[] }>("/api/v1/users?limit=200").then((x) => x.items),
+        apiRequest<Squad[]>("/api/v1/squads"),
         apiRequest<Plan[]>("/api/v1/plans"),
         apiRequest<Order[]>("/api/v1/orders?limit=200"),
         apiRequest<Payment[]>("/api/v1/payments?limit=200"),
       ]);
       setUsers(userData);
+      setSquads(squadData);
       setPlans(planData);
       setOrders(orderData);
       setPayments(paymentData);
@@ -142,6 +159,14 @@ export default function ClientBillingPage() {
               value={planForm.traffic_limit_bytes}
               onChange={(e) => setPlanForm({ ...planForm, traffic_limit_bytes: e.target.value })}
             />
+            <select className="select" value={planForm.squad_id} onChange={(e) => setPlanForm({ ...planForm, squad_id: e.target.value })}>
+              <option value="">No squad binding</option>
+              {squads.map((squad) => (
+                <option key={squad.id} value={squad.id}>
+                  {squad.name}
+                </option>
+              ))}
+            </select>
             <button
               className="btn"
               type="button"
@@ -158,6 +183,7 @@ export default function ClientBillingPage() {
                         duration_days: Number(planForm.duration_days),
                         traffic_limit_bytes: Number(planForm.traffic_limit_bytes),
                         max_devices: Number(planForm.max_devices),
+                        squad_id: planForm.squad_id || null,
                       }),
                     });
                     setPlanForm({
@@ -167,6 +193,7 @@ export default function ClientBillingPage() {
                       duration_days: "30",
                       traffic_limit_bytes: "0",
                       max_devices: "3",
+                      squad_id: "",
                     });
                   },
                   "Plan created",
@@ -259,6 +286,50 @@ export default function ClientBillingPage() {
         </Card>
       </div>
 
+      <Card title="User Squad Recovery">
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() =>
+              void run(
+                async () => {
+                  const result = await apiRequest<ReconcileResult>("/api/v1/plans/reconcile-user-squads", {
+                    method: "POST",
+                    body: JSON.stringify({ dry_run: true }),
+                  });
+                  setReconcileResult(result);
+                },
+                "Dry-run completed",
+              )
+            }
+          >
+            Dry-run Reconcile
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() =>
+              void run(
+                async () => {
+                  const result = await apiRequest<ReconcileResult>("/api/v1/plans/reconcile-user-squads", {
+                    method: "POST",
+                    body: JSON.stringify({ dry_run: false }),
+                  });
+                  setReconcileResult(result);
+                },
+                "Reconcile applied",
+              )
+            }
+          >
+            Apply Reconcile
+          </button>
+        </div>
+        {reconcileResult ? (
+          <pre className="mt-3 overflow-x-auto rounded-md bg-black/5 p-2 text-xs">{JSON.stringify(reconcileResult, null, 2)}</pre>
+        ) : null}
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card title="Plans">
           <div className="table-wrap">
@@ -266,6 +337,7 @@ export default function ClientBillingPage() {
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Squad</th>
                   <th>Price</th>
                   <th>Duration</th>
                   <th>Limit</th>
@@ -275,6 +347,7 @@ export default function ClientBillingPage() {
                 {plans.map((plan) => (
                   <tr key={plan.id}>
                     <td>{plan.name}</td>
+                    <td>{squads.find((squad) => squad.id === plan.squad_id)?.name ?? "-"}</td>
                     <td>
                       {plan.price} {plan.currency}
                     </td>
@@ -284,7 +357,7 @@ export default function ClientBillingPage() {
                 ))}
                 {plans.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="text-black/50">
+                    <td colSpan={5} className="text-black/50">
                       No plans yet.
                     </td>
                   </tr>

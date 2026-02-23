@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     backup_dir: str = "./backups"
     webhook_timeout_seconds: int = 5
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    public_api_base_url: str = "http://localhost:8080"
+
+    singbox_check_command: str = "sing-box check -c {config_path}"
+    singbox_check_timeout_seconds: int = 20
+    singbox_check_strict: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

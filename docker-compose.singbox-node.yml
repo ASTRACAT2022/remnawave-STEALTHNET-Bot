@@ -1,0 +1,15 @@
+services:
+  singbox-node:
+    image: ghcr.io/stealthnet/singbox-node-agent:beta
+    container_name: singbox-node
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      STEALTHNET_API_URL: "https://panel.example.com/api"
+      SINGBOX_NODE_TOKEN: "replace-with-node-token"
+      SINGBOX_PROTOCOL: "HYSTERIA2"
+      SINGBOX_PORT: "444"
+      SINGBOX_TLS_ENABLED: "1"
+    volumes:
+      - ./config:/etc/sing-box
+      - ./data:/var/lib/singbox-agent

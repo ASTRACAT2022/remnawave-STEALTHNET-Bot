@@ -1,10 +1,14 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminShell } from "../../components/admin-shell";
 import { Card, Notice, SmallButton } from "../../components/ui";
 import { apiRequest, formatDate, prettyJson, safeJsonParse } from "../../lib/api";
+import { getSingboxTemplateById, SINGBOX_INBOUND_TEMPLATES } from "../../lib/singbox-templates";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 type NodeItem = {
   id: string;
@@ -19,19 +23,31 @@ type NodeItem = {
 
 type Server = { id: string; host: string };
 
+type ValidateResponse = {
+  ok: boolean;
+  singbox_present: boolean;
+  validated_by: string;
+};
+
+const DEFAULT_CONFIG = '{\n  "inbounds": []\n}';
+
 export default function NodesPage() {
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
   const [createForm, setCreateForm] = useState({
     server_id: "",
     node_token: `node-${Math.random().toString(36).slice(2, 9)}`,
-    desired_config: '{"inbounds": []}',
+    desired_config: DEFAULT_CONFIG,
   });
-  const [configJson, setConfigJson] = useState('{"inbounds": []}');
+  const [createTemplateId, setCreateTemplateId] = useState("vless");
+
+  const [configJson, setConfigJson] = useState(DEFAULT_CONFIG);
+  const [templateId, setTemplateId] = useState("vless");
   const [rollbackRevision, setRollbackRevision] = useState("");
 
   const selectedNode = useMemo(() => nodes.find((item) => item.id === selectedNodeId) ?? null, [nodes, selectedNodeId]);
@@ -59,7 +75,8 @@ export default function NodesPage() {
 
   useEffect(() => {
     if (selectedNode) {
-      setConfigJson(prettyJson({ inbounds: [] }));
+      setConfigJson(DEFAULT_CONFIG);
+      setValidationMessage(null);
     }
   }, [selectedNode]);
 
@@ -75,10 +92,37 @@ export default function NodesPage() {
     }
   }
 
+  async function validateConfig(rawConfig: string): Promise<ValidateResponse> {
+    const payload = safeJsonParse<Record<string, unknown>>(rawConfig, {});
+    return apiRequest<ValidateResponse>("/api/v1/nodes/validate-config", {
+      method: "POST",
+      body: JSON.stringify({
+        desired_config: payload,
+        engine_singbox_enabled: true,
+      }),
+    });
+  }
+
+  function applyTemplateToCreate() {
+    const template = getSingboxTemplateById(createTemplateId);
+    if (!template) return;
+    setCreateForm((prev) => ({ ...prev, desired_config: prettyJson(template.config) }));
+    setSuccess(`Template applied: ${template.label}`);
+    setValidationMessage(null);
+  }
+
+  function applyTemplateToSelected() {
+    const template = getSingboxTemplateById(templateId);
+    if (!template) return;
+    setConfigJson(prettyJson(template.config));
+    setSuccess(`Template applied: ${template.label}`);
+    setValidationMessage(null);
+  }
+
   return (
     <AdminShell
       title="Nodes"
-      subtitle="Create nodes, push desired configs, run rollback and offline checks"
+      subtitle="Create nodes, validate Sing-box config, push desired configs and rollback revisions"
       actions={
         <div className="flex gap-2">
           <SmallButton onClick={() => void load()}>Refresh</SmallButton>
@@ -96,6 +140,7 @@ export default function NodesPage() {
     >
       <Notice type="error" message={error} />
       <Notice type="success" message={success} />
+      <Notice type="success" message={validationMessage} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card title="Create Node">
@@ -116,12 +161,39 @@ export default function NodesPage() {
               <input className="input" value={createForm.node_token} onChange={(e) => setCreateForm({ ...createForm, node_token: e.target.value })} />
             </div>
             <div>
+              <label className="label">Sing-box Inbound Template</label>
+              <div className="flex gap-2">
+                <select className="select" value={createTemplateId} onChange={(e) => setCreateTemplateId(e.target.value)}>
+                  {SINGBOX_INBOUND_TEMPLATES.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn" type="button" onClick={applyTemplateToCreate}>
+                  Apply Template
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-black/55">
+                {getSingboxTemplateById(createTemplateId)?.description ?? ""}
+              </p>
+            </div>
+            <div>
               <label className="label">Desired Config (JSON)</label>
-              <textarea
-                className="textarea"
-                value={createForm.desired_config}
-                onChange={(e) => setCreateForm({ ...createForm, desired_config: e.target.value })}
-              />
+              <div className="overflow-hidden rounded-lg border border-black/10">
+                <MonacoEditor
+                  height="320px"
+                  defaultLanguage="json"
+                  value={createForm.desired_config}
+                  onChange={(value) => setCreateForm({ ...createForm, desired_config: value ?? "{}" })}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    automaticLayout: true,
+                    tabSize: 2,
+                  }}
+                />
+              </div>
             </div>
             <button
               className="btn"
@@ -130,6 +202,9 @@ export default function NodesPage() {
               onClick={() =>
                 void run(
                   async () => {
+                    const check = await validateConfig(createForm.desired_config);
+                    setValidationMessage(`Create config validated via ${check.validated_by}`);
+
                     await apiRequest("/api/v1/nodes", {
                       method: "POST",
                       body: JSON.stringify({
@@ -164,26 +239,73 @@ export default function NodesPage() {
               </div>
 
               <div>
+                <label className="label">Sing-box Inbound Template</label>
+                <div className="flex gap-2">
+                  <select className="select" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                    {SINGBOX_INBOUND_TEMPLATES.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn" type="button" onClick={applyTemplateToSelected}>
+                    Apply Template
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-black/55">{getSingboxTemplateById(templateId)?.description ?? ""}</p>
+              </div>
+
+              <div>
                 <label className="label">New Desired Config (JSON)</label>
-                <textarea className="textarea" value={configJson} onChange={(e) => setConfigJson(e.target.value)} />
-                <button
-                  className="btn mt-2"
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      async () => {
-                        await apiRequest(`/api/v1/nodes/${selectedNode.id}/desired-config`, {
-                          method: "POST",
-                          body: configJson,
-                          headers: { "Content-Type": "application/json" },
-                        });
-                      },
-                      "Desired config updated",
-                    )
-                  }
-                >
-                  Push Desired Config
-                </button>
+                <div className="overflow-hidden rounded-lg border border-black/10">
+                  <MonacoEditor
+                    height="320px"
+                    defaultLanguage="json"
+                    value={configJson}
+                    onChange={(value) => setConfigJson(value ?? "{}")}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      automaticLayout: true,
+                      tabSize: 2,
+                    }}
+                  />
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() =>
+                      void run(async () => {
+                        const check = await validateConfig(configJson);
+                        setValidationMessage(`Config validated via ${check.validated_by}`);
+                      }, "Validation completed")
+                    }
+                  >
+                    Validate
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() =>
+                      void run(
+                        async () => {
+                          const check = await validateConfig(configJson);
+                          setValidationMessage(`Push config validated via ${check.validated_by}`);
+
+                          await apiRequest(`/api/v1/nodes/${selectedNode.id}/desired-config`, {
+                            method: "POST",
+                            body: configJson,
+                            headers: { "Content-Type": "application/json" },
+                          });
+                        },
+                        "Desired config updated",
+                      )
+                    }
+                  >
+                    Push Desired Config
+                  </button>
+                </div>
               </div>
 
               <div>

@@ -14,10 +14,13 @@ from app.schemas.nodes import (
     DesiredConfigResponse,
     NodeCreate,
     NodeResponse,
+    ValidateDesiredConfigRequest,
+    ValidateDesiredConfigResponse,
 )
 from app.services.audit import write_audit
 from app.services.auth import AuthContext, get_auth_context
 from app.services.rbac import require_scopes
+from app.services.singbox_validation import SingboxValidationError, validate_desired_config
 from app.services.traffic import report_usage
 from app.services.webhooks import enqueue_event
 
@@ -25,11 +28,34 @@ admin_router = APIRouter(prefix="/nodes", tags=["nodes"])
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
 
+def _validate_singbox_or_400(
+    desired_config: dict,
+    *,
+    singbox_enabled: bool,
+    require_singbox_present: bool = False,
+) -> ValidateDesiredConfigResponse:
+    try:
+        result = validate_desired_config(
+            desired_config,
+            singbox_enabled=singbox_enabled,
+            require_singbox_present=require_singbox_present,
+        )
+        return ValidateDesiredConfigResponse(
+            ok=True,
+            singbox_present=result.singbox_present,
+            validated_by=result.validated_by,
+        )
+    except SingboxValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @admin_router.post("", response_model=NodeResponse, dependencies=[Depends(require_scopes("nodes.control"))])
 def create_node(payload: NodeCreate, db: Session = Depends(get_db), ctx: AuthContext = Depends(get_auth_context)) -> Node:
     server = db.get(Server, payload.server_id)
     if not server:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="server_not_found")
+
+    _validate_singbox_or_400(payload.desired_config, singbox_enabled=payload.engine_singbox_enabled)
 
     node = Node(**payload.model_dump())
     db.add(node)
@@ -50,6 +76,19 @@ def list_nodes(status_filter: Optional[str] = None, db: Session = Depends(get_db
     if status_filter:
         query = query.where(Node.status == status_filter)
     return db.scalars(query.order_by(Node.last_seen_at.desc().nullslast())).all()
+
+
+@admin_router.post(
+    "/validate-config",
+    response_model=ValidateDesiredConfigResponse,
+    dependencies=[Depends(require_scopes("nodes.control"))],
+)
+def validate_node_config(payload: ValidateDesiredConfigRequest) -> ValidateDesiredConfigResponse:
+    return _validate_singbox_or_400(
+        payload.desired_config,
+        singbox_enabled=payload.engine_singbox_enabled,
+        require_singbox_present=True,
+    )
 
 
 @admin_router.post("/check-offline", dependencies=[Depends(require_scopes("nodes.control"))])
@@ -84,6 +123,8 @@ def update_desired_config(
     node = db.get(Node, node_id)
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="node_not_found")
+
+    _validate_singbox_or_400(desired_config, singbox_enabled=node.engine_singbox_enabled)
 
     node.desired_config_revision += 1
     node.desired_config = desired_config
@@ -167,6 +208,9 @@ def desired_config(node_token: str = Query(...), db: Session = Depends(get_db)) 
     return DesiredConfigResponse(
         node_id=node.id,
         desired_config_revision=node.desired_config_revision,
+        applied_config_revision=node.applied_config_revision,
+        engine_awg2_enabled=node.engine_awg2_enabled,
+        engine_singbox_enabled=node.engine_singbox_enabled,
         desired_config=node.desired_config,
     )
 

@@ -175,3 +175,147 @@ def test_orion_squad_returns_90_endpoints(client, admin_headers):
     sub_resp = client.get(f"/api/v1/subscriptions/{user['subscription_token']}")
     assert sub_resp.status_code == 200
     assert len(sub_resp.json()["endpoints"]) == 90
+
+
+def test_payment_assigns_squad_from_plan_mapping(client, admin_headers):
+    base_squad_resp = client.post(
+        "/api/v1/squads",
+        json={"name": "BASE-SQUAD", "description": "", "selection_policy": "round-robin", "fallback_policy": "none", "allowed_protocols": ["AWG2"]},
+        headers=admin_headers,
+    )
+    assert base_squad_resp.status_code == 200, base_squad_resp.text
+    base_squad_id = base_squad_resp.json()["id"]
+
+    premium_squad_resp = client.post(
+        "/api/v1/squads",
+        json={"name": "PREMIUM-SQUAD", "description": "", "selection_policy": "round-robin", "fallback_policy": "none", "allowed_protocols": ["AWG2", "Sing-box"]},
+        headers=admin_headers,
+    )
+    assert premium_squad_resp.status_code == 200, premium_squad_resp.text
+    premium_squad_id = premium_squad_resp.json()["id"]
+
+    user = create_user(
+        client,
+        admin_headers,
+        squad_id=premium_squad_id,
+        token="token-plan-squad",
+        user_uuid="66666666-6666-6666-6666-666666666666",
+    )
+
+    plan_resp = client.post(
+        "/api/v1/plans",
+        json={
+            "name": "BASE 30",
+            "price": 5.0,
+            "currency": "USD",
+            "duration_days": 30,
+            "traffic_limit_bytes": 10_000,
+            "max_devices": 2,
+            "squad_id": base_squad_id,
+        },
+        headers=admin_headers,
+    )
+    assert plan_resp.status_code == 200, plan_resp.text
+    assert plan_resp.json()["squad_id"] == base_squad_id
+
+    order_resp = client.post(
+        "/api/v1/orders",
+        json={"user_id": user["id"], "plan_id": plan_resp.json()["id"]},
+        headers=admin_headers,
+    )
+    assert order_resp.status_code == 200, order_resp.text
+
+    payment_resp = client.post(
+        "/api/v1/payments/confirm",
+        json={"order_id": order_resp.json()["id"], "external_payment_id": "pay-plan-squad-1", "provider": "test"},
+        headers=admin_headers,
+    )
+    assert payment_resp.status_code == 200, payment_resp.text
+
+    user_after = client.get(f"/api/v1/users/{user['id']}", headers=admin_headers)
+    assert user_after.status_code == 200, user_after.text
+    assert user_after.json()["squad_id"] == base_squad_id
+
+
+def test_reconcile_user_squads_updates_by_latest_paid_plan(client, admin_headers):
+    base_squad_resp = client.post(
+        "/api/v1/squads",
+        json={"name": "BASE-SQUAD-2", "description": "", "selection_policy": "round-robin", "fallback_policy": "none", "allowed_protocols": ["AWG2"]},
+        headers=admin_headers,
+    )
+    assert base_squad_resp.status_code == 200, base_squad_resp.text
+    base_squad_id = base_squad_resp.json()["id"]
+
+    premium_squad_resp = client.post(
+        "/api/v1/squads",
+        json={"name": "PREMIUM-SQUAD-2", "description": "", "selection_policy": "round-robin", "fallback_policy": "none", "allowed_protocols": ["AWG2", "Sing-box"]},
+        headers=admin_headers,
+    )
+    assert premium_squad_resp.status_code == 200, premium_squad_resp.text
+    premium_squad_id = premium_squad_resp.json()["id"]
+
+    user = create_user(
+        client,
+        admin_headers,
+        squad_id=base_squad_id,
+        token="token-reconcile-1",
+        user_uuid="77777777-7777-7777-7777-777777777777",
+    )
+
+    plan_resp = client.post(
+        "/api/v1/plans",
+        json={
+            "name": "BASE 60",
+            "price": 7.0,
+            "currency": "USD",
+            "duration_days": 60,
+            "traffic_limit_bytes": 20_000,
+            "max_devices": 2,
+            "squad_id": base_squad_id,
+        },
+        headers=admin_headers,
+    )
+    assert plan_resp.status_code == 200, plan_resp.text
+
+    order_resp = client.post(
+        "/api/v1/orders",
+        json={"user_id": user["id"], "plan_id": plan_resp.json()["id"]},
+        headers=admin_headers,
+    )
+    assert order_resp.status_code == 200, order_resp.text
+
+    payment_resp = client.post(
+        "/api/v1/payments/confirm",
+        json={"order_id": order_resp.json()["id"], "external_payment_id": "pay-reconcile-1", "provider": "test"},
+        headers=admin_headers,
+    )
+    assert payment_resp.status_code == 200, payment_resp.text
+
+    # Emulate broken state where user ended up in premium despite having paid for base.
+    assign_resp = client.post(
+        f"/api/v1/users/{user['id']}/assign-squad?squad_id={premium_squad_id}",
+        headers=admin_headers,
+    )
+    assert assign_resp.status_code == 200, assign_resp.text
+    assert assign_resp.json()["squad_id"] == premium_squad_id
+
+    dry_run_resp = client.post(
+        "/api/v1/plans/reconcile-user-squads",
+        json={"dry_run": True},
+        headers=admin_headers,
+    )
+    assert dry_run_resp.status_code == 200, dry_run_resp.text
+    assert dry_run_resp.json()["users_to_update"] >= 1
+    assert dry_run_resp.json()["users_updated"] == 0
+
+    apply_resp = client.post(
+        "/api/v1/plans/reconcile-user-squads",
+        json={"dry_run": False},
+        headers=admin_headers,
+    )
+    assert apply_resp.status_code == 200, apply_resp.text
+    assert apply_resp.json()["users_updated"] >= 1
+
+    user_after = client.get(f"/api/v1/users/{user['id']}", headers=admin_headers)
+    assert user_after.status_code == 200, user_after.text
+    assert user_after.json()["squad_id"] == base_squad_id
