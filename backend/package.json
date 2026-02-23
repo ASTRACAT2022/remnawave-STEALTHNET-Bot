@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "seed": "tsx src/scripts/seed-admin.ts"
+    "seed": "tsx src/scripts/seed-admin.ts",
+    "remove-leaked-squad:dry": "node scripts/remove-leaked-squad.mjs",
+    "remove-leaked-squad:apply": "node scripts/remove-leaked-squad.mjs --apply"
   },
   "engines": {
     "node": ">=20"

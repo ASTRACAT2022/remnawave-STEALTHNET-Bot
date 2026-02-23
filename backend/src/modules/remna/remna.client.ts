@@ -257,15 +257,13 @@ export function remnaBulkUpdateUsersSquads(body: { uuids: string[]; activeIntern
   });
 }
 
-/** POST /api/internal-squads/{squadUuid}/bulk-actions/add-users */
-export function remnaAddUsersToInternalSquad(squadUuid: string, body: { userUuids: string[] }) {
-  return remnaFetch<unknown>(`/api/internal-squads/${squadUuid}/bulk-actions/add-users`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-/** Гарантированно добавить пользователя в каждый внутренний сквад (по очереди, с остановкой на первой ошибке). */
+/**
+ * Безопасно выставляет пользователю ровно указанный набор внутренних сквадов.
+ *
+ * Почему не используем add-users:
+ * endpoint /internal-squads/*/bulk-actions/add-users в некоторых версиях Remna может
+ * иметь массовую семантику для сквада, из-за чего возможна раздача доступа не тому кругу пользователей.
+ */
 export async function remnaEnsureUserInInternalSquads(
   userUuid: string,
   squadUuids: string[],
@@ -276,14 +274,23 @@ export async function remnaEnsureUserInInternalSquads(
       .filter((s) => s.length > 0),
   )];
 
-  for (const squadUuid of uniqueSquads) {
-    const res = await remnaAddUsersToInternalSquad(squadUuid, { userUuids: [userUuid] });
-    if (res.error) {
-      return {
-        status: res.status >= 400 ? res.status : 500,
-        error: `Failed to add user to squad ${squadUuid}: ${res.error}`,
-      };
-    }
+  // Предпочитаем bulk update по конкретному uuid (точечное действие).
+  const bulkRes = await remnaBulkUpdateUsersSquads({
+    uuids: [userUuid],
+    activeInternalSquads: uniqueSquads,
+  });
+  if (!bulkRes.error) return { status: 200 };
+
+  // Fallback для несовместимых версий API: PATCH одного пользователя.
+  const patchRes = await remnaUpdateUser({
+    uuid: userUuid,
+    activeInternalSquads: uniqueSquads,
+  });
+  if (patchRes.error) {
+    return {
+      status: patchRes.status >= 400 ? patchRes.status : 500,
+      error: `Failed to set squads for user ${userUuid}: ${patchRes.error} (bulk error: ${bulkRes.error})`,
+    };
   }
 
   return { status: 200 };

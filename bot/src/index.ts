@@ -294,8 +294,20 @@ function parseForceChannelTarget(channelInput: string): ForceChannelTarget {
   }
 
   if (/^-?\d+$/.test(raw)) {
-    const joinUrl = raw.startsWith("-100") ? `https://t.me/c/${raw.slice(4)}` : null;
-    return { chatId: raw, joinUrl };
+    // Каноничный формат Telegram для каналов/супергрупп: -100xxxxxxxxxx
+    if (raw.startsWith("-100")) {
+      return { chatId: raw, joinUrl: `https://t.me/c/${raw.slice(4)}` };
+    }
+    // Иногда админы вставляют "100xxxxxxxxxx" (без минуса)
+    if (raw.startsWith("100") && raw.length > 3) {
+      const core = raw.slice(3);
+      return { chatId: `-${raw}`, joinUrl: /^\d+$/.test(core) ? `https://t.me/c/${core}` : null };
+    }
+    // Иногда вставляют только numeric part из /c/<id>
+    if (!raw.startsWith("-") && raw.length >= 9) {
+      return { chatId: `-100${raw}`, joinUrl: `https://t.me/c/${raw}` };
+    }
+    return { chatId: raw, joinUrl: null };
   }
 
   return { chatId: null, joinUrl: null };
@@ -363,6 +375,36 @@ async function enforceSubscription(
   await ctx.reply(`⚠️ ${msg}`, { reply_markup: subscribeKeyboard(channelId) });
   return true;
 }
+
+// Жёсткий глобальный гейт: без подписки бот не обрабатывает апдейты.
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  if (!userId) {
+    await next();
+    return;
+  }
+
+  // Кнопка проверки подписки должна работать всегда.
+  const cbData = ctx.callbackQuery?.data;
+  if (cbData === "check_subscribe") {
+    await next();
+    return;
+  }
+
+  const config = await api.getPublicConfig().catch(() => null);
+  if (!config?.forceSubscribeEnabled) {
+    await next();
+    return;
+  }
+
+  if (await enforceSubscription(ctx, config)) {
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: "Подпишитесь на канал, чтобы продолжить." }).catch(() => {});
+    }
+    return;
+  }
+  await next();
+});
 
 type TariffItem = { id: string; name: string; price: number; currency: string };
 type TariffCategory = { id: string; name: string; emoji?: string; emojiKey?: string | null; tariffs: TariffItem[] };
@@ -737,9 +779,6 @@ bot.command("start", async (ctx) => {
     setToken(from.id, auth.token);
     const client = auth.client;
 
-    // Проверка подписки на канал до любых действий (включая promo-активацию)
-    if (await enforceSubscription(ctx, config)) return;
-
     // Если это промо-ссылка — активируем промокод
     if (promoCode) {
       try {
@@ -890,28 +929,6 @@ bot.on("callback_query:data", async (ctx) => {
     if (!token) {
       await ctx.reply("Сессия истекла. Отправьте /start");
       return;
-    }
-
-    // Проверка подписки на канал для всех действий
-    if (config?.forceSubscribeEnabled) {
-      const channelId = config.forceSubscribeChannelId?.trim();
-      if (!channelId) {
-        await editMessageContent(
-          ctx,
-          "⚠️ Проверка подписки включена, но канал не настроен.\n\nУкажите корректный @username или ID канала в админ-панели.",
-          backToMenu(config?.botBackLabel ?? null, "danger")
-        );
-        return;
-      }
-      const result = await checkUserSubscription(userId, channelId);
-      if (result.state !== "subscribed") {
-        const msg = config.forceSubscribeMessage?.trim() || "Для использования бота подпишитесь на наш канал:";
-        const details = result.state === "cannot_verify"
-          ? "\n\nПроверка подписки сейчас недоступна. Сообщите администратору."
-          : "";
-        await editMessageContent(ctx, `⚠️ ${msg}${details}`, subscribeKeyboard(channelId));
-        return;
-      }
     }
 
     const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
@@ -1442,7 +1459,6 @@ bot.on("message:text", async (ctx) => {
   const token = getToken(userId);
   if (!token) return;
   const publicConfig = await api.getPublicConfig().catch(() => null);
-  if (await enforceSubscription(ctx, publicConfig)) return;
 
   // Если пользователь ожидает ввод промокода
   if (awaitingPromoCode.has(userId)) {
