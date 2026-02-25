@@ -1018,7 +1018,13 @@ export async function createNalogoReceipt(
     timeoutMs,
   );
   if (pythonBridgeResult) {
-    return pythonBridgeResult;
+    if ("receiptUuid" in pythonBridgeResult) {
+      return pythonBridgeResult;
+    }
+    if (bridgeOnly) {
+      return pythonBridgeResult;
+    }
+    bridgeFailure = pythonBridgeResult;
   }
   if (bridgeOnly) {
     return {
