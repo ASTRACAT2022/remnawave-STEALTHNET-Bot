@@ -1,0 +1,353 @@
+/**
+ * Синхронизация клиентов панели с Remna (из Remna и в Remna).
+ */
+
+import { prisma } from "../../db.js";
+import {
+  isRemnaConfigured,
+  remnaGetUsers,
+  remnaGetUser,
+  remnaUpdateUser,
+  remnaCreateUser,
+  remnaGetUserByTelegramId,
+  remnaGetUserByEmail,
+  remnaGetUserByUsername,
+  extractRemnaActiveInternalSquadUuids,
+  extractRemnaUuid,
+} from "../remna/remna.client.js";
+import { getSystemConfig } from "../client/client.service.js";
+
+const PAGE_SIZE = 100;
+const runningSyncJobs = new Set<string>();
+
+function tryStartSyncJob(name: string): boolean {
+  if (runningSyncJobs.has(name)) return false;
+  runningSyncJobs.add(name);
+  return true;
+}
+
+function finishSyncJob(name: string): void {
+  runningSyncJobs.delete(name);
+}
+
+type RemnaUser = {
+  uuid?: string;
+  telegramId?: number | null;
+  email?: string | null;
+  username?: string;
+};
+
+function extractRemnaUsers(data: unknown): RemnaUser[] {
+  if (Array.isArray(data)) return data as RemnaUser[];
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (obj.response && typeof obj.response === "object") {
+      const resp = (obj.response as Record<string, unknown>).users;
+      if (Array.isArray(resp)) return resp as RemnaUser[];
+    }
+    if (Array.isArray(obj.items)) return obj.items as RemnaUser[];
+    if (Array.isArray(obj.data)) return obj.data as RemnaUser[];
+    if (Array.isArray(obj.users)) return obj.users as RemnaUser[];
+  }
+  return [];
+}
+
+function extractRemnaUserObject(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  const root = data as Record<string, unknown>;
+  const response = root.response;
+  const nestedData = root.data;
+
+  const candidates: unknown[] = [response, nestedData, root];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const obj = candidate as Record<string, unknown>;
+    if (obj.user && typeof obj.user === "object") {
+      return obj.user as Record<string, unknown>;
+    }
+    return obj;
+  }
+  return null;
+}
+
+function extractRemoteTelegramId(data: unknown): number | null {
+  const user = extractRemnaUserObject(data);
+  const raw = user?.telegramId;
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === "string") {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+function extractRemoteEmail(data: unknown): string | null {
+  const user = extractRemnaUserObject(data);
+  const raw = user?.email;
+  if (typeof raw !== "string") return null;
+  const email = raw.trim();
+  return email.length > 0 ? email : null;
+}
+
+/** Синхронизация из Remna: загружаем пользователей Remna и создаём/обновляем клиентов в нашей БД. */
+export async function syncFromRemna(): Promise<{
+  ok: boolean;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}> {
+  if (!tryStartSyncJob("syncFromRemna")) {
+    return {
+      ok: false,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: ["Синхронизация из Remna уже выполняется"],
+    };
+  }
+
+  try {
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
+
+    if (!isRemnaConfigured()) {
+      result.errors.push("Remna API не настроен (REMNA_API_URL, REMNA_ADMIN_TOKEN)");
+      return { ok: false, ...result };
+    }
+
+    // Берём настройки панели (язык/валюта по умолчанию),
+    // чтобы новые клиенты из Remna создавались с теми же значениями.
+    const config = await getSystemConfig();
+    const defaultLang = config.defaultLanguage ?? "ru";
+    const defaultCurrency = (config.defaultCurrency ?? "usd").toLowerCase();
+
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const start = (page - 1) * PAGE_SIZE;
+      const res = await remnaGetUsers({ start, size: PAGE_SIZE });
+      if (res.error) {
+        result.errors.push(`Remna: ${res.error}`);
+        break;
+      }
+
+      const users = extractRemnaUsers(res.data);
+      if (users.length === 0) hasMore = false;
+      else {
+        for (const u of users) {
+          const uuid = u.uuid;
+          if (!uuid) {
+            result.skipped++;
+            continue;
+          }
+          const telegramId = u.telegramId != null ? String(u.telegramId) : null;
+          const email = u.email && String(u.email).trim() ? String(u.email).trim() : null;
+          const username = u.username && String(u.username).trim() ? String(u.username).trim() : null;
+
+          try {
+            const existingByUuid = await prisma.client.findFirst({
+              where: { remnawaveUuid: uuid },
+            });
+            const existingByTg = telegramId
+              ? await prisma.client.findFirst({ where: { telegramId } })
+              : null;
+            const existingByEmail = email
+              ? await prisma.client.findFirst({ where: { email } })
+              : null;
+
+            const existing = existingByUuid || existingByTg || existingByEmail;
+
+            if (existing) {
+              await prisma.client.update({
+                where: { id: existing.id },
+                data: {
+                  remnawaveUuid: uuid,
+                  ...(telegramId && { telegramId }),
+                  ...(email && { email }),
+                  ...(username && !existing.telegramUsername && { telegramUsername: username }),
+                },
+              });
+              result.updated++;
+            } else {
+              const refCode = "REF-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+              await prisma.client.create({
+                data: {
+                  remnawaveUuid: uuid,
+                  email: email ?? null,
+                  telegramId,
+                  telegramUsername: username ?? null,
+                  referralCode: refCode,
+                  preferredLang: defaultLang,
+                  preferredCurrency: defaultCurrency,
+                },
+              });
+              result.created++;
+            }
+          } catch (e) {
+            result.errors.push(`${uuid}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        if (users.length < PAGE_SIZE) hasMore = false;
+        else page++;
+      }
+    }
+
+    return { ok: result.errors.length === 0, ...result };
+  } finally {
+    finishSyncJob("syncFromRemna");
+  }
+}
+
+/** Синхронизация в Remna: отправляем данные наших клиентов (telegramId, email) в Remna. */
+export async function syncToRemna(): Promise<{
+  ok: boolean;
+  updated: number;
+  errors: string[];
+}> {
+  if (!tryStartSyncJob("syncToRemna")) {
+    return {
+      ok: false,
+      updated: 0,
+      errors: ["Синхронизация в Remna уже выполняется"],
+    };
+  }
+
+  try {
+    const result = { updated: 0, errors: [] as string[] };
+
+    if (!isRemnaConfigured()) {
+      result.errors.push("Remna API не настроен");
+      return { ok: false, ...result };
+    }
+
+    const clients = await prisma.client.findMany({
+      where: { remnawaveUuid: { not: null } },
+      select: { id: true, remnawaveUuid: true, telegramId: true, email: true },
+    });
+
+    for (const c of clients) {
+      const uuid = c.remnawaveUuid;
+      if (!uuid) continue;
+      try {
+        const currentRes = await remnaGetUser(uuid);
+        if (currentRes.error) {
+          result.errors.push(`${uuid}: skipped (failed to read user before sync): ${currentRes.error}`);
+          continue;
+        }
+
+        const body: Record<string, unknown> = { uuid };
+        const currentSquads = extractRemnaActiveInternalSquadUuids(currentRes.data);
+        if (currentSquads.length > 0) body.activeInternalSquads = currentSquads;
+
+        if (c.telegramId?.trim()) {
+          const parsedTelegramId = Number.parseInt(c.telegramId.trim(), 10);
+          if (!Number.isNaN(parsedTelegramId)) body.telegramId = parsedTelegramId;
+        } else {
+          const currentTelegramId = extractRemoteTelegramId(currentRes.data);
+          if (currentTelegramId != null) body.telegramId = currentTelegramId;
+        }
+
+        if (c.email?.trim()) {
+          body.email = c.email.trim();
+        } else {
+          const currentEmail = extractRemoteEmail(currentRes.data);
+          if (currentEmail) body.email = currentEmail;
+        }
+
+        const res = await remnaUpdateUser(body);
+        if (res.error) result.errors.push(`${uuid}: ${res.error}`);
+        else result.updated++;
+      } catch (e) {
+        result.errors.push(`${uuid}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    return { ok: result.errors.length === 0, ...result };
+  } finally {
+    finishSyncJob("syncToRemna");
+  }
+}
+
+/** Создать в Remna пользователей для клиентов панели, у которых ещё нет remnawaveUuid. */
+export async function createRemnaUsersForClientsWithoutUuid(): Promise<{
+  ok: boolean;
+  created: number;
+  linked: number;
+  errors: string[];
+}> {
+  if (!tryStartSyncJob("createRemnaUsersForClientsWithoutUuid")) {
+    return {
+      ok: false,
+      created: 0,
+      linked: 0,
+      errors: ["Создание пользователей Remna уже выполняется"],
+    };
+  }
+
+  try {
+    const result = { created: 0, linked: 0, errors: [] as string[] };
+
+    if (!isRemnaConfigured()) {
+      result.errors.push("Remna API не настроен");
+      return { ok: false, ...result };
+    }
+
+    const clients = await prisma.client.findMany({
+      where: { remnawaveUuid: null },
+      select: { id: true, email: true, telegramId: true, telegramUsername: true },
+    });
+
+    for (const c of clients) {
+      try {
+        let uuid: string | null = null;
+        if (c.telegramId?.trim()) {
+          const res = await remnaGetUserByTelegramId(c.telegramId.trim());
+          uuid = extractRemnaUuid(res.data);
+        }
+        if (!uuid && c.email?.trim()) {
+          const res = await remnaGetUserByEmail(c.email.trim());
+          uuid = extractRemnaUuid(res.data);
+        }
+        if (!uuid) {
+          const rawName = c.email?.split("@")[0] || `user${c.id.slice(-6)}`;
+          const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "u_" + Date.now().toString(36);
+          const finalUsername = username.length >= 3 ? username : "u_" + username;
+          const byUsernameRes = await remnaGetUserByUsername(finalUsername);
+          uuid = extractRemnaUuid(byUsernameRes.data);
+        }
+        if (!uuid) {
+          const rawName = c.email?.split("@")[0] || `user${c.id.slice(-6)}`;
+          const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "u_" + Date.now().toString(36);
+          const finalUsername = username.length >= 3 ? username : "u_" + username;
+          const createRes = await remnaCreateUser({
+            username: finalUsername,
+            trafficLimitBytes: 0,
+            trafficLimitStrategy: "NO_RESET",
+            expireAt: new Date(Date.now() - 1000).toISOString(),
+            ...(c.telegramId && { telegramId: parseInt(c.telegramId, 10) }),
+            ...(c.email && { email: c.email }),
+          });
+          uuid = extractRemnaUuid(createRes.data);
+          if (uuid) result.created++;
+        } else {
+          result.linked++;
+        }
+        if (uuid) {
+          await prisma.client.update({
+            where: { id: c.id },
+            data: { remnawaveUuid: uuid },
+          });
+        } else {
+          result.errors.push(`Client ${c.id}: не удалось получить или создать UUID в Remna`);
+        }
+      } catch (e) {
+        result.errors.push(`Client ${c.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    return { ok: result.errors.length === 0, ...result };
+  } finally {
+    finishSyncJob("createRemnaUsersForClientsWithoutUuid");
+  }
+}
