@@ -3,17 +3,21 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
-RUN npm install --no-save moy-nalog
 COPY . .
 RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine
 
-RUN apk add --no-cache postgresql-client
+RUN apk add --no-cache postgresql-client python3 py3-pip \
+  && python3 -m venv /opt/venv \
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+  && /opt/venv/bin/pip install --no-cache-dir nalogovich
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/venv/bin:${PATH}"
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./

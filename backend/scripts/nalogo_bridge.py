@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from typing import Any
 
 
@@ -14,28 +14,12 @@ def emit(payload: dict[str, Any], code: int) -> None:
     raise SystemExit(code)
 
 
-def parse_dt(raw: Any) -> datetime:
-    if isinstance(raw, str) and raw.strip():
-        s = raw.strip()
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(s)
-            if parsed.tzinfo is not None:
-                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-            return parsed
-        except ValueError:
-            pass
-    return datetime.utcnow()
-
-
 def extract_uuid(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     s = value.strip()
     if not s:
         return None
-
     m = re.search(r"/receipt/([^/]+)/", s)
     if m:
         return m.group(1)
@@ -47,11 +31,33 @@ def extract_uuid(value: Any) -> str | None:
     return None
 
 
-def pick_first(data: dict[str, Any], keys: list[str]) -> Any:
-    for key in keys:
-        if key in data and data[key] is not None:
-            return data[key]
-    return None
+def to_plain(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [to_plain(v) for v in value]
+    if isinstance(value, tuple):
+        return [to_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): to_plain(v) for k, v in value.items()}
+    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+        try:
+            dumped = value.model_dump()  # type: ignore[attr-defined]
+            return to_plain(dumped)
+        except Exception:
+            pass
+    if hasattr(value, "dict") and callable(getattr(value, "dict")):
+        try:
+            dumped = value.dict()  # type: ignore[attr-defined]
+            return to_plain(dumped)
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        try:
+            return {str(k): to_plain(v) for k, v in vars(value).items()}
+        except Exception:
+            pass
+    return str(value)
 
 
 def find_uuid_deep(value: Any) -> str | None:
@@ -59,7 +65,7 @@ def find_uuid_deep(value: Any) -> str | None:
     if direct:
         return direct
     if isinstance(value, dict):
-        for key in ("approvedReceiptUuid", "receiptUuid", "uuid", "receiptUrl", "printUrl", "url", "link"):
+        for key in ("id", "approvedReceiptUuid", "receiptUuid", "uuid", "receiptUrl", "printUrl", "url", "link"):
             if key in value:
                 found = find_uuid_deep(value[key])
                 if found:
@@ -103,14 +109,14 @@ def classify_error(message: str) -> tuple[int, bool]:
     return 502, True
 
 
-def main() -> None:
+async def run() -> None:
     try:
-        from nalogapi import NalogAPI
+        from nalogovich.lknpd import NpdClient
     except Exception as exc:
         emit(
             {
                 "ok": False,
-                "error": f"nalogapi import failed: {exc}",
+                "error": f"nalogovich import failed: {exc}",
                 "status": 502,
                 "retryable": True,
             },
@@ -120,7 +126,6 @@ def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
         emit({"ok": False, "error": "empty input", "status": 400, "retryable": False}, 1)
-
     try:
         payload = json.loads(raw)
     except Exception:
@@ -129,82 +134,74 @@ def main() -> None:
     inn = str(payload.get("inn", "")).strip()
     password = str(payload.get("password", "")).strip()
     mode = str(payload.get("mode", "income")).strip().lower()
-    name = str(payload.get("name", "")).strip()
-    amount = payload.get("amountRub")
-    op_time = parse_dt(payload.get("operationTimeIso"))
-
     if not inn or not password:
         emit({"ok": False, "error": "missing inn/password", "status": 400, "retryable": False}, 1)
     if mode not in ("income", "auth"):
         emit({"ok": False, "error": "invalid mode", "status": 400, "retryable": False}, 1)
 
-    amount_value = 0.0
-    if mode == "income":
-        if not name:
-            emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
-        try:
-            amount_value = float(amount)
-        except Exception:
-            emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
-        if amount_value <= 0:
-            emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
-
-
     try:
-        NalogAPI.configure(inn, password)
-        if mode == "auth":
-            emit({"ok": True, "message": "NaloGO auth successful"}, 0)
-        result = NalogAPI.addIncome(op_time, amount_value, name)
+        async with NpdClient(inn=inn, password=password) as client:
+            await client.auth()
+
+            if mode == "auth":
+                emit({"ok": True, "message": "Nalogovich auth successful"}, 0)
+
+            name = str(payload.get("name", "")).strip()
+            amount_raw = payload.get("amountRub")
+            if not name:
+                emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
+            try:
+                amount_value = float(amount_raw)
+            except Exception:
+                emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
+            if amount_value <= 0:
+                emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
+
+            receipt = await client.create_check(
+                name=name,
+                amount=round(amount_value, 2),
+            )
+            plain = to_plain(receipt)
+            receipt_uuid = find_uuid_deep(plain)
+            if not receipt_uuid:
+                snippet = str(plain)
+                if len(snippet) > 350:
+                    snippet = snippet[:350] + "..."
+                emit(
+                    {
+                        "ok": False,
+                        "error": f"nalogovich did not return receipt UUID: {snippet}",
+                        "status": 502,
+                        "retryable": True,
+                    },
+                    1,
+                )
+
+            receipt_url = None
+            if isinstance(plain, dict):
+                raw_url = (
+                    plain.get("printUrl")
+                    or plain.get("print_url")
+                    or plain.get("receiptUrl")
+                    or plain.get("url")
+                )
+                if isinstance(raw_url, str) and raw_url.strip():
+                    receipt_url = raw_url.strip()
+
+            emit({"ok": True, "receiptUuid": receipt_uuid, "receiptUrl": receipt_url}, 0)
     except Exception as exc:
         msg = str(exc)
         status, retryable = classify_error(msg)
         emit(
             {
                 "ok": False,
-                "error": f"nalogapi request failed: {msg}",
+                "error": f"nalogovich request failed: {msg}",
                 "status": status,
                 "retryable": retryable,
             },
             1,
         )
 
-    receipt_uuid = find_uuid_deep(result)
-    receipt_url = None
-
-    if isinstance(result, str):
-        receipt_url = result.strip()
-        if not receipt_uuid:
-            receipt_uuid = extract_uuid(receipt_url)
-    elif isinstance(result, dict):
-        raw_url = pick_first(result, ["receiptUrl", "printUrl", "url", "link"])
-        if isinstance(raw_url, str) and raw_url.strip():
-            receipt_url = raw_url.strip()
-        if not receipt_uuid and receipt_url:
-            receipt_uuid = extract_uuid(receipt_url)
-
-    if not receipt_uuid:
-        snippet = str(result)
-        if len(snippet) > 300:
-            snippet = snippet[:300] + "..."
-        emit(
-            {
-                "ok": False,
-                "error": f"nalogapi did not return receipt UUID: {snippet}",
-                "status": 502,
-                "retryable": True,
-            },
-            1,
-        )
-
-    emit(
-        {
-            "ok": True,
-            "receiptUuid": receipt_uuid,
-            "receiptUrl": receipt_url,
-        },
-        0,
-    )
-
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run())

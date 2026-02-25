@@ -130,10 +130,10 @@ function mergeBridgeAndNativeError(
 }
 
 function resolveNalogoBridgeCommandAndPath(): { command: string; scriptPath: string } {
-  const command = (process.env.NALOGO_BRIDGE_BIN ?? process.execPath).trim() || process.execPath;
+  const command = (process.env.NALOGO_BRIDGE_BIN ?? "python3").trim() || "python3";
   const scriptPath = (
     process.env.NALOGO_BRIDGE_PATH ??
-    path.join(process.cwd(), "scripts", "nalogo_bridge.cjs")
+    path.join(process.cwd(), "scripts", "nalogo_bridge.py")
   ).trim();
   return { command, scriptPath };
 }
