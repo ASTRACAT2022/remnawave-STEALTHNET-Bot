@@ -1179,7 +1179,7 @@ bot.on("callback_query:data", async (ctx) => {
         const title = clipText(`Тариф: ${tariff.name}`, 32);
         const desc = clipText(payment.description || `Оплата тарифа ${tariff.name}`, 255);
         const label = clipText(`Тариф ${tariff.name}`, 32);
-        await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "", "XTR", [{ label, amount: payment.starsAmount }]);
+        await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "XTR", [{ label, amount: payment.starsAmount }]);
         const sent = titleWithEmoji("CARD", `Счёт на ${payment.starsAmount} ⭐ отправлен.\n\nОплатите его в сообщении выше.`, config?.botEmojis);
         await editMessageContent(ctx, sent.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), sent.entities);
       } catch (e: unknown) {
@@ -1383,7 +1383,7 @@ bot.on("callback_query:data", async (ctx) => {
         const title = clipText("Пополнение баланса", 32);
         const desc = clipText(payment.description || `Пополнение на ${formatMoney(amount, client.preferredCurrency)}`, 255);
         const label = clipText("Пополнение баланса", 32);
-        await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "", "XTR", [{ label, amount: payment.starsAmount }]);
+        await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "XTR", [{ label, amount: payment.starsAmount }]);
         const sent = titleWithEmoji("CARD", `Счёт на ${payment.starsAmount} ⭐ отправлен.\n\nОплатите его в сообщении выше.`, config?.botEmojis);
         await editMessageContent(ctx, sent.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), sent.entities);
       } catch (e: unknown) {
@@ -1487,7 +1487,7 @@ bot.on("callback_query:data", async (ctx) => {
           const title = clipText("Пополнение баланса", 32);
           const desc = clipText(payment.description || `Пополнение на ${formatMoney(amount, client.preferredCurrency)}`, 255);
           const label = clipText("Пополнение баланса", 32);
-          await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "", "XTR", [{ label, amount: payment.starsAmount }]);
+          await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "XTR", [{ label, amount: payment.starsAmount }]);
           const sent = titleWithEmoji("CARD", `Счёт на ${payment.starsAmount} ⭐ отправлен.\n\nОплатите его в сообщении выше.`, config?.botEmojis);
           await editMessageContent(ctx, sent.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), sent.entities);
         } catch (e: unknown) {
@@ -1712,7 +1712,7 @@ bot.on("message:text", async (ctx) => {
       const title = clipText("Пополнение баланса", 32);
       const desc = clipText(payment.description || `Пополнение на ${formatMoney(num, client.preferredCurrency)}`, 255);
       const label = clipText("Пополнение баланса", 32);
-      await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "", "XTR", [{ label, amount: payment.starsAmount }]);
+      await ctx.replyWithInvoice(title, desc, payment.invoicePayload, "XTR", [{ label, amount: payment.starsAmount }]);
       const topupMsgStars = titleWithEmoji("CARD", `Счёт на ${payment.starsAmount} ⭐ отправлен.\n\nОплатите его в сообщении выше.`, config?.botEmojis);
       await ctx.reply(topupMsgStars.text, {
         entities: topupMsgStars.entities.length ? topupMsgStars.entities : undefined,
