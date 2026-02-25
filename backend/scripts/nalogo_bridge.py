@@ -128,24 +128,32 @@ def main() -> None:
 
     inn = str(payload.get("inn", "")).strip()
     password = str(payload.get("password", "")).strip()
+    mode = str(payload.get("mode", "income")).strip().lower()
     name = str(payload.get("name", "")).strip()
     amount = payload.get("amountRub")
     op_time = parse_dt(payload.get("operationTimeIso"))
 
     if not inn or not password:
         emit({"ok": False, "error": "missing inn/password", "status": 400, "retryable": False}, 1)
-    if not name:
-        emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
-    try:
-        amount_value = float(amount)
-    except Exception:
-        emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
-    if amount_value <= 0:
-        emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
+    if mode not in ("income", "auth"):
+        emit({"ok": False, "error": "invalid mode", "status": 400, "retryable": False}, 1)
+
+    amount_value = 0.0
+    if mode == "income":
+        if not name:
+            emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
+        try:
+            amount_value = float(amount)
+        except Exception:
+            emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
+        if amount_value <= 0:
+            emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
 
 
     try:
         NalogAPI.configure(inn, password)
+        if mode == "auth":
+            emit({"ok": True, "message": "NaloGO auth successful"}, 0)
         result = NalogAPI.addIncome(op_time, amount_value, name)
     except Exception as exc:
         msg = str(exc)

@@ -42,6 +42,7 @@ export type NalogoCreateReceiptResult =
 type NalogoPythonBridgeOutput = {
   ok?: boolean;
   receiptUuid?: unknown;
+  message?: unknown;
   error?: unknown;
   status?: unknown;
   retryable?: unknown;
@@ -238,6 +239,123 @@ async function createNalogoReceiptViaPythonBridge(
           : true;
 
       finish({
+        error: message,
+        status,
+        retryable,
+      });
+    });
+
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+}
+
+async function testNalogoConnectionViaPythonBridge(
+  config: NalogoConfig,
+  timeoutMs: number,
+): Promise<{ ok: true; message: string } | { ok: false; error: string; status: number; retryable: boolean }> {
+  if (!resolvePythonBridgeEnabled(config)) {
+    return {
+      ok: false,
+      error: "NaloGO python bridge is disabled",
+      status: 500,
+      retryable: false,
+    };
+  }
+
+  const pythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
+  const scriptPath = (
+    process.env.NALOGO_PYTHON_BRIDGE_PATH ??
+    path.join(process.cwd(), "scripts", "nalogo_bridge.py")
+  ).trim();
+
+  const payload = {
+    mode: "auth",
+    inn: String(config.inn ?? "").trim(),
+    password: String(config.password ?? "").trim(),
+  };
+
+  return await new Promise((resolve) => {
+    const child = spawn(pythonBin, [scriptPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (
+      result: { ok: true; message: string } | { ok: false; error: string; status: number; retryable: boolean },
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({
+        ok: false,
+        error: "NaloGO python bridge timeout",
+        status: 504,
+        retryable: true,
+      });
+    }, Math.max(timeoutMs, 3000));
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      finish({
+        ok: false,
+        error: `NaloGO python bridge start failed: ${error.message}`,
+        status: 502,
+        retryable: true,
+      });
+    });
+
+    child.on("close", (code) => {
+      const out = stdout.trim();
+      const err = stderr.trim();
+      let parsed: NalogoPythonBridgeOutput | null = null;
+      if (out) {
+        try {
+          parsed = JSON.parse(out) as NalogoPythonBridgeOutput;
+        } catch {
+          parsed = null;
+        }
+      }
+
+      if (code === 0 && parsed?.ok === true) {
+        const msg =
+          typeof parsed.message === "string" && parsed.message.trim()
+            ? parsed.message.trim()
+            : "Авторизация в NaloGO успешна";
+        finish({ ok: true, message: msg });
+        return;
+      }
+
+      const parsedError =
+        parsed && typeof parsed.error === "string" && parsed.error.trim()
+          ? parsed.error.trim()
+          : null;
+      const fallbackMsg = err || out || `python bridge exited with code ${code ?? -1}`;
+      const message = `NaloGO python bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
+      const status = normalizeHttpStatus(parsed?.status, 502);
+      const retryable =
+        parsed && typeof parsed.retryable === "boolean"
+          ? parsed.retryable
+          : true;
+
+      finish({
+        ok: false,
         error: message,
         status,
         retryable,
@@ -942,46 +1060,14 @@ export async function testNalogoConnection(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const inn = String(config.inn).trim();
-  const password = String(config.password).trim();
-  const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const parsedProxy = resolveNalogoProxyConfig(config);
-  if (parsedProxy.error) {
-    return {
-      ok: false,
-      error: parsedProxy.error,
-      status: 400,
-      retryable: false,
-    };
-  }
-  const proxy = parsedProxy.proxy;
-
-  try {
-    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
-    if ("error" in authResult) {
-      return { ok: false, ...authResult };
-    }
-
-    return { ok: true, message: "Авторизация в NaloGO успешна" };
-  } catch (e) {
-    if (isTimeoutError(e)) {
-      const details = e instanceof Error && e.message ? `: ${e.message}` : "";
-      return {
-        ok: false,
-        error: `NaloGO timeout (${proxyModeLabel(proxy)})${details}`.slice(0, 500),
-        status: 504,
-        retryable: true,
-      };
-    }
-
-    const eMessage = e instanceof Error ? e.message : "NaloGO unknown error";
-    return {
-      ok: false,
-      error: `${eMessage} (${proxyModeLabel(proxy)})`.slice(0, 500),
-      status: 502,
-      retryable: true,
-    };
-  }
+  return await testNalogoConnectionViaPythonBridge(
+    {
+      ...config,
+      pythonBridgeEnabled: true,
+      pythonBridgeOnly: true,
+    },
+    timeoutMs,
+  );
 }
 
 export async function createNalogoReceipt(
@@ -1009,121 +1095,22 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  // Python bridge via nalogapi is the primary mode by default.
-  const bridgeOnly = resolvePythonBridgeOnly(config);
-  let bridgeFailure: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
   const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
-    config,
+    {
+      ...config,
+      pythonBridgeEnabled: true,
+      pythonBridgeOnly: true,
+    },
     params,
     timeoutMs,
   );
   if (pythonBridgeResult) {
-    if ("receiptUuid" in pythonBridgeResult) {
-      return pythonBridgeResult;
-    }
-    if (bridgeOnly) {
-      return pythonBridgeResult;
-    }
-    bridgeFailure = pythonBridgeResult;
-  }
-  if (bridgeOnly) {
-    return {
-      error:
-        "NaloGO python bridge mode is enabled, but bridge is disabled in settings/env",
-      status: 500,
-      retryable: false,
-    };
+    return pythonBridgeResult;
   }
 
-  const inn = String(config.inn).trim();
-  const password = String(config.password).trim();
-  const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const parsedProxy = resolveNalogoProxyConfig(config);
-  if (parsedProxy.error) {
-    return mergeBridgeAndNativeError(bridgeFailure, {
-      error: parsedProxy.error,
-      status: 400,
-      retryable: false,
-    });
-  }
-  const proxy = parsedProxy.proxy;
-  try {
-    // 1) Авторизация
-    const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
-    if ("error" in authResult) {
-      return mergeBridgeAndNativeError(bridgeFailure, authResult);
-    }
-
-    // 2) Создание чека
-    const now = new Date();
-    const quantity = Number.isFinite(params.quantity) && Number(params.quantity) > 0 ? Number(params.quantity) : 1;
-    const opTime = toMoscowIso(now);
-    const totalAmount = amount.toFixed(2);
-    const requestBody = {
-      operationTime: opTime,
-      requestTime: opTime,
-      services: [
-        {
-          name: params.name.slice(0, 128),
-          amount: totalAmount,
-          quantity: String(quantity),
-        },
-      ],
-      totalAmount,
-      client: {
-        contactPhone: params.clientPhone ?? null,
-        displayName: params.clientName ?? null,
-        incomeType: "FROM_INDIVIDUAL",
-        inn: params.clientInn ?? null,
-      },
-      paymentType: "CASH",
-      ignoreMaxTotalIncomeRestriction: false,
-    };
-
-    const incomeRes = await nalogoPostWithRetry(
-      "/v1/income",
-      requestBody,
-      timeoutMs,
-      { Authorization: `Bearer ${authResult.token}` },
-      proxy,
-    );
-
-    const incomeData = await parseJsonSafe(incomeRes);
-    if (!incomeRes.ok) {
-      return mergeBridgeAndNativeError(bridgeFailure, {
-        error: `NaloGO income failed: ${extractErrorMessage(incomeData, `HTTP ${incomeRes.status}`)}`,
-        status: incomeRes.status,
-        retryable: isRetryableStatus(incomeRes.status),
-      });
-    }
-
-    const receiptUuidRaw =
-      incomeData.approvedReceiptUuid ?? incomeData.receiptUuid ?? incomeData.uuid;
-    const receiptUuid =
-      typeof receiptUuidRaw === "string" ? receiptUuidRaw.trim() : "";
-    if (!receiptUuid) {
-      return mergeBridgeAndNativeError(bridgeFailure, {
-        error: "NaloGO не вернул UUID чека",
-        status: 502,
-        retryable: true,
-      });
-    }
-
-    return { receiptUuid };
-  } catch (e) {
-    if (isTimeoutError(e)) {
-      const details = e instanceof Error && e.message ? `: ${e.message}` : "";
-      return mergeBridgeAndNativeError(bridgeFailure, {
-        error: `NaloGO timeout (${proxyModeLabel(proxy)})${details}`.slice(0, 500),
-        status: 504,
-        retryable: true,
-      });
-    }
-    const eMessage = e instanceof Error ? e.message : "NaloGO unknown error";
-    return mergeBridgeAndNativeError(bridgeFailure, {
-      error: `${eMessage} (${proxyModeLabel(proxy)})`.slice(0, 500),
-      status: 502,
-      retryable: true,
-    });
-  }
+  return {
+    error: "NaloGO official-library mode: python bridge is unavailable",
+    status: 500,
+    retryable: false,
+  };
 }
