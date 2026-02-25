@@ -116,8 +116,8 @@ services:
     profiles:
       - builtin-nginx
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:${FRONTEND_PORT:-4545}:80"
+      - "127.0.0.1:${FRONTEND_SSL_PORT:-4546}:443"
     volumes:
       - frontend_dist:/var/www/stealthnet:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
