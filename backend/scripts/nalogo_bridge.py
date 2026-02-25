@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import socket
 import sys
+from urllib.parse import parse_qs, unquote, urlparse
 from typing import Any
 
 
@@ -109,7 +112,83 @@ def classify_error(message: str) -> tuple[int, bool]:
     return 502, True
 
 
+def parse_proxy_url(raw: str) -> tuple[str, int, str | None, str | None] | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+
+    parsed = urlparse(value)
+    if parsed.scheme == "tg" and parsed.netloc == "socks":
+        qs = parse_qs(parsed.query)
+        host = (qs.get("server", [""])[0] or "").strip()
+        port_raw = (qs.get("port", ["1080"])[0] or "1080").strip()
+        user = (qs.get("user", [""])[0] or "").strip() or None
+        password = (qs.get("pass", [""])[0] or "").strip() or None
+        if not host:
+            raise ValueError("proxy server is required in tg://socks URL")
+        try:
+            port = int(port_raw)
+        except Exception as exc:
+            raise ValueError("invalid proxy port in tg://socks URL") from exc
+        if port <= 0 or port > 65535:
+            raise ValueError("proxy port out of range")
+        return host, port, user, password
+
+    if parsed.scheme not in ("socks5", "socks5h", "socks"):
+        raise ValueError("only socks5/socks5h/tg://socks proxy URL is supported")
+
+    host = (parsed.hostname or "").strip()
+    if not host:
+        raise ValueError("proxy host is required")
+    port = int(parsed.port or 1080)
+    if port <= 0 or port > 65535:
+        raise ValueError("proxy port out of range")
+    user = unquote(parsed.username) if parsed.username else None
+    password = unquote(parsed.password) if parsed.password else None
+    return host, port, user, password
+
+
+def apply_socks_proxy_from_env() -> None:
+    raw_proxy = (os.getenv("NALOGO_PROXY_URL") or "").strip()
+    if not raw_proxy:
+        return
+
+    proxy = parse_proxy_url(raw_proxy)
+    if proxy is None:
+        return
+    host, port, user, password = proxy
+
+    try:
+        import socks  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"PySocks import failed: {exc}") from exc
+
+    # Force all outbound sockets through SOCKS5 proxy.
+    socks.set_default_proxy(
+        socks.SOCKS5,
+        host,
+        port,
+        True,  # rdns via proxy
+        user,
+        password,
+    )
+    socket.socket = socks.socksocket  # type: ignore[assignment]
+
+
 async def run() -> None:
+    try:
+        apply_socks_proxy_from_env()
+    except Exception as exc:
+        emit(
+            {
+                "ok": False,
+                "error": f"proxy setup failed: {exc}",
+                "status": 400,
+                "retryable": False,
+            },
+            1,
+        )
+
     try:
         from nalogovich.lknpd import NpdClient
     except Exception as exc:
