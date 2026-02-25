@@ -364,6 +364,77 @@ async function enforceSubscription(
   return true;
 }
 
+function isStartCommand(text: string | undefined): boolean {
+  const raw = (text ?? "").trim().toLowerCase();
+  return raw === "/start" || raw.startsWith("/start ");
+}
+
+function isBroadcastCommand(text: string | undefined): boolean {
+  const raw = (text ?? "").trim().toLowerCase();
+  return raw === "/broadcast" || raw.startsWith("/broadcast ");
+}
+
+function shouldSkipGlobalSubscribeGuard(ctx: {
+  message?: { text?: string; successful_payment?: unknown };
+  callbackQuery?: { data?: string };
+  preCheckoutQuery?: unknown;
+}): boolean {
+  const text = ctx.message?.text;
+  if (isStartCommand(text) || isBroadcastCommand(text)) return true;
+  if (ctx.callbackQuery?.data === "check_subscribe") return true;
+  // Не блокируем платёжный флоу: оплата уже может быть инициирована/успешна.
+  if (ctx.preCheckoutQuery) return true;
+  if (ctx.message?.successful_payment) return true;
+  return false;
+}
+
+// Глобальная обязательная проверка подписки перед любыми действиями бота.
+bot.use(async (ctx, next) => {
+  if (shouldSkipGlobalSubscribeGuard(ctx)) {
+    await next();
+    return;
+  }
+
+  const userId = ctx.from?.id;
+  if (!userId) {
+    await next();
+    return;
+  }
+
+  const config = await api.getPublicConfig().catch(() => null);
+  if (!config?.forceSubscribeEnabled) {
+    await next();
+    return;
+  }
+
+  const channelId = config.forceSubscribeChannelId?.trim();
+  if (!channelId) {
+    await ctx.reply(
+      "⚠️ Проверка подписки включена, но канал не настроен. Сообщите администратору: укажите @username или ID канала в настройках.",
+    ).catch(() => {});
+    return;
+  }
+
+  const result = await checkUserSubscription(userId, channelId);
+  if (result.state === "subscribed") {
+    await next();
+    return;
+  }
+
+  if (ctx.callbackQuery) {
+    await ctx.answerCallbackQuery({
+      text: "Подпишитесь на канал, чтобы пользоваться ботом",
+      show_alert: true,
+    }).catch(() => {});
+  }
+
+  const msg = config.forceSubscribeMessage?.trim() || "Для использования бота подпишитесь на наш канал:";
+  const details = result.state === "cannot_verify"
+    ? "\n\nПроверка подписки сейчас недоступна. Сообщите администратору."
+    : "";
+  await ctx.reply(`⚠️ ${msg}${details}`, { reply_markup: subscribeKeyboard(channelId) }).catch(() => {});
+});
+
 type TariffItem = { id: string; name: string; price: number; currency: string };
 type TariffCategory = { id: string; name: string; emoji?: string; emojiKey?: string | null; tariffs: TariffItem[] };
 
@@ -959,28 +1030,6 @@ bot.on("callback_query:data", async (ctx) => {
     if (!token) {
       await ctx.reply("Сессия истекла. Отправьте /start");
       return;
-    }
-
-    // Проверка подписки на канал для всех действий
-    if (config?.forceSubscribeEnabled) {
-      const channelId = config.forceSubscribeChannelId?.trim();
-      if (!channelId) {
-        await editMessageContent(
-          ctx,
-          "⚠️ Проверка подписки включена, но канал не настроен.\n\nУкажите корректный @username или ID канала в админ-панели.",
-          backToMenu(config?.botBackLabel ?? null, "danger")
-        );
-        return;
-      }
-      const result = await checkUserSubscription(userId, channelId);
-      if (result.state !== "subscribed") {
-        const msg = config.forceSubscribeMessage?.trim() || "Для использования бота подпишитесь на наш канал:";
-        const details = result.state === "cannot_verify"
-          ? "\n\nПроверка подписки сейчас недоступна. Сообщите администратору."
-          : "";
-        await editMessageContent(ctx, `⚠️ ${msg}${details}`, subscribeKeyboard(channelId));
-        return;
-      }
     }
 
     const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
@@ -1597,7 +1646,6 @@ bot.on("message:text", async (ctx) => {
   const token = getToken(userId);
   if (!token) return;
   const publicConfig = await api.getPublicConfig().catch(() => null);
-  if (await enforceSubscription(ctx, publicConfig)) return;
 
   // Если пользователь ожидает ввод промокода
   if (awaitingPromoCode.has(userId)) {
