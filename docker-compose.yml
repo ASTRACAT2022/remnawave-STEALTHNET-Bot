@@ -50,10 +50,10 @@ services:
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
       BOT_INTERNAL_API_KEY: "${BOT_INTERNAL_API_KEY:-}"
-      NALOGO_PYTHON_BRIDGE_ENABLED: "${NALOGO_PYTHON_BRIDGE_ENABLED:-true}"
-      NALOGO_PYTHON_BRIDGE_ONLY: "${NALOGO_PYTHON_BRIDGE_ONLY:-true}"
-      NALOGO_PYTHON_BIN: "${NALOGO_PYTHON_BIN:-/opt/venv/bin/python}"
-      NALOGO_PYTHON_BRIDGE_PATH: "${NALOGO_PYTHON_BRIDGE_PATH:-/app/scripts/nalogo_bridge.py}"
+      NALOGO_BRIDGE_ENABLED: "${NALOGO_BRIDGE_ENABLED:-true}"
+      NALOGO_BRIDGE_ONLY: "${NALOGO_BRIDGE_ONLY:-true}"
+      NALOGO_BRIDGE_BIN: "${NALOGO_BRIDGE_BIN:-/usr/local/bin/node}"
+      NALOGO_BRIDGE_PATH: "${NALOGO_BRIDGE_PATH:-/app/scripts/nalogo_bridge.cjs}"
       NALOGO_PROXY_URL: "${NALOGO_PROXY_URL:-}"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]

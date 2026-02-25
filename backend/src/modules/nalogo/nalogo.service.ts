@@ -99,14 +99,14 @@ function resolvePythonBridgeEnabled(config: NalogoConfig): boolean {
   if (typeof config.pythonBridgeEnabled === "boolean") {
     return config.pythonBridgeEnabled;
   }
-  return !isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ENABLED ?? "true");
+  return !isFalseLike(process.env.NALOGO_BRIDGE_ENABLED ?? process.env.NALOGO_PYTHON_BRIDGE_ENABLED ?? "true");
 }
 
 function resolvePythonBridgeOnly(config: NalogoConfig): boolean {
   if (typeof config.pythonBridgeOnly === "boolean") {
     return config.pythonBridgeOnly;
   }
-  return !isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY ?? "true");
+  return !isFalseLike(process.env.NALOGO_BRIDGE_ONLY ?? process.env.NALOGO_PYTHON_BRIDGE_ONLY ?? "true");
 }
 
 function normalizeHttpStatus(value: unknown, fallback: number): number {
@@ -129,6 +129,15 @@ function mergeBridgeAndNativeError(
   };
 }
 
+function resolveNalogoBridgeCommandAndPath(): { command: string; scriptPath: string } {
+  const command = (process.env.NALOGO_BRIDGE_BIN ?? process.execPath).trim() || process.execPath;
+  const scriptPath = (
+    process.env.NALOGO_BRIDGE_PATH ??
+    path.join(process.cwd(), "scripts", "nalogo_bridge.cjs")
+  ).trim();
+  return { command, scriptPath };
+}
+
 async function createNalogoReceiptViaPythonBridge(
   config: NalogoConfig,
   params: {
@@ -145,11 +154,7 @@ async function createNalogoReceiptViaPythonBridge(
     return null;
   }
 
-  const pythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
-  const scriptPath = (
-    process.env.NALOGO_PYTHON_BRIDGE_PATH ??
-    path.join(process.cwd(), "scripts", "nalogo_bridge.py")
-  ).trim();
+  const { command, scriptPath } = resolveNalogoBridgeCommandAndPath();
 
   const payload = {
     inn: String(config.inn ?? "").trim(),
@@ -164,7 +169,7 @@ async function createNalogoReceiptViaPythonBridge(
   };
 
   return await new Promise<NalogoCreateReceiptResult>((resolve) => {
-    const child = spawn(pythonBin, [scriptPath], {
+    const child = spawn(command, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -182,7 +187,7 @@ async function createNalogoReceiptViaPythonBridge(
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish({
-        error: "NaloGO python bridge timeout",
+        error: "NaloGO bridge timeout",
         status: 504,
         retryable: true,
       });
@@ -199,7 +204,7 @@ async function createNalogoReceiptViaPythonBridge(
 
     child.on("error", (error) => {
       finish({
-        error: `NaloGO python bridge start failed: ${error.message}`,
+        error: `NaloGO bridge start failed: ${error.message}`,
         status: 502,
         retryable: true,
       });
@@ -230,8 +235,8 @@ async function createNalogoReceiptViaPythonBridge(
         parsed && typeof parsed.error === "string" && parsed.error.trim()
           ? parsed.error.trim()
           : null;
-      const fallbackMsg = err || out || `python bridge exited with code ${code ?? -1}`;
-      const message = `NaloGO python bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
+      const fallbackMsg = err || out || `bridge exited with code ${code ?? -1}`;
+      const message = `NaloGO bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
       const status = normalizeHttpStatus(parsed?.status, 502);
       const retryable =
         parsed && typeof parsed.retryable === "boolean"
@@ -257,17 +262,13 @@ async function testNalogoConnectionViaPythonBridge(
   if (!resolvePythonBridgeEnabled(config)) {
     return {
       ok: false,
-      error: "NaloGO python bridge is disabled",
+      error: "NaloGO bridge is disabled",
       status: 500,
       retryable: false,
     };
   }
 
-  const pythonBin = (process.env.NALOGO_PYTHON_BIN ?? "python3").trim() || "python3";
-  const scriptPath = (
-    process.env.NALOGO_PYTHON_BRIDGE_PATH ??
-    path.join(process.cwd(), "scripts", "nalogo_bridge.py")
-  ).trim();
+  const { command, scriptPath } = resolveNalogoBridgeCommandAndPath();
 
   const payload = {
     mode: "auth",
@@ -276,7 +277,7 @@ async function testNalogoConnectionViaPythonBridge(
   };
 
   return await new Promise((resolve) => {
-    const child = spawn(pythonBin, [scriptPath], {
+    const child = spawn(command, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -297,7 +298,7 @@ async function testNalogoConnectionViaPythonBridge(
       child.kill("SIGKILL");
       finish({
         ok: false,
-        error: "NaloGO python bridge timeout",
+        error: "NaloGO bridge timeout",
         status: 504,
         retryable: true,
       });
@@ -315,7 +316,7 @@ async function testNalogoConnectionViaPythonBridge(
     child.on("error", (error) => {
       finish({
         ok: false,
-        error: `NaloGO python bridge start failed: ${error.message}`,
+        error: `NaloGO bridge start failed: ${error.message}`,
         status: 502,
         retryable: true,
       });
@@ -346,8 +347,8 @@ async function testNalogoConnectionViaPythonBridge(
         parsed && typeof parsed.error === "string" && parsed.error.trim()
           ? parsed.error.trim()
           : null;
-      const fallbackMsg = err || out || `python bridge exited with code ${code ?? -1}`;
-      const message = `NaloGO python bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
+      const fallbackMsg = err || out || `bridge exited with code ${code ?? -1}`;
+      const message = `NaloGO bridge failed: ${parsedError ?? fallbackMsg}`.slice(0, 500);
       const status = normalizeHttpStatus(parsed?.status, 502);
       const retryable =
         parsed && typeof parsed.retryable === "boolean"
@@ -1060,14 +1061,7 @@ export async function testNalogoConnection(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  return await testNalogoConnectionViaPythonBridge(
-    {
-      ...config,
-      pythonBridgeEnabled: true,
-      pythonBridgeOnly: true,
-    },
-    timeoutMs,
-  );
+  return await testNalogoConnectionViaPythonBridge(config, timeoutMs);
 }
 
 export async function createNalogoReceipt(
@@ -1095,21 +1089,13 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
-    {
-      ...config,
-      pythonBridgeEnabled: true,
-      pythonBridgeOnly: true,
-    },
-    params,
-    timeoutMs,
-  );
+  const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(config, params, timeoutMs);
   if (pythonBridgeResult) {
     return pythonBridgeResult;
   }
 
   return {
-    error: "NaloGO official-library mode: python bridge is unavailable",
+    error: "NaloGO official-library mode: bridge is unavailable",
     status: 500,
     retryable: false,
   };

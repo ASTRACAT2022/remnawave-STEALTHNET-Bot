@@ -1484,7 +1484,7 @@ export function SettingsPage() {
                           checked={settings.nalogoPythonBridgeEnabled ?? true}
                           onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoPythonBridgeEnabled: checked === true } : s))}
                         />
-                        <Label htmlFor="nalogo-python-bridge-enabled">Python nalogapi (рекомендуется)</Label>
+                        <Label htmlFor="nalogo-python-bridge-enabled">Официальная библиотека moy-nalog</Label>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox
@@ -1492,7 +1492,7 @@ export function SettingsPage() {
                           checked={settings.nalogoPythonBridgeOnly ?? true}
                           onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoPythonBridgeOnly: checked === true } : s))}
                         />
-                        <Label htmlFor="nalogo-python-bridge-only">Только Python режим</Label>
+                        <Label htmlFor="nalogo-python-bridge-only">Только режим библиотеки</Label>
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
