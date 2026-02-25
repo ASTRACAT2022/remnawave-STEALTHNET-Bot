@@ -1080,6 +1080,8 @@ const updateSettingsSchema = z.object({
   nalogoPassword: z.string().max(500).nullable().optional(),
   nalogoDeviceId: z.string().max(100).nullable().optional(),
   nalogoTimeout: z.number().min(1).max(120).optional(),
+  nalogoPythonBridgeEnabled: z.boolean().optional(),
+  nalogoPythonBridgeOnly: z.boolean().optional(),
   botButtons: z.string().max(10000).nullable().optional(),
   botAdminIds: z.string().max(4000).nullable().optional(),
   botEmojis: z.union([z.string().max(15000), z.record(z.object({ unicode: z.string().max(20).optional(), tgEmojiId: z.string().max(50).optional() }))]).nullable().optional(),
@@ -1375,6 +1377,20 @@ adminRouter.patch("/settings", async (req, res) => {
       where: { key: "nalogo_timeout" },
       create: { key: "nalogo_timeout", value: String(updates.nalogoTimeout) },
       update: { value: String(updates.nalogoTimeout) },
+    });
+  }
+  if (updates.nalogoPythonBridgeEnabled !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "nalogo_python_bridge_enabled" },
+      create: { key: "nalogo_python_bridge_enabled", value: updates.nalogoPythonBridgeEnabled ? "true" : "false" },
+      update: { value: updates.nalogoPythonBridgeEnabled ? "true" : "false" },
+    });
+  }
+  if (updates.nalogoPythonBridgeOnly !== undefined) {
+    await prisma.systemSetting.upsert({
+      where: { key: "nalogo_python_bridge_only" },
+      create: { key: "nalogo_python_bridge_only", value: updates.nalogoPythonBridgeOnly ? "true" : "false" },
+      update: { value: updates.nalogoPythonBridgeOnly ? "true" : "false" },
     });
   }
   if (updates.botButtons !== undefined) {
@@ -2148,6 +2164,8 @@ adminRouter.post("/nalogo-check", asyncRoute(async (_req, res) => {
     password: config.nalogoPassword,
     deviceId: config.nalogoDeviceId,
     timeoutSeconds: config.nalogoTimeout,
+    pythonBridgeEnabled: Boolean(config.nalogoPythonBridgeEnabled),
+    pythonBridgeOnly: Boolean(config.nalogoPythonBridgeOnly),
   });
 
   if (!result.ok) {

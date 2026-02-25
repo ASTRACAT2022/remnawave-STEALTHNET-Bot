@@ -704,6 +704,8 @@ export type UpdateSettingsPayload = {
   nalogoPassword?: string | null;
   nalogoDeviceId?: string | null;
   nalogoTimeout?: number;
+  nalogoPythonBridgeEnabled?: boolean;
+  nalogoPythonBridgeOnly?: boolean;
   botButtons?: string | null;
   botAdminIds?: string | null;
   botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | string | null;
@@ -803,6 +805,8 @@ export interface AdminSettings {
   nalogoPassword?: string | null;
   nalogoDeviceId?: string | null;
   nalogoTimeout?: number;
+  nalogoPythonBridgeEnabled?: boolean;
+  nalogoPythonBridgeOnly?: boolean;
   /** Кнопки главного меню бота: порядок, видимость, текст, стиль, ключ эмодзи (TRIAL, PACKAGE, …) */
   botButtons?: { id: string; visible: boolean; label: string; order: number; style?: string; emojiKey?: string }[];
   /** Telegram ID админов рассылки в боте */

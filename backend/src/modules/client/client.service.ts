@@ -52,6 +52,7 @@ const SYSTEM_CONFIG_KEYS = [
   "yookassa_trusted_proxy_networks",
   "telegram_stars_enabled", "telegram_stars_rate",
   "nalogo_enabled", "nalogo_inn", "nalogo_password", "nalogo_device_id", "nalogo_timeout",
+  "nalogo_python_bridge_enabled", "nalogo_python_bridge_only",
   "bot_buttons", "bot_back_label", "bot_menu_texts", "bot_inner_button_styles",
   "bot_admin_ids",
   "bot_emojis", // JSON: { "TRIAL": { "unicode": "🎁", "tgEmojiId": "..." }, "PACKAGE": ... } — эмодзи кнопок/текста, TG ID для премиум
@@ -291,6 +292,14 @@ export async function getSystemConfig() {
     nalogoPassword: map.nalogo_password || null,
     nalogoDeviceId: map.nalogo_device_id || null,
     nalogoTimeout: Number.isFinite(parseFloat(map.nalogo_timeout || "30")) ? parseFloat(map.nalogo_timeout || "30") : 30,
+    nalogoPythonBridgeEnabled:
+      map.nalogo_python_bridge_enabled == null || map.nalogo_python_bridge_enabled === ""
+        ? true
+        : map.nalogo_python_bridge_enabled === "true" || map.nalogo_python_bridge_enabled === "1",
+    nalogoPythonBridgeOnly:
+      map.nalogo_python_bridge_only == null || map.nalogo_python_bridge_only === ""
+        ? true
+        : map.nalogo_python_bridge_only === "true" || map.nalogo_python_bridge_only === "1",
     botButtons: parseBotButtons(map.bot_buttons),
     botAdminIds: parseBotAdminIds(map.bot_admin_ids),
     botEmojis: parseBotEmojis(map.bot_emojis),

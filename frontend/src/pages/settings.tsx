@@ -120,6 +120,8 @@ export function SettingsPage() {
         yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
         nalogoEnabled: Boolean((data as AdminSettings).nalogoEnabled),
         nalogoTimeout: (data as AdminSettings).nalogoTimeout ?? 30,
+        nalogoPythonBridgeEnabled: (data as AdminSettings).nalogoPythonBridgeEnabled ?? true,
+        nalogoPythonBridgeOnly: (data as AdminSettings).nalogoPythonBridgeOnly ?? true,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -292,6 +294,8 @@ export function SettingsPage() {
         nalogoPassword: settings.nalogoPassword && settings.nalogoPassword !== "********" ? settings.nalogoPassword : undefined,
         nalogoDeviceId: settings.nalogoDeviceId ?? null,
         nalogoTimeout: settings.nalogoTimeout ?? 30,
+        nalogoPythonBridgeEnabled: settings.nalogoPythonBridgeEnabled ?? true,
+        nalogoPythonBridgeOnly: settings.nalogoPythonBridgeOnly ?? true,
         botButtons: settings.botButtons != null ? JSON.stringify(settings.botButtons) : undefined,
         botAdminIds: settings.botAdminIds?.length ? settings.botAdminIds.join(",") : null,
         botEmojis: settings.botEmojis != null ? settings.botEmojis : undefined,
@@ -312,6 +316,8 @@ export function SettingsPage() {
         const u = updated as AdminSettings;
         setSettings({
           ...u,
+          nalogoPythonBridgeEnabled: u.nalogoPythonBridgeEnabled ?? true,
+          nalogoPythonBridgeOnly: u.nalogoPythonBridgeOnly ?? true,
           botAdminIds: Array.isArray(u.botAdminIds)
             ? Array.from(new Set(u.botAdminIds.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v))))
             : [],
@@ -1470,6 +1476,24 @@ export function SettingsPage() {
                         onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoEnabled: checked === true } : s))}
                       />
                       <Label htmlFor="nalogo-enabled">Включить отправку чеков в налоговую</Label>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="nalogo-python-bridge-enabled"
+                          checked={settings.nalogoPythonBridgeEnabled ?? true}
+                          onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoPythonBridgeEnabled: checked === true } : s))}
+                        />
+                        <Label htmlFor="nalogo-python-bridge-enabled">Python nalogapi (рекомендуется)</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="nalogo-python-bridge-only"
+                          checked={settings.nalogoPythonBridgeOnly ?? true}
+                          onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, nalogoPythonBridgeOnly: checked === true } : s))}
+                        />
+                        <Label htmlFor="nalogo-python-bridge-only">Только Python режим</Label>
+                      </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">

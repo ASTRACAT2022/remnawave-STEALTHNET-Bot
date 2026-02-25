@@ -31,6 +31,8 @@ export type NalogoConfig = {
   deviceId?: string | null;
   timeoutSeconds?: number;
   proxyUrl?: string | null;
+  pythonBridgeEnabled?: boolean;
+  pythonBridgeOnly?: boolean;
 };
 
 export type NalogoCreateReceiptResult =
@@ -92,10 +94,18 @@ function isFalseLike(raw: string | undefined): boolean {
   return v === "0" || v === "false" || v === "no" || v === "off";
 }
 
-function isTrueLike(raw: string | undefined): boolean {
-  if (!raw) return false;
-  const v = raw.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
+function resolvePythonBridgeEnabled(config: NalogoConfig): boolean {
+  if (typeof config.pythonBridgeEnabled === "boolean") {
+    return config.pythonBridgeEnabled;
+  }
+  return !isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ENABLED ?? "true");
+}
+
+function resolvePythonBridgeOnly(config: NalogoConfig): boolean {
+  if (typeof config.pythonBridgeOnly === "boolean") {
+    return config.pythonBridgeOnly;
+  }
+  return !isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY ?? "true");
 }
 
 function normalizeHttpStatus(value: unknown, fallback: number): number {
@@ -130,7 +140,7 @@ async function createNalogoReceiptViaPythonBridge(
   },
   timeoutMs: number,
 ): Promise<NalogoCreateReceiptResult | null> {
-  if (isFalseLike(process.env.NALOGO_PYTHON_BRIDGE_ENABLED)) {
+  if (!resolvePythonBridgeEnabled(config)) {
     return null;
   }
 
@@ -388,6 +398,13 @@ function resolveNalogoProxyRaw(config: NalogoConfig): string {
 
 function proxyModeLabel(proxy: SocksProxyConfig | null): string {
   return proxy ? `proxy=${proxy.label}` : "proxy=off";
+}
+
+function resolveNalogoProxyConfig(
+  config: NalogoConfig,
+): { proxy: SocksProxyConfig | null; error?: string } {
+  const raw = resolveNalogoProxyRaw(config);
+  return parseSocksProxyConfig(raw);
 }
 
 function writeSocket(socket: Socket, data: Buffer): Promise<void> {
@@ -928,7 +945,16 @@ export async function testNalogoConnection(
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const proxy: SocksProxyConfig | null = null;
+  const parsedProxy = resolveNalogoProxyConfig(config);
+  if (parsedProxy.error) {
+    return {
+      ok: false,
+      error: parsedProxy.error,
+      status: 400,
+      retryable: false,
+    };
+  }
+  const proxy = parsedProxy.proxy;
 
   try {
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);
@@ -983,7 +1009,8 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const bridgeOnly = isTrueLike(process.env.NALOGO_PYTHON_BRIDGE_ONLY);
+  // Python bridge via nalogapi is the primary mode by default.
+  const bridgeOnly = resolvePythonBridgeOnly(config);
   let bridgeFailure: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
   const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(
     config,
@@ -991,19 +1018,29 @@ export async function createNalogoReceipt(
     timeoutMs,
   );
   if (pythonBridgeResult) {
-    if ("receiptUuid" in pythonBridgeResult) {
-      return pythonBridgeResult;
-    }
-    if (bridgeOnly) {
-      return pythonBridgeResult;
-    }
-    bridgeFailure = pythonBridgeResult;
+    return pythonBridgeResult;
+  }
+  if (bridgeOnly) {
+    return {
+      error:
+        "NaloGO python bridge mode is enabled, but bridge is disabled in settings/env",
+      status: 500,
+      retryable: false,
+    };
   }
 
   const inn = String(config.inn).trim();
   const password = String(config.password).trim();
   const deviceId = normalizeDeviceId(config.deviceId, inn);
-  const proxy: SocksProxyConfig | null = null;
+  const parsedProxy = resolveNalogoProxyConfig(config);
+  if (parsedProxy.error) {
+    return mergeBridgeAndNativeError(bridgeFailure, {
+      error: parsedProxy.error,
+      status: 400,
+      retryable: false,
+    });
+  }
+  const proxy = parsedProxy.proxy;
   try {
     // 1) Авторизация
     const authResult = await authorizeNalogo(inn, password, deviceId, timeoutMs, proxy);

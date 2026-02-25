@@ -15,6 +15,8 @@ const DEFAULTS: Array<[string, string]> = [
   ["bot_admin_ids", ""],
   ["nalogo_enabled", "false"],
   ["nalogo_timeout", "30"],
+  ["nalogo_python_bridge_enabled", "true"],
+  ["nalogo_python_bridge_only", "true"],
   [
     "bot_inner_button_styles",
     '{"tariffPay":"success","topup":"primary","back":"danger","profile":"primary","trialConfirm":"success","lang":"primary","currency":"primary"}',

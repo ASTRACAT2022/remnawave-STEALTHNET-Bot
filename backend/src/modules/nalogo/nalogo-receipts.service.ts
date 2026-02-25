@@ -184,6 +184,8 @@ export async function processNalogoReceiptForPayment(
       password: config.nalogoPassword,
       deviceId: config.nalogoDeviceId,
       timeoutSeconds: config.nalogoTimeout,
+      pythonBridgeEnabled: Boolean(config.nalogoPythonBridgeEnabled),
+      pythonBridgeOnly: Boolean(config.nalogoPythonBridgeOnly),
     },
     {
       name: receiptName,
