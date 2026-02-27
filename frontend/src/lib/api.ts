@@ -26,6 +26,23 @@ export interface AuthState {
   refreshToken: string | null;
 }
 
+
+function normalizeApiErrorMessage(rawMessage: string | undefined, status: number, statusText: string): string {
+  const raw = (rawMessage ?? "").trim();
+  const lower = raw.toLowerCase();
+  const looksLikeHtml = lower.includes("<html") || lower.includes("<!doctype html") || lower.includes("</body>") || lower.includes("</head>");
+
+  if (status === 502 || lower.includes("502 bad gateway") || lower.includes("bad gateway")) {
+    return "Сервер временно недоступен (502 Bad Gateway). Попробуйте снова через 1–2 минуты.";
+  }
+
+  if (looksLikeHtml) {
+    return `Сервер вернул HTML-страницу ошибки (${status || 0}). Попробуйте обновить страницу или повторить позже.`;
+  }
+
+  return raw || statusText || "Request failed";
+}
+
 async function request<T>(
   path: string,
   options: RequestInit & { token?: string; _retry?: boolean } = {}
@@ -58,7 +75,7 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const message = (data as { message?: string })?.message ?? res.statusText ?? "Request failed";
+    const message = normalizeApiErrorMessage((data as { message?: string })?.message, res.status, res.statusText);
     throw new Error(message);
   }
 
@@ -311,9 +328,9 @@ export const api = {
         const d = JSON.parse(text);
         if (d.message) msg = d.message;
       } catch {
-        // ignore
+        if (text?.trim()) msg = text.trim();
       }
-      throw new Error(msg);
+      throw new Error(normalizeApiErrorMessage(msg, res.status, res.statusText));
     }
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -343,9 +360,9 @@ export const api = {
         const d = JSON.parse(text);
         if (d.message) msg = d.message;
       } catch {
-        // ignore
+        if (text?.trim()) msg = text.trim();
       }
-      throw new Error(msg);
+      throw new Error(normalizeApiErrorMessage(msg, res.status, res.statusText));
     }
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -383,7 +400,7 @@ export const api = {
       if (newToken) return api.restoreBackup(newToken, file);
     }
     if (!res.ok) {
-      const message = (data as { message?: string })?.message ?? res.statusText ?? "Request failed";
+      const message = normalizeApiErrorMessage((data as { message?: string })?.message, res.status, res.statusText);
       throw new Error(message);
     }
     return data as { message: string };
