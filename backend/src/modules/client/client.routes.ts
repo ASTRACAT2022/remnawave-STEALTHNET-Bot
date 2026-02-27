@@ -966,23 +966,70 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
   return res.json({ message: `Промокод активирован! Подписка на ${promo.durationDays} дн. подключена.` });
 });
 
-/** Определить отображаемое имя тарифа: название с сайта, Триал или «Тариф не выбран» */
+/** Определить отображаемое имя тарифа: Триал, название с сайта или «Тариф не выбран» */
+function normalizeUuid(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeUuidList(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const normalized = normalizeUuid(value);
+    if (normalized) seen.add(normalized);
+  }
+  return [...seen];
+}
+
+function pickTariffNameBySquads(
+  activeSquads: readonly string[],
+  tariffs: readonly { name: string; internalSquadUuids: string[] }[],
+): string | null {
+  if (!activeSquads.length) return null;
+  const activeSet = new Set(activeSquads);
+
+  let bestName: string | null = null;
+  let bestOverlap = 0;
+  let bestExtra = Number.POSITIVE_INFINITY;
+
+  for (const tariff of tariffs) {
+    const name = tariff.name?.trim();
+    if (!name) continue;
+    const tariffSquads = normalizeUuidList(tariff.internalSquadUuids ?? []);
+    if (!tariffSquads.length) continue;
+
+    let overlap = 0;
+    for (const squadUuid of tariffSquads) {
+      if (activeSet.has(squadUuid)) overlap += 1;
+    }
+    if (overlap === 0) continue;
+
+    const extra = tariffSquads.length - overlap;
+    if (overlap > bestOverlap || (overlap === bestOverlap && extra < bestExtra)) {
+      bestName = name;
+      bestOverlap = overlap;
+      bestExtra = extra;
+    }
+  }
+
+  return bestName;
+}
+
 async function resolveTariffDisplayName(remnaUserData: unknown, clientId: string): Promise<string> {
-  const squadUuids = extractRemnaActiveInternalSquadUuids(remnaUserData);
+  const squadUuids = normalizeUuidList(extractRemnaActiveInternalSquadUuids(remnaUserData));
   if (!squadUuids.length) return "Тариф не выбран";
 
   const config = await getSystemConfig();
-  const trialSquadUuid = config.trialSquadUuid?.trim() || "";
+  const rawTrialSquadUuid = config.trialSquadUuid?.trim() ?? "";
+  const trialSquadUuid = rawTrialSquadUuid ? normalizeUuid(rawTrialSquadUuid) : "";
   const tariffs = await prisma.tariff.findMany({ select: { name: true, internalSquadUuids: true } });
 
   // Если активны и trial, и платный squad — приоритет у платного.
   const nonTrialSquads = trialSquadUuid
     ? squadUuids.filter((uuid) => uuid !== trialSquadUuid)
     : squadUuids;
-  for (const uuid of nonTrialSquads) {
-    const match = tariffs.find((t) => t.internalSquadUuids.includes(uuid));
-    if (match?.name?.trim()) return match.name;
-  }
+  const paidTariffName = pickTariffNameBySquads(nonTrialSquads, tariffs);
+  if (paidTariffName) return paidTariffName;
 
   const lastPaidTariff = await prisma.payment.findFirst({
     where: { clientId, status: "PAID", tariffId: { not: null } },
@@ -996,10 +1043,9 @@ async function resolveTariffDisplayName(remnaUserData: unknown, clientId: string
 
   if (trialSquadUuid && squadUuids.includes(trialSquadUuid)) return "Триал";
 
-  for (const uuid of squadUuids) {
-    const match = tariffs.find((t) => t.internalSquadUuids.includes(uuid));
-    if (match?.name?.trim()) return match.name;
-  }
+  const anyTariffName = pickTariffNameBySquads(squadUuids, tariffs);
+  if (anyTariffName) return anyTariffName;
+
   return "Тариф не выбран";
 }
 

@@ -237,6 +237,7 @@ export function ClientDashboardPage() {
     let cancelled = false;
     setLoading(true);
     setSubscriptionError(null);
+    setTariffDisplayName(null);
     Promise.all([
       api.clientSubscription(token),
       api.clientPayments(token),
@@ -244,7 +245,8 @@ export function ClientDashboardPage() {
       .then(([subRes, payRes]) => {
         if (cancelled) return;
         setSubscription(subRes.subscription ?? null);
-        setTariffDisplayName(typeof subRes.tariffDisplayName === "string" ? subRes.tariffDisplayName : null);
+        const tariffName = typeof subRes.tariffDisplayName === "string" ? subRes.tariffDisplayName.trim() : "";
+        setTariffDisplayName(tariffName || null);
         if (subRes.message) setSubscriptionError(subRes.message);
         setPayments(payRes.items ?? []);
       })
@@ -282,6 +284,10 @@ export function ClientDashboardPage() {
   const subParsed = parseSubscription(subscription);
   const hasActiveSubscription =
     subscription && typeof subscription === "object" && (subParsed.status === "ACTIVE" || subParsed.status === undefined);
+  const effectiveTariffName =
+    (tariffDisplayName && tariffDisplayName.trim())
+    || (subParsed.productName && subParsed.productName.trim())
+    || (hasActiveSubscription && client?.trialUsed ? "Триал" : null);
   // Ссылка на VPN берётся только из Remna (subscriptionUrl), без резервной ссылки из настроек
   const vpnUrl = subParsed.subscriptionUrl || null;
   const [referralCopied, setReferralCopied] = useState<"site" | "bot" | null>(null);
@@ -371,14 +377,14 @@ export function ClientDashboardPage() {
                     </div>
                   </div>
                 )}
-                {subParsed.productName && (
+                {effectiveTariffName && (
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       <Package className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs text-muted-foreground">Тариф</p>
-                      <p className="text-sm font-medium truncate" title={subParsed.productName}>{subParsed.productName}</p>
+                      <p className="text-sm font-medium truncate" title={effectiveTariffName}>{effectiveTariffName}</p>
                     </div>
                   </div>
                 )}
@@ -713,10 +719,10 @@ export function ClientDashboardPage() {
                     {hasActiveSubscription ? "Активна" : subParsed.status === "EXPIRED" ? "Истекла" : subParsed.status === "DISABLED" ? "Отключена" : "Неактивна"}
                   </span>
                 </div>
-                {(subParsed.productName || tariffDisplayName || (hasActiveSubscription && client?.trialUsed)) && (
+                {effectiveTariffName && (
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span>Тариф: {subParsed.productName?.trim() || tariffDisplayName || "Триал"}</span>
+                    <span>Тариф: {effectiveTariffName}</span>
                   </div>
                 )}
                 {subParsed.expireAt && (
