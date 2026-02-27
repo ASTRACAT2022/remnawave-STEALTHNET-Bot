@@ -111,6 +111,7 @@ export function ClientDashboardPage() {
   const config = useCabinetConfig();
   const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<unknown>(null);
+  const [tariffDisplayName, setTariffDisplayName] = useState<string | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [payments, setPayments] = useState<ClientPayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -243,6 +244,7 @@ export function ClientDashboardPage() {
       .then(([subRes, payRes]) => {
         if (cancelled) return;
         setSubscription(subRes.subscription ?? null);
+        setTariffDisplayName(typeof subRes.tariffDisplayName === "string" ? subRes.tariffDisplayName : null);
         if (subRes.message) setSubscriptionError(subRes.message);
         setPayments(payRes.items ?? []);
       })
@@ -711,10 +713,10 @@ export function ClientDashboardPage() {
                     {hasActiveSubscription ? "Активна" : subParsed.status === "EXPIRED" ? "Истекла" : subParsed.status === "DISABLED" ? "Отключена" : "Неактивна"}
                   </span>
                 </div>
-                {(subParsed.productName || (hasActiveSubscription && client?.trialUsed)) && (
+                {(subParsed.productName || tariffDisplayName || (hasActiveSubscription && client?.trialUsed)) && (
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span>Тариф: {subParsed.productName?.trim() || "Триал"}</span>
+                    <span>Тариф: {subParsed.productName?.trim() || tariffDisplayName || "Триал"}</span>
                   </div>
                 )}
                 {subParsed.expireAt && (
