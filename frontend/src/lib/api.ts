@@ -1,4 +1,6 @@
 const API_BASE = "/api";
+const API_RETRY_ATTEMPTS = 4;
+const API_RETRY_BASE_MS = 350;
 
 /** Вызывается при 401: возвращает новый access token или null. Устанавливается из AuthProvider. */
 let tokenRefreshFn: (() => Promise<string | null>) | null = null;
@@ -35,6 +37,12 @@ function normalizeApiErrorMessage(rawMessage: string | undefined, status: number
   if (status === 502 || lower.includes("502 bad gateway") || lower.includes("bad gateway")) {
     return "Сервер временно недоступен (502 Bad Gateway). Попробуйте снова через 1–2 минуты.";
   }
+  if (status === 503 || lower.includes("503 service unavailable")) {
+    return "Сервис временно недоступен (503). Попробуйте снова через 1–2 минуты.";
+  }
+  if (status === 504 || lower.includes("504 gateway timeout") || lower.includes("gateway timeout")) {
+    return "Сервер не ответил вовремя (504 Gateway Timeout). Повторите запрос через минуту.";
+  }
 
   if (looksLikeHtml) {
     return `Сервер вернул HTML-страницу ошибки (${status || 0}). Попробуйте обновить страницу или повторить позже.`;
@@ -43,19 +51,49 @@ function normalizeApiErrorMessage(rawMessage: string | undefined, status: number
   return raw || statusText || "Request failed";
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const sec = Number(value);
+  if (Number.isFinite(sec) && sec > 0) return Math.max(250, Math.floor(sec * 1000));
+  const at = Date.parse(value);
+  if (Number.isFinite(at)) {
+    const diff = at - Date.now();
+    if (diff > 0) return Math.max(250, diff);
+  }
+  return null;
+}
+
+function isRetryableMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS";
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
 async function request<T>(
   path: string,
-  options: RequestInit & { token?: string; _retry?: boolean } = {}
+  options: RequestInit & { token?: string; _retry?: boolean; _attempt?: number } = {}
 ): Promise<T> {
-  const { token, _retry, ...init } = options;
+  const { token, _retry, _attempt, ...init } = options;
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  const method = (init.method ?? "GET").toUpperCase();
+  const attempt = _attempt ?? 1;
 
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch (e) {
+    if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method)) {
+      await sleep(API_RETRY_BASE_MS * attempt);
+      return request<T>(path, { ...options, _attempt: attempt + 1 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`NetworkError: не удалось выполнить запрос к API (${msg})`);
   }
@@ -70,11 +108,16 @@ async function request<T>(
   if (res.status === 401 && token && !_retry && tokenRefreshFn && !path.startsWith("/auth/")) {
     const newToken = await tokenRefreshFn();
     if (newToken) {
-      return request<T>(path, { ...options, token: newToken, _retry: true });
+      return request<T>(path, { ...options, token: newToken, _retry: true, _attempt: attempt });
     }
   }
 
   if (!res.ok) {
+    if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method) && isRetryableStatus(res.status)) {
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+      await sleep(retryAfterMs ?? API_RETRY_BASE_MS * attempt);
+      return request<T>(path, { ...options, _attempt: attempt + 1 });
+    }
     const message = normalizeApiErrorMessage((data as { message?: string })?.message, res.status, res.statusText);
     throw new Error(message);
   }

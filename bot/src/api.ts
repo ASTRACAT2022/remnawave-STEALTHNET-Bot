@@ -7,6 +7,7 @@ const BOT_INTERNAL_API_KEY = (process.env.BOT_INTERNAL_API_KEY || "").trim();
 const PUBLIC_CONFIG_CACHE_MS = 5000;
 const BROADCAST_ADMINS_CACHE_MS = 5000;
 const API_RETRY_ATTEMPTS = 4;
+const API_RETRY_BASE_MS = 300;
 if (!API_URL) {
   console.warn("API_URL not set in .env — bot API calls will fail");
 }
@@ -36,21 +37,44 @@ function parseRetryAfterMs(value: string | null): number | null {
   return null;
 }
 
+function isRetryableMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS";
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function normalizeHttpError(status: number, message: string): string {
+  const lower = message.toLowerCase();
+  if (status === 502 || lower.includes("bad gateway")) {
+    return "Сервер временно недоступен (502 Bad Gateway). Попробуйте снова через 1–2 минуты.";
+  }
+  if (status === 503 || lower.includes("service unavailable")) {
+    return "Сервис временно недоступен (503). Попробуйте снова через 1–2 минуты.";
+  }
+  if (status === 504 || lower.includes("gateway timeout")) {
+    return "Сервер не ответил вовремя (504 Gateway Timeout). Попробуйте позже.";
+  }
+  return message;
+}
+
 async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string> }): Promise<T> {
   let lastErr: Error | null = null;
+  const method = (opts?.method ?? "GET").toUpperCase();
   for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS; attempt += 1) {
     let res: Response;
     try {
       res = await fetch(`${API_URL}${path}`, {
-        method: opts?.method ?? "GET",
+        method,
         headers: { ...getHeaders(opts?.token), ...(opts?.extraHeaders ?? {}) },
         ...(opts?.body !== undefined && { body: JSON.stringify(opts.body) }),
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastErr = new Error(`NetworkError: API недоступен (${msg})`);
-      if (attempt < API_RETRY_ATTEMPTS) {
-        await sleep(200 * attempt);
+      if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method)) {
+        await sleep(API_RETRY_BASE_MS * attempt);
         continue;
       }
       throw lastErr;
@@ -62,13 +86,13 @@ async function fetchJson<T>(path: string, opts?: { method?: string; body?: unkno
     }
 
     const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
-    if (res.status === 429 && attempt < API_RETRY_ATTEMPTS) {
+    if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method) && isRetryableStatus(res.status)) {
       const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
-      await sleep(retryAfterMs ?? 300 * attempt);
+      await sleep(retryAfterMs ?? API_RETRY_BASE_MS * attempt);
       continue;
     }
 
-    lastErr = new Error(msg);
+    lastErr = new Error(normalizeHttpError(res.status, msg));
     break;
   }
 

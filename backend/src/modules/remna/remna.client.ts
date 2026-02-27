@@ -72,8 +72,12 @@ function parseRetryAfterMs(value: string | null): number | null {
 
 function isRetryableStatus(status: number, method: string): boolean {
   if (status === 429) return true;
-  if (method !== "GET") return false;
+  if (!isRetryableMethod(method)) return false;
   return status === 408 || status >= 500;
+}
+
+function isRetryableMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS" || method === "PUT" || method === "PATCH" || method === "DELETE";
 }
 
 export async function remnaFetch<T>(
@@ -127,7 +131,7 @@ export async function remnaFetch<T>(
     } catch (e) {
       const isAbortError = (e as { name?: string })?.name === "AbortError";
       const abortedByOuterSignal = Boolean(options.signal?.aborted);
-      if (attempt < REMNA_FETCH_RETRY_ATTEMPTS && method === "GET" && !abortedByOuterSignal) {
+      if (attempt < REMNA_FETCH_RETRY_ATTEMPTS && isRetryableMethod(method) && !abortedByOuterSignal) {
         await sleep(REMNA_FETCH_RETRY_BASE_MS * attempt);
         continue;
       }
