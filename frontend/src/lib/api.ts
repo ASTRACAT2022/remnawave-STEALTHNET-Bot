@@ -47,7 +47,7 @@ async function request<T>(
   try {
     data = text ? JSON.parse(text) : undefined;
   } catch {
-    throw new Error(res.statusText || "Request failed");
+    data = text ? { message: text.trim() } : undefined;
   }
 
   if (res.status === 401 && token && !_retry && tokenRefreshFn && !path.startsWith("/auth/")) {
@@ -58,8 +58,12 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const message = (data as { message?: string })?.message ?? res.statusText;
+    const message = (data as { message?: string })?.message ?? res.statusText ?? "Request failed";
     throw new Error(message);
+  }
+
+  if (text && data === undefined) {
+    throw new Error("Invalid API response format");
   }
   return data as T;
 }
@@ -372,14 +376,14 @@ export const api = {
     try {
       data = text ? JSON.parse(text) : undefined;
     } catch {
-      throw new Error(res.statusText || "Request failed");
+      data = text ? { message: text.trim() } : undefined;
     }
     if (res.status === 401 && token && tokenRefreshFn) {
       const newToken = await tokenRefreshFn();
       if (newToken) return api.restoreBackup(newToken, file);
     }
     if (!res.ok) {
-      const message = (data as { message?: string })?.message ?? res.statusText;
+      const message = (data as { message?: string })?.message ?? res.statusText ?? "Request failed";
       throw new Error(message);
     }
     return data as { message: string };
@@ -452,7 +456,7 @@ export const api = {
     return request("/client/auth/me", { token });
   },
 
-  async clientSubscription(token: string): Promise<{ subscription: unknown; message?: string }> {
+  async clientSubscription(token: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string }> {
     return request("/client/subscription", { token });
   },
 
