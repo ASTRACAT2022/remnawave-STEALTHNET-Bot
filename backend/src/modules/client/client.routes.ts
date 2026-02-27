@@ -966,8 +966,8 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
   return res.json({ message: `Промокод активирован! Подписка на ${promo.durationDays} дн. подключена.` });
 });
 
-/** Определить отображаемое имя тарифа: Триал, название с сайта или «Тариф не выбран» */
-async function resolveTariffDisplayName(remnaUserData: unknown): Promise<string> {
+/** Определить отображаемое имя тарифа: название с сайта, Триал или «Тариф не выбран» */
+async function resolveTariffDisplayName(remnaUserData: unknown, clientId: string): Promise<string> {
   const squadUuids = extractRemnaActiveInternalSquadUuids(remnaUserData);
   if (!squadUuids.length) return "Тариф не выбран";
 
@@ -983,6 +983,16 @@ async function resolveTariffDisplayName(remnaUserData: unknown): Promise<string>
     const match = tariffs.find((t) => t.internalSquadUuids.includes(uuid));
     if (match?.name?.trim()) return match.name;
   }
+
+  const lastPaidTariff = await prisma.payment.findFirst({
+    where: { clientId, status: "PAID", tariffId: { not: null } },
+    orderBy: [
+      { paidAt: "desc" },
+      { createdAt: "desc" },
+    ],
+    select: { tariff: { select: { name: true } } },
+  });
+  if (lastPaidTariff?.tariff?.name?.trim()) return lastPaidTariff.tariff.name;
 
   if (trialSquadUuid && squadUuids.includes(trialSquadUuid)) return "Триал";
 
@@ -1000,7 +1010,7 @@ clientRouter.get("/subscription", async (req, res) => {
   if (effectiveRemnaUuid) {
     const result = await remnaGetUser(effectiveRemnaUuid);
     if (!result.error) {
-      const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null);
+      const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null, client.id);
       return res.json({ subscription: result.data ?? null, tariffDisplayName });
     }
 
@@ -1027,7 +1037,7 @@ clientRouter.get("/subscription", async (req, res) => {
     if (recreatedUser.error) {
       return res.json({ subscription: null, tariffDisplayName: null, message: recreatedUser.error });
     }
-    const tariffDisplayName = await resolveTariffDisplayName(recreatedUser.data ?? null);
+    const tariffDisplayName = await resolveTariffDisplayName(recreatedUser.data ?? null, client.id);
     return res.json({ subscription: recreatedUser.data ?? null, tariffDisplayName });
   }
 
@@ -1039,7 +1049,7 @@ clientRouter.get("/subscription", async (req, res) => {
   if (relinked.error) {
     return res.json({ subscription: null, tariffDisplayName: null, message: relinked.error });
   }
-  const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null);
+  const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null, client.id);
   return res.json({ subscription: relinked.data ?? null, tariffDisplayName });
 });
 
