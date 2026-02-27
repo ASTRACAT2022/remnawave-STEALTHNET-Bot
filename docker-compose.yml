@@ -47,6 +47,9 @@ services:
       CORS_ORIGIN: "https://${DOMAIN:-localhost}"
       REMNA_API_URL: "${REMNA_API_URL:-}"
       REMNA_ADMIN_TOKEN: "${REMNA_ADMIN_TOKEN:-}"
+      REMNA_FETCH_TIMEOUT_MS: "${REMNA_FETCH_TIMEOUT_MS:-15000}"
+      REMNA_FETCH_RETRY_ATTEMPTS: "${REMNA_FETCH_RETRY_ATTEMPTS:-3}"
+      REMNA_FETCH_RETRY_BASE_MS: "${REMNA_FETCH_RETRY_BASE_MS:-350}"
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
       BOT_INTERNAL_API_KEY: "${BOT_INTERNAL_API_KEY:-}"
@@ -128,7 +131,7 @@ services:
       frontend:
         condition: service_completed_successfully
       api:
-        condition: service_started
+        condition: service_healthy
     networks:
       - stealthnet
 
