@@ -363,6 +363,11 @@ docker compose --profile builtin-nginx up -d
 # Остановка (со встроенным nginx + SSL)
 docker compose --profile builtin-nginx down
 
+# Если встроенный nginx используется как upstream для внешнего reverse proxy:
+# сгенерируйте HTTP-only конфиг (без локальных SSL-сертов)
+sed "s/REPLACE_DOMAIN/$DOMAIN/g" nginx/nginx.conf.template > nginx/nginx.conf
+docker compose --profile builtin-nginx up -d nginx
+
 # Пересборка после обновления кода
 docker compose build api bot
 docker compose up frontend        # пересобрать фронтенд
@@ -457,7 +462,8 @@ remnawave-STEALTHNET-Bot/
 │   │   └── ...
 │   └── ...
 ├── nginx/                    # Конфиги Nginx
-│   ├── nginx.conf.template   # Шаблон для встроенного nginx
+│   ├── nginx.conf.template   # HTTP-only шаблон (для upstream за внешним reverse proxy)
+│   ├── nginx.ssl.conf.template # SSL-шаблон (используется install.sh после certbot)
 │   ├── nginx-initial.conf    # Начальный конфиг для certbot
 │   └── external.conf.example # Пример для внешнего nginx
 ├── scripts/                  # Вспомогательные скрипты

@@ -194,9 +194,13 @@ ENVEOF
 # ── Генерация nginx.conf из шаблона ──────────────────────────────
 generate_nginx_conf() {
   info "Генерация nginx.conf для домена $DOMAIN ..."
-  sed "s/REPLACE_DOMAIN/$DOMAIN/g" "$SCRIPT_DIR/nginx/nginx.conf.template" \
+  local template="$SCRIPT_DIR/nginx/nginx.ssl.conf.template"
+  if [ ! -f "$template" ]; then
+    template="$SCRIPT_DIR/nginx/nginx.conf.template"
+  fi
+  sed "s/REPLACE_DOMAIN/$DOMAIN/g" "$template" \
     > "$SCRIPT_DIR/nginx/nginx.conf"
-  success "nginx/nginx.conf сгенерирован"
+  success "nginx/nginx.conf (SSL) сгенерирован"
 }
 
 generate_nginx_initial() {
