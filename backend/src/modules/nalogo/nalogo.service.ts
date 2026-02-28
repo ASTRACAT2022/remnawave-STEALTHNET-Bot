@@ -23,6 +23,9 @@ const NALOGO_APP_VERSION = "1.0.0";
 const NALOGO_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_2) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/88.0.4324.192 Safari/537.36";
+const DEFAULT_BRIDGE_CREATE_ATTEMPTS = 2;
+const DEFAULT_BRIDGE_TEST_ATTEMPTS = 2;
+const DEFAULT_BRIDGE_RETRY_BASE_MS = 1200;
 
 export type NalogoConfig = {
   enabled: boolean;
@@ -64,6 +67,22 @@ function resolveTimeoutMs(config: NalogoConfig): number {
       ? Number(config.timeoutSeconds)
       : 30;
   return Math.floor(timeoutSec * 1000);
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.floor(raw);
+}
+
+function resolveBridgeRetryDelayMs(attempt: number): number {
+  const base = readPositiveIntEnv("NALOGO_BRIDGE_RETRY_BASE_MS", DEFAULT_BRIDGE_RETRY_BASE_MS);
+  const exp = Math.max(0, Math.min(6, attempt - 1));
+  return base * Math.pow(2, exp);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 function toMoscowIso(date: Date): string {
@@ -1061,7 +1080,27 @@ export async function testNalogoConnection(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  return await testNalogoConnectionViaPythonBridge(config, timeoutMs);
+  const attempts = Math.min(
+    readPositiveIntEnv("NALOGO_BRIDGE_TEST_ATTEMPTS", DEFAULT_BRIDGE_TEST_ATTEMPTS),
+    5,
+  );
+  let lastError: { ok: false; error: string; status: number; retryable: boolean } | null = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = await testNalogoConnectionViaPythonBridge(config, timeoutMs);
+    if (result.ok) return result;
+    lastError = result;
+
+    const canRetry = result.retryable && isRetryableStatus(result.status) && attempt < attempts;
+    if (!canRetry) break;
+    await sleep(resolveBridgeRetryDelayMs(attempt));
+  }
+
+  return lastError ?? {
+    ok: false,
+    error: "NaloGO bridge failed with unknown error",
+    status: 502,
+    retryable: true,
+  };
 }
 
 export async function createNalogoReceipt(
@@ -1089,9 +1128,23 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const pythonBridgeResult = await createNalogoReceiptViaPythonBridge(config, params, timeoutMs);
-  if (pythonBridgeResult) {
-    return pythonBridgeResult;
+  const attempts = Math.min(
+    readPositiveIntEnv("NALOGO_BRIDGE_CREATE_ATTEMPTS", DEFAULT_BRIDGE_CREATE_ATTEMPTS),
+    5,
+  );
+  let lastBridgeError: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const bridgeResult = await createNalogoReceiptViaPythonBridge(config, params, timeoutMs);
+    if (!bridgeResult) break;
+    if ("receiptUuid" in bridgeResult) return bridgeResult;
+
+    lastBridgeError = bridgeResult;
+    const canRetry = bridgeResult.retryable && isRetryableStatus(bridgeResult.status) && attempt < attempts;
+    if (!canRetry) break;
+    await sleep(resolveBridgeRetryDelayMs(attempt));
+  }
+  if (lastBridgeError) {
+    return lastBridgeError;
   }
 
   return {

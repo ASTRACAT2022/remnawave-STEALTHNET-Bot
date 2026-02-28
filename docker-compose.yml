@@ -57,6 +57,9 @@ services:
       NALOGO_BRIDGE_ONLY: "${NALOGO_BRIDGE_ONLY:-true}"
       NALOGO_BRIDGE_BIN: "${NALOGO_BRIDGE_BIN:-/opt/venv/bin/python}"
       NALOGO_BRIDGE_PATH: "${NALOGO_BRIDGE_PATH:-/app/scripts/nalogo_bridge.py}"
+      NALOGO_BRIDGE_CREATE_ATTEMPTS: "${NALOGO_BRIDGE_CREATE_ATTEMPTS:-2}"
+      NALOGO_BRIDGE_TEST_ATTEMPTS: "${NALOGO_BRIDGE_TEST_ATTEMPTS:-2}"
+      NALOGO_BRIDGE_RETRY_BASE_MS: "${NALOGO_BRIDGE_RETRY_BASE_MS:-1200}"
       NALOGO_PROXY_URL: "${NALOGO_PROXY_URL:-}"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/health || exit 1"]
