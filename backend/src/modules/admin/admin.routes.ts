@@ -2247,7 +2247,10 @@ adminRouter.get("/nalogo-receipts", asyncRoute(async (req, res) => {
   });
 }));
 
-const nalogoRetryParamsSchema = z.object({ paymentId: z.string().cuid() });
+const nalogoRetryParamsSchema = z.object({
+  // Поддерживаем как cuid, так и legacy/uuid идентификаторы платежей.
+  paymentId: z.string().min(1).max(191),
+});
 
 adminRouter.post("/nalogo-receipts/:paymentId/retry", asyncRoute(async (req, res) => {
   const parsed = nalogoRetryParamsSchema.safeParse(req.params);
@@ -2287,6 +2290,8 @@ adminRouter.post("/nalogo-receipts/retry-pending", asyncRoute(async (req, res) =
         { metadata: null },
         { metadata: "" },
         { metadata: { not: { contains: "\"nalogoReceiptUuid\"" } } },
+        { metadata: { contains: "\"nalogoReceiptUuid\":\"\"" } },
+        { metadata: { contains: "\"nalogoReceiptUuid\":null" } },
       ],
     },
     select: { id: true },

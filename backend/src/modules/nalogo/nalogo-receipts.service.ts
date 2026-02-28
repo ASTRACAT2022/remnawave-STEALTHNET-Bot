@@ -257,6 +257,8 @@ export async function processPendingNalogoReceipts(options?: {
         { metadata: null },
         { metadata: "" },
         { metadata: { not: { contains: "\"nalogoReceiptUuid\"" } } },
+        { metadata: { contains: "\"nalogoReceiptUuid\":\"\"" } },
+        { metadata: { contains: "\"nalogoReceiptUuid\":null" } },
       ],
     },
     select: { id: true },

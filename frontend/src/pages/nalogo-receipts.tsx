@@ -105,6 +105,12 @@ export function NalogoReceiptsPage() {
         setMessage("Чек успешно отправлен в Налоговую.");
       } else if (res.status === "not_configured") {
         setError("NaloGO не настроен в разделе Настройки.");
+      } else if (res.status === "failed") {
+        setError(res.error?.trim() || "Повторная отправка завершилась ошибкой.");
+      } else if (res.status === "not_found") {
+        setError("Платеж не найден.");
+      } else if (res.status === "not_paid_yookassa") {
+        setError("Этот платеж не подходит для отправки чека (нужен PAID + yookassa).");
       } else {
         setMessage(`Состояние после повтора: ${res.status}`);
       }
