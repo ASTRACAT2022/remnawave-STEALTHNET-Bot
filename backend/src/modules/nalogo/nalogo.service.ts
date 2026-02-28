@@ -54,6 +54,45 @@ type NalogoPythonBridgeOutput = {
   retryable?: unknown;
 };
 
+function parseBridgeOutput(stdoutRaw: string): NalogoPythonBridgeOutput | null {
+  const out = stdoutRaw.trim();
+  if (!out) return null;
+
+  try {
+    return JSON.parse(out) as NalogoPythonBridgeOutput;
+  } catch {
+    // ignore
+  }
+
+  // Some python libs may print warnings/logs before/after JSON.
+  const lines = out
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line.startsWith("{") || !line.endsWith("}")) continue;
+    try {
+      return JSON.parse(line) as NalogoPythonBridgeOutput;
+    } catch {
+      // ignore
+    }
+  }
+
+  const firstBrace = out.indexOf("{");
+  const lastBrace = out.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const slice = out.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(slice) as NalogoPythonBridgeOutput;
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
 function defaultHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -437,14 +476,7 @@ async function createNalogoReceiptViaPythonBridge(
     child.on("close", (code) => {
       const out = stdout.trim();
       const err = stderr.trim();
-      let parsed: NalogoPythonBridgeOutput | null = null;
-      if (out) {
-        try {
-          parsed = JSON.parse(out) as NalogoPythonBridgeOutput;
-        } catch {
-          parsed = null;
-        }
-      }
+      const parsed = parseBridgeOutput(out);
 
       const parsedUuid =
         parsed && typeof parsed.receiptUuid === "string" && parsed.receiptUuid.trim()
@@ -550,14 +582,7 @@ async function testNalogoConnectionViaPythonBridge(
     child.on("close", (code) => {
       const out = stdout.trim();
       const err = stderr.trim();
-      let parsed: NalogoPythonBridgeOutput | null = null;
-      if (out) {
-        try {
-          parsed = JSON.parse(out) as NalogoPythonBridgeOutput;
-        } catch {
-          parsed = null;
-        }
-      }
+      const parsed = parseBridgeOutput(out);
 
       if (code === 0 && parsed?.ok === true) {
         const msg =

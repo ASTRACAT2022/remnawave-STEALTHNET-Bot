@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import socket
 import sys
 import time
-from datetime import datetime
+import warnings
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
+
+# Keep bridge output deterministic (JSON only) and avoid noisy deprecated warnings.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def emit(payload: dict[str, Any], code: int) -> None:
@@ -69,7 +74,16 @@ def find_uuid_deep(value: Any) -> str | None:
     if direct:
         return direct
     if isinstance(value, dict):
-        for key in ("id", "approvedReceiptUuid", "receiptUuid", "uuid", "receiptUrl", "printUrl", "url", "link"):
+        for key in (
+            "id",
+            "approvedReceiptUuid",
+            "receiptUuid",
+            "uuid",
+            "receiptUrl",
+            "printUrl",
+            "url",
+            "link",
+        ):
             if key in value:
                 found = find_uuid_deep(value[key])
                 if found:
@@ -127,6 +141,10 @@ def read_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     if value > maximum:
         return maximum
     return value
+
+
+def read_env_timeout_seconds(name: str, default_ms: int, minimum_ms: int, maximum_ms: int) -> float:
+    return read_env_int(name, default_ms, minimum_ms, maximum_ms) / 1000.0
 
 
 def parse_proxy_url(raw: str) -> tuple[str, int, str | None, str | None] | None:
@@ -191,13 +209,59 @@ def apply_socks_proxy_from_env() -> None:
     socket.socket = socks.socksocket  # type: ignore[assignment]
 
 
-def do_auth(nalog_api: Any, inn: str, password: str) -> None:
-    nalog_api.configure(inn, password)
+def should_try_nalogovich_fallback(exc: Exception) -> bool:
+    # `nalogapi` often crashes with KeyError('refreshToken') on unstable auth responses.
+    # In such case we can transparently fallback to nalogovich.
+    if (os.getenv("NALOGO_BRIDGE_USE_NALOGOVICH_FALLBACK") or "true").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        return False
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    return "refreshtoken" in msg or "keyerror" in msg
 
 
-def do_income(nalog_api: Any, name: str, amount_rub: float) -> Any:
-    # NalogAPI.addIncome(date, amount, description)
-    return nalog_api.addIncome(datetime.utcnow(), round(amount_rub, 2), name)
+def auth_via_nalogapi(inn: str, password: str) -> str:
+    from nalogapi import NalogAPI
+
+    NalogAPI.configure(inn, password)
+    return "NalogAPI auth successful"
+
+
+async def auth_via_nalogovich(inn: str, password: str, auth_timeout_s: float) -> str:
+    from nalogovich.lknpd import NpdClient
+
+    async with NpdClient(inn=inn, password=password) as client:
+        await asyncio.wait_for(client.auth(), timeout=auth_timeout_s)
+    return "Nalogovich auth successful"
+
+
+def create_income_via_nalogapi(inn: str, password: str, name: str, amount_rub: float) -> Any:
+    from nalogapi import NalogAPI
+
+    NalogAPI.configure(inn, password)
+    # Use timezone-aware UTC datetime.
+    return NalogAPI.addIncome(datetime.now(timezone.utc), round(amount_rub, 2), name)
+
+
+async def create_income_via_nalogovich(
+    inn: str,
+    password: str,
+    name: str,
+    amount_rub: float,
+    auth_timeout_s: float,
+    create_timeout_s: float,
+) -> Any:
+    from nalogovich.lknpd import NpdClient
+
+    async with NpdClient(inn=inn, password=password) as client:
+        await asyncio.wait_for(client.auth(), timeout=auth_timeout_s)
+        return await asyncio.wait_for(
+            client.create_check(name=name, amount=round(amount_rub, 2)),
+            timeout=create_timeout_s,
+        )
 
 
 def run() -> None:
@@ -210,19 +274,6 @@ def run() -> None:
                 "error": f"proxy setup failed: {exc}",
                 "status": 400,
                 "retryable": False,
-            },
-            1,
-        )
-
-    try:
-        from nalogapi import NalogAPI
-    except Exception as exc:
-        emit(
-            {
-                "ok": False,
-                "error": f"nalogapi import failed: {exc}",
-                "status": 502,
-                "retryable": True,
             },
             1,
         )
@@ -245,28 +296,58 @@ def run() -> None:
 
     attempts = read_env_int("NALOGO_BRIDGE_PY_ATTEMPTS", 3, 1, 8)
     retry_base_ms = read_env_int("NALOGO_BRIDGE_PY_RETRY_BASE_MS", 1200, 100, 20_000)
+    auth_timeout_s = read_env_timeout_seconds("NALOGO_BRIDGE_PY_AUTH_TIMEOUT_MS", 20_000, 3_000, 120_000)
+    create_timeout_s = read_env_timeout_seconds("NALOGO_BRIDGE_PY_CREATE_TIMEOUT_MS", 35_000, 3_000, 180_000)
+
+    name = str(payload.get("name", "")).strip()
+    amount_raw = payload.get("amountRub")
+
+    if mode == "income":
+        if not name:
+            emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
+        try:
+            amount_value = float(amount_raw)
+        except Exception:
+            emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
+        if amount_value <= 0:
+            emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
+    else:
+        amount_value = 0.0
+
     last_error_payload: dict[str, Any] | None = None
 
     for attempt in range(1, attempts + 1):
         try:
-            do_auth(NalogAPI, inn, password)
+            provider = "nalogapi"
+
             if mode == "auth":
-                emit({"ok": True, "message": "NalogAPI auth successful"}, 0)
+                try:
+                    message = auth_via_nalogapi(inn, password)
+                except Exception as api_exc:
+                    if not should_try_nalogovich_fallback(api_exc):
+                        raise
+                    provider = "nalogovich"
+                    message = asyncio.run(auth_via_nalogovich(inn, password, auth_timeout_s))
+                emit({"ok": True, "message": f"{message} ({provider})"}, 0)
 
-            name = str(payload.get("name", "")).strip()
-            amount_raw = payload.get("amountRub")
-            if not name:
-                emit({"ok": False, "error": "missing income name", "status": 400, "retryable": False}, 1)
             try:
-                amount_value = float(amount_raw)
-            except Exception:
-                emit({"ok": False, "error": "invalid amount", "status": 400, "retryable": False}, 1)
-            if amount_value <= 0:
-                emit({"ok": False, "error": "amount must be > 0", "status": 400, "retryable": False}, 1)
+                receipt = create_income_via_nalogapi(inn, password, name, amount_value)
+            except Exception as api_exc:
+                if not should_try_nalogovich_fallback(api_exc):
+                    raise
+                provider = "nalogovich"
+                receipt = asyncio.run(
+                    create_income_via_nalogovich(
+                        inn,
+                        password,
+                        name,
+                        amount_value,
+                        auth_timeout_s,
+                        create_timeout_s,
+                    )
+                )
 
-            receipt = do_income(NalogAPI, name, amount_value)
             plain = to_plain(receipt)
-
             receipt_url = None
             if isinstance(plain, str) and plain.strip():
                 receipt_url = plain.strip()
@@ -292,14 +373,23 @@ def run() -> None:
                 emit(
                     {
                         "ok": False,
-                        "error": f"nalogapi did not return receipt UUID: {snippet}",
+                        "error": f"{provider} did not return receipt UUID: {snippet}",
                         "status": 502,
                         "retryable": True,
                     },
                     1,
                 )
 
-            emit({"ok": True, "receiptUuid": receipt_uuid, "receiptUrl": receipt_url}, 0)
+            emit(
+                {
+                    "ok": True,
+                    "receiptUuid": receipt_uuid,
+                    "receiptUrl": receipt_url,
+                    "provider": provider,
+                },
+                0,
+            )
+
         except Exception as exc:
             exc_type = type(exc).__name__
             raw_msg = str(exc).strip()
@@ -307,7 +397,7 @@ def run() -> None:
             status, retryable = classify_error(msg)
             last_error_payload = {
                 "ok": False,
-                "error": f"nalogapi request failed ({exc_type}): {msg}",
+                "error": f"nalogo bridge request failed ({exc_type}): {msg}",
                 "status": status,
                 "retryable": retryable,
             }
@@ -321,7 +411,7 @@ def run() -> None:
         last_error_payload
         or {
             "ok": False,
-            "error": "nalogapi request failed: unknown error",
+            "error": "nalogo bridge request failed: unknown error",
             "status": 502,
             "retryable": True,
         },
