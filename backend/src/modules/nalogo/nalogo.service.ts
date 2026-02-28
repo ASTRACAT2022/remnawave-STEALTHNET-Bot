@@ -158,6 +158,9 @@ function resolveNativeFallbackOnBridgeError(): boolean {
 }
 
 function resolveRemoteRelayUrl(): string | null {
+  if (isFalseLike(process.env.NALOGO_REMOTE_RELAY_ENABLED ?? "false")) {
+    return null;
+  }
   const raw = (process.env.NALOGO_REMOTE_RELAY_URL ?? "").trim();
   return raw ? raw.replace(/\/+$/, "") : null;
 }

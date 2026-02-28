@@ -330,66 +330,30 @@ docker compose ps
 
 ---
 
-## NaloGO Relay (RU node -> DE panel)
+## NaloGO (прямой SOCKS режим, без нод)
 
-Режим для гео-разделения:
-- RU-нода: только отправка чеков через `Nalogovich` (сервис `nalogo-relay`).
-- DE-панель: отправляет запросы на RU relay.
+Рекомендуемый режим: один API-сервис, прямой Python bridge на `NalogAPI`, без relay.
 
-### RU-нода (2 команды)
+В `.env`:
 
 ```bash
-cp relay.env.example .env
-docker compose -f docker-compose.relay.yml --env-file .env up -d --build
+NALOGO_REMOTE_RELAY_ENABLED=false
+NALOGO_BRIDGE_ENABLED=true
+NALOGO_BRIDGE_ONLY=true
+NALOGO_PROXY_URL=socks5h://user:pass@host:port
 ```
 
-После запуска проксируйте `http://127.0.0.1:7070` наружу (через ваш reverse proxy) и защитите TLS.
-По умолчанию relay поднимается максимально просто, без ключей (`RELAY_AUTH_DISABLED=true`).
-
-### DE-панель
-
-Добавьте в `.env`:
+Применить:
 
 ```bash
-NALOGO_REMOTE_RELAY_URL=https://<ru-relay-domain>
-NALOGO_REMOTE_RELAY_TIMEOUT_MS=60000
-NALOGO_REMOTE_RELAY_ONLY=true
+docker compose up -d --build --force-recreate api
 ```
 
-И перезапустите API:
+Проверка авторизации в налоговой через bridge:
 
 ```bash
-docker compose up -d --force-recreate api
-```
-
-### Relay API
-
-- `GET /health`
-- `POST /relay/nalogo/test`
-- `POST /relay/nalogo/create`
-
-Авторизация: `Authorization: Bearer <RELAY_API_KEY>` или `X-Relay-Key: <RELAY_API_KEY>`.
-Если `RELAY_AUTH_DISABLED=true`, ключ не нужен.
-
-### Быстрый автоинсталлер (`curl | bash`)
-
-RU relay:
-
-```bash
-curl -fsSL https://<your-domain>/installcheak.sh | \
-  INSTALL_MODE_999=relay \
-  NALOGO_PROXY_URL_999='socks5://user:pass@host:port' \
-  bash
-```
-
-DE panel:
-
-```bash
-curl -fsSL https://<your-domain>/installcheak.sh | \
-  INSTALL_MODE_999=panel \
-  NALOGO_REMOTE_RELAY_URL_999='https://<ru-relay-domain>' \
-  NALOGO_REMOTE_RELAY_ONLY_999=true \
-  bash
+docker compose exec -T api sh -lc \
+  "printf '%s' '{\"mode\":\"auth\",\"inn\":\"<INN>\",\"password\":\"<PASSWORD>\"}' | /opt/venv/bin/python /app/scripts/nalogo_bridge.py"
 ```
 
 ---
