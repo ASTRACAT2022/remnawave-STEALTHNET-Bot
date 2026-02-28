@@ -370,6 +370,29 @@ docker compose up -d --force-recreate api
 
 Авторизация: `Authorization: Bearer <RELAY_API_KEY>` или `X-Relay-Key: <RELAY_API_KEY>`.
 
+### Быстрый автоинсталлер (`curl | bash`)
+
+RU relay:
+
+```bash
+curl -fsSL https://<your-domain>/installcheak.sh | \
+  INSTALL_MODE_999=relay \
+  RELAY_API_KEY_999='<strong_key>' \
+  NALOGO_PROXY_URL_999='socks5://user:pass@host:port' \
+  bash
+```
+
+DE panel:
+
+```bash
+curl -fsSL https://<your-domain>/installcheak.sh | \
+  INSTALL_MODE_999=panel \
+  NALOGO_REMOTE_RELAY_URL_999='https://<ru-relay-domain>' \
+  NALOGO_REMOTE_RELAY_KEY_999='<strong_key>' \
+  NALOGO_REMOTE_RELAY_ONLY_999=true \
+  bash
+```
+
 ---
 
 ## Полезные команды
