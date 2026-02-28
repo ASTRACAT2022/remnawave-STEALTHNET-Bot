@@ -12,7 +12,8 @@ services:
     environment:
       NODE_ENV: production
       RELAY_PORT: "7070"
-      RELAY_API_KEY: "${RELAY_API_KEY:?set RELAY_API_KEY in env}"
+      RELAY_AUTH_DISABLED: "${RELAY_AUTH_DISABLED:-true}"
+      RELAY_API_KEY: "${RELAY_API_KEY:-}"
       RELAY_CORS_ORIGIN: "${RELAY_CORS_ORIGIN:-*}"
       NALOGO_BRIDGE_ENABLED: "${NALOGO_BRIDGE_ENABLED:-true}"
       NALOGO_BRIDGE_ONLY: "${NALOGO_BRIDGE_ONLY:-true}"
@@ -35,4 +36,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-

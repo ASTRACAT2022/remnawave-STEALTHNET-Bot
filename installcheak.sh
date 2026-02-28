@@ -29,6 +29,13 @@ upsert_env() {
   printf '%s=%s\n' "$key" "$value" >> "$file"
 }
 
+remove_env() {
+  local file="$1"
+  local key="$2"
+  [ -f "$file" ] || return 0
+  sed -i "/^${key}=/d" "$file"
+}
+
 clone_or_update_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     log "Updating repo in $INSTALL_DIR"
@@ -43,18 +50,30 @@ clone_or_update_repo() {
 
 deploy_relay() {
   local relay_api_key="${RELAY_API_KEY_999:-}"
+  local relay_auth_disabled="${RELAY_AUTH_DISABLED_999:-true}"
   local relay_port="${RELAY_PORT_999:-7070}"
   local relay_cors_origin="${RELAY_CORS_ORIGIN_999:-*}"
   local nalogo_proxy_url="${NALOGO_PROXY_URL_999:-}"
 
-  [ -n "$relay_api_key" ] || err "RELAY_API_KEY_999 is required for relay mode"
+  case "$(printf '%s' "$relay_auth_disabled" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) relay_auth_disabled="false" ;;
+    *) relay_auth_disabled="true" ;;
+  esac
+  if [ "$relay_auth_disabled" = "false" ] && [ -z "$relay_api_key" ]; then
+    err "RELAY_API_KEY_999 is required when RELAY_AUTH_DISABLED_999=false"
+  fi
 
   local env_file="$INSTALL_DIR/.env"
   if [ ! -f "$env_file" ]; then
     cp "$INSTALL_DIR/relay.env.example" "$env_file"
   fi
 
-  upsert_env "$env_file" "RELAY_API_KEY" "$relay_api_key"
+  upsert_env "$env_file" "RELAY_AUTH_DISABLED" "$relay_auth_disabled"
+  if [ -n "$relay_api_key" ]; then
+    upsert_env "$env_file" "RELAY_API_KEY" "$relay_api_key"
+  else
+    remove_env "$env_file" "RELAY_API_KEY"
+  fi
   upsert_env "$env_file" "RELAY_PORT" "$relay_port"
   upsert_env "$env_file" "RELAY_CORS_ORIGIN" "$relay_cors_origin"
   upsert_env "$env_file" "NALOGO_PROXY_URL" "$nalogo_proxy_url"
@@ -73,12 +92,16 @@ configure_panel() {
   local relay_only="${NALOGO_REMOTE_RELAY_ONLY_999:-true}"
 
   [ -n "$relay_url" ] || err "NALOGO_REMOTE_RELAY_URL_999 is required for panel mode"
-  [ -n "$relay_key" ] || err "NALOGO_REMOTE_RELAY_KEY_999 is required for panel mode"
 
   local env_file="$INSTALL_DIR/.env"
   touch "$env_file"
   upsert_env "$env_file" "NALOGO_REMOTE_RELAY_URL" "$relay_url"
-  upsert_env "$env_file" "NALOGO_REMOTE_RELAY_KEY" "$relay_key"
+  if [ -n "$relay_key" ]; then
+    upsert_env "$env_file" "NALOGO_REMOTE_RELAY_KEY" "$relay_key"
+  else
+    remove_env "$env_file" "NALOGO_REMOTE_RELAY_KEY"
+    remove_env "$env_file" "NALOGO_REMOTE_RELAY_BEARER"
+  fi
   upsert_env "$env_file" "NALOGO_REMOTE_RELAY_TIMEOUT_MS" "$relay_timeout"
   upsert_env "$env_file" "NALOGO_REMOTE_RELAY_ONLY" "$relay_only"
 
@@ -107,4 +130,3 @@ main() {
 }
 
 main "$@"
-

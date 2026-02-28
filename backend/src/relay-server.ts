@@ -11,7 +11,8 @@ import {
 
 const relayEnvSchema = z.object({
   RELAY_PORT: z.coerce.number().default(7070),
-  RELAY_API_KEY: z.string().min(8),
+  RELAY_API_KEY: z.string().optional(),
+  RELAY_AUTH_DISABLED: z.string().optional(),
   RELAY_CORS_ORIGIN: z.string().default("*"),
 });
 
@@ -21,6 +22,17 @@ if (!relayEnvParsed.success) {
   process.exit(1);
 }
 const relayEnv = relayEnvParsed.data;
+const relayAuthDisabled = (() => {
+  const raw = relayEnv.RELAY_AUTH_DISABLED?.trim().toLowerCase();
+  if (!raw) return true;
+  return !["0", "false", "no", "off"].includes(raw);
+})();
+const relayApiKey = relayEnv.RELAY_API_KEY?.trim() ?? "";
+
+if (!relayAuthDisabled && relayApiKey.length < 8) {
+  console.error("Invalid relay env: RELAY_API_KEY must be set (min 8 chars) when RELAY_AUTH_DISABLED=false");
+  process.exit(1);
+}
 
 const nalogoConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -88,8 +100,9 @@ app.get("/health", (_req, res) => {
 
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
+  if (relayAuthDisabled) return next();
   const provided = pickApiKey(req);
-  if (!provided || provided !== relayEnv.RELAY_API_KEY) {
+  if (!provided || provided !== relayApiKey) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   return next();
@@ -130,7 +143,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 const server = app.listen(relayEnv.RELAY_PORT, "0.0.0.0", () => {
-  console.log(`NaloGO relay listening on port ${relayEnv.RELAY_PORT}`);
+  console.log(
+    `NaloGO relay listening on port ${relayEnv.RELAY_PORT} (auth=${relayAuthDisabled ? "disabled" : "enabled"})`,
+  );
 });
 
 const shutdown = () => {
@@ -138,4 +153,3 @@ const shutdown = () => {
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
-

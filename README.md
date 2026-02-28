@@ -344,6 +344,7 @@ docker compose -f docker-compose.relay.yml --env-file .env up -d --build
 ```
 
 После запуска проксируйте `http://127.0.0.1:7070` наружу (через ваш reverse proxy) и защитите TLS.
+По умолчанию relay поднимается максимально просто, без ключей (`RELAY_AUTH_DISABLED=true`).
 
 ### DE-панель
 
@@ -351,7 +352,6 @@ docker compose -f docker-compose.relay.yml --env-file .env up -d --build
 
 ```bash
 NALOGO_REMOTE_RELAY_URL=https://<ru-relay-domain>
-NALOGO_REMOTE_RELAY_KEY=<тот_же_RELAY_API_KEY_что_на_RU>
 NALOGO_REMOTE_RELAY_TIMEOUT_MS=60000
 NALOGO_REMOTE_RELAY_ONLY=true
 ```
@@ -369,6 +369,7 @@ docker compose up -d --force-recreate api
 - `POST /relay/nalogo/create`
 
 Авторизация: `Authorization: Bearer <RELAY_API_KEY>` или `X-Relay-Key: <RELAY_API_KEY>`.
+Если `RELAY_AUTH_DISABLED=true`, ключ не нужен.
 
 ### Быстрый автоинсталлер (`curl | bash`)
 
@@ -377,7 +378,6 @@ RU relay:
 ```bash
 curl -fsSL https://<your-domain>/installcheak.sh | \
   INSTALL_MODE_999=relay \
-  RELAY_API_KEY_999='<strong_key>' \
   NALOGO_PROXY_URL_999='socks5://user:pass@host:port' \
   bash
 ```
@@ -388,7 +388,6 @@ DE panel:
 curl -fsSL https://<your-domain>/installcheak.sh | \
   INSTALL_MODE_999=panel \
   NALOGO_REMOTE_RELAY_URL_999='https://<ru-relay-domain>' \
-  NALOGO_REMOTE_RELAY_KEY_999='<strong_key>' \
   NALOGO_REMOTE_RELAY_ONLY_999=true \
   bash
 ```
