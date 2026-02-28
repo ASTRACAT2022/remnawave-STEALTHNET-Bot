@@ -26,6 +26,9 @@ const NALOGO_USER_AGENT =
 const DEFAULT_BRIDGE_CREATE_ATTEMPTS = 2;
 const DEFAULT_BRIDGE_TEST_ATTEMPTS = 2;
 const DEFAULT_BRIDGE_RETRY_BASE_MS = 1200;
+const DEFAULT_BRIDGE_PY_ATTEMPTS = 2;
+const DEFAULT_BRIDGE_PROCESS_OVERHEAD_MS = 5000;
+const DEFAULT_BRIDGE_PROCESS_MAX_TIMEOUT_MS = 60_000;
 
 export type NalogoConfig = {
   enabled: boolean;
@@ -81,6 +84,28 @@ function resolveBridgeRetryDelayMs(attempt: number): number {
   return base * Math.pow(2, exp);
 }
 
+function resolveBridgePyAttempts(): number {
+  return Math.min(
+    readPositiveIntEnv("NALOGO_BRIDGE_PY_ATTEMPTS", DEFAULT_BRIDGE_PY_ATTEMPTS),
+    6,
+  );
+}
+
+function resolveBridgeProcessTimeoutMs(timeoutMs: number): number {
+  const perAttemptMs = Math.max(timeoutMs, 3000);
+  const pyAttempts = resolveBridgePyAttempts();
+  const overheadMs = readPositiveIntEnv(
+    "NALOGO_BRIDGE_PROCESS_OVERHEAD_MS",
+    DEFAULT_BRIDGE_PROCESS_OVERHEAD_MS,
+  );
+  const raw = perAttemptMs * pyAttempts + overheadMs;
+  const maxTimeoutMs = readPositiveIntEnv(
+    "NALOGO_BRIDGE_PROCESS_MAX_TIMEOUT_MS",
+    DEFAULT_BRIDGE_PROCESS_MAX_TIMEOUT_MS,
+  );
+  return Math.min(raw, Math.max(10_000, maxTimeoutMs));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
@@ -128,12 +153,82 @@ function resolvePythonBridgeOnly(config: NalogoConfig): boolean {
   return !isFalseLike(process.env.NALOGO_BRIDGE_ONLY ?? process.env.NALOGO_PYTHON_BRIDGE_ONLY ?? "true");
 }
 
+function resolveNativeFallbackOnBridgeError(): boolean {
+  return !isFalseLike(process.env.NALOGO_NATIVE_FALLBACK_ON_BRIDGE_ERROR ?? "true");
+}
+
+function resolveRemoteRelayUrl(): string | null {
+  const raw = (process.env.NALOGO_REMOTE_RELAY_URL ?? "").trim();
+  return raw ? raw.replace(/\/+$/, "") : null;
+}
+
+function resolveRemoteRelayOnly(): boolean {
+  return !isFalseLike(process.env.NALOGO_REMOTE_RELAY_ONLY ?? "false");
+}
+
+function resolveRemoteRelayTimeoutMs(): number {
+  return Math.max(3000, Math.min(180000, readPositiveIntEnv("NALOGO_REMOTE_RELAY_TIMEOUT_MS", 60000)));
+}
+
+function resolveRemoteRelayAuthHeader(): string | null {
+  const bearer = (process.env.NALOGO_REMOTE_RELAY_BEARER ?? "").trim();
+  if (bearer) return `Bearer ${bearer}`;
+  const key = (process.env.NALOGO_REMOTE_RELAY_KEY ?? "").trim();
+  if (key) return `Bearer ${key}`;
+  return null;
+}
+
 function normalizeHttpStatus(value: unknown, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   const status = Math.floor(n);
   if (status < 100 || status > 599) return fallback;
   return status;
+}
+
+function extractReceiptUuid(value: unknown): string | null {
+  const parseString = (raw: string): string | null => {
+    const s = raw.trim();
+    if (!s) return null;
+    const fromUrl = /\/receipt\/([^/]+)(?:\/|$)/i.exec(s);
+    if (fromUrl && fromUrl[1]) return fromUrl[1].trim();
+    if (/^[A-Za-z0-9_-]{8,}$/.test(s)) return s;
+    return null;
+  };
+
+  if (typeof value === "string") return parseString(value);
+  if (!value || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractReceiptUuid(item);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    "approvedReceiptUuid",
+    "approved_receipt_uuid",
+    "receiptUuid",
+    "receipt_id",
+    "receiptId",
+    "uuid",
+    "id",
+    "receiptUrl",
+    "url",
+    "link",
+  ]) {
+    if (!(key in record)) continue;
+    const nested = extractReceiptUuid(record[key]);
+    if (nested) return nested;
+  }
+
+  for (const nested of Object.values(record)) {
+    const found = extractReceiptUuid(nested);
+    if (found) return found;
+  }
+  return null;
 }
 
 function mergeBridgeAndNativeError(
@@ -146,6 +241,112 @@ function mergeBridgeAndNativeError(
     retryable: bridgeError.retryable || nativeError.retryable,
     error: `python-bridge: ${bridgeError.error}; native: ${nativeError.error}`.slice(0, 500),
   };
+}
+
+function mergeRelayAndLocalError(
+  relayError: { error: string; status: number; retryable: boolean } | null,
+  localError: { error: string; status: number; retryable: boolean },
+): { error: string; status: number; retryable: boolean } {
+  if (!relayError) return localError;
+  return {
+    status: localError.status,
+    retryable: relayError.retryable || localError.retryable,
+    error: `remote-relay: ${relayError.error}; local: ${localError.error}`.slice(0, 500),
+  };
+}
+
+async function callRemoteRelay<T extends Record<string, unknown>>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; payload: T } | { ok: false; error: string; status: number; retryable: boolean }> {
+  const relayUrl = resolveRemoteRelayUrl();
+  if (!relayUrl) {
+    return { ok: false, error: "Remote relay URL is not configured", status: 500, retryable: false };
+  }
+
+  const controller = new AbortController();
+  const timeoutMs = resolveRemoteRelayTimeoutMs();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
+    const auth = resolveRemoteRelayAuthHeader();
+    if (auth) headers.Authorization = auth;
+
+    const res = await fetch(`${relayUrl}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const payload = await parseJsonSafe(res);
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Remote relay ${path} failed: ${extractErrorMessage(payload, `HTTP ${res.status}`)}`.slice(0, 500),
+        status: res.status,
+        retryable: isRetryableStatus(res.status),
+      };
+    }
+    return { ok: true, payload: payload as T };
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Remote relay ${path} network error: ${formatNetworkError(e, "remote-relay")}`.slice(0, 500),
+      status: isTimeoutError(e) ? 504 : 502,
+      retryable: true,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeRelayError(
+  error: { error: string; status: number; retryable: boolean },
+): { ok: false; error: string; status: number; retryable: boolean } {
+  return {
+    ok: false,
+    error: error.error,
+    status: normalizeHttpStatus(error.status, 502),
+    retryable: Boolean(error.retryable),
+  };
+}
+
+function parseRemoteTestPayload(
+  payload: Record<string, unknown>,
+): { ok: true; message: string } | { ok: false; error: string; status: number; retryable: boolean } {
+  if (payload.ok === true) {
+    const msg = typeof payload.message === "string" && payload.message.trim()
+      ? payload.message.trim()
+      : "Remote relay: NaloGO auth ok";
+    return { ok: true, message: msg };
+  }
+
+  const status = normalizeHttpStatus(payload.status, 502);
+  const retryable = typeof payload.retryable === "boolean" ? payload.retryable : isRetryableStatus(status);
+  const error = typeof payload.error === "string" && payload.error.trim()
+    ? payload.error.trim()
+    : "Remote relay test failed";
+  return { ok: false, error, status, retryable };
+}
+
+function parseRemoteCreatePayload(payload: Record<string, unknown>): NalogoCreateReceiptResult {
+  const receiptUuid =
+    typeof payload.receiptUuid === "string" && payload.receiptUuid.trim()
+      ? payload.receiptUuid.trim()
+      : null;
+  if (receiptUuid) {
+    return { receiptUuid };
+  }
+
+  const status = normalizeHttpStatus(payload.status, 502);
+  const retryable = typeof payload.retryable === "boolean" ? payload.retryable : isRetryableStatus(status);
+  const error = typeof payload.error === "string" && payload.error.trim()
+    ? payload.error.trim()
+    : "Remote relay create failed";
+  return { error, status, retryable };
 }
 
 function resolveNalogoBridgeCommandAndPath(): { command: string; scriptPath: string } {
@@ -203,14 +404,15 @@ async function createNalogoReceiptViaPythonBridge(
       resolve(result);
     };
 
+    const processTimeoutMs = resolveBridgeProcessTimeoutMs(timeoutMs);
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish({
-        error: "NaloGO bridge timeout",
+        error: `NaloGO bridge timeout after ${processTimeoutMs}ms`,
         status: 504,
         retryable: true,
       });
-    }, Math.max(timeoutMs, 3000));
+    }, processTimeoutMs);
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -313,15 +515,16 @@ async function testNalogoConnectionViaPythonBridge(
       resolve(result);
     };
 
+    const processTimeoutMs = resolveBridgeProcessTimeoutMs(timeoutMs);
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish({
         ok: false,
-        error: "NaloGO bridge timeout",
+        error: `NaloGO bridge timeout after ${processTimeoutMs}ms`,
         status: 504,
         retryable: true,
       });
-    }, Math.max(timeoutMs, 3000));
+    }, processTimeoutMs);
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -998,6 +1201,167 @@ async function authorizeNalogo(
   );
 }
 
+function buildIncomeClientPayload(params: {
+  clientName?: string | null;
+  clientInn?: string | null;
+}): Record<string, string | null> {
+  const clientName = (params.clientName ?? "").trim() || null;
+  const clientInn = (params.clientInn ?? "").trim() || null;
+  if (clientInn) {
+    return {
+      incomeType: "FROM_LEGAL_ENTITY",
+      displayName: clientName,
+      inn: clientInn,
+    };
+  }
+  return {
+    incomeType: "FROM_INDIVIDUAL",
+    displayName: clientName,
+    inn: null,
+  };
+}
+
+async function testNalogoConnectionViaNativeApi(
+  config: NalogoConfig,
+  timeoutMs: number,
+): Promise<{ ok: true; message: string } | { ok: false; error: string; status: number; retryable: boolean }> {
+  const proxyCfg = resolveNalogoProxyConfig(config);
+  if (proxyCfg.error) {
+    return { ok: false, error: proxyCfg.error, status: 400, retryable: false };
+  }
+  const proxy = proxyCfg.proxy;
+
+  const deviceId = normalizeDeviceId(config.deviceId, config.inn ?? undefined);
+  try {
+    const auth = await authorizeNalogo(
+      String(config.inn ?? "").trim(),
+      String(config.password ?? "").trim(),
+      deviceId,
+      timeoutMs,
+      proxy,
+    );
+    if ("error" in auth) {
+      return { ok: false, error: auth.error, status: auth.status, retryable: auth.retryable };
+    }
+  } catch (e) {
+    const message = formatNetworkError(e, "native-auth");
+    return {
+      ok: false,
+      error: `NaloGO native auth failed: ${message}`,
+      status: isTimeoutError(e) ? 504 : 502,
+      retryable: true,
+    };
+  }
+
+  return {
+    ok: true,
+    message: `Авторизация в NaloGO успешна (${proxyModeLabel(proxy)})`,
+  };
+}
+
+async function createNalogoReceiptViaNativeApi(
+  config: NalogoConfig,
+  params: {
+    name: string;
+    amountRub: number;
+    quantity?: number;
+    clientPhone?: string | null;
+    clientName?: string | null;
+    clientInn?: string | null;
+  },
+  timeoutMs: number,
+): Promise<NalogoCreateReceiptResult> {
+  const proxyCfg = resolveNalogoProxyConfig(config);
+  if (proxyCfg.error) {
+    return { error: proxyCfg.error, status: 400, retryable: false };
+  }
+  const proxy = proxyCfg.proxy;
+  const deviceId = normalizeDeviceId(config.deviceId, config.inn ?? undefined);
+
+  let token: string;
+  try {
+    const auth = await authorizeNalogo(
+      String(config.inn ?? "").trim(),
+      String(config.password ?? "").trim(),
+      deviceId,
+      timeoutMs,
+      proxy,
+    );
+    if ("error" in auth) {
+      return { error: auth.error, status: auth.status, retryable: auth.retryable };
+    }
+    token = auth.token;
+  } catch (e) {
+    const message = formatNetworkError(e, "native-auth");
+    return {
+      error: `NaloGO native auth failed: ${message}`,
+      status: isTimeoutError(e) ? 504 : 502,
+      retryable: true,
+    };
+  }
+
+  const operationTime = toMoscowIso(new Date());
+  const quantity = Number.isFinite(params.quantity) && Number(params.quantity) > 0
+    ? Math.floor(Number(params.quantity))
+    : 1;
+  const serviceAmount = Math.round(params.amountRub * 100) / 100;
+  const totalAmount = Math.round(serviceAmount * quantity * 100) / 100;
+
+  const payload = {
+    operationTime,
+    requestTime: operationTime,
+    services: [
+      {
+        name: params.name,
+        quantity,
+        amount: serviceAmount,
+      },
+    ],
+    totalAmount: String(totalAmount),
+    client: buildIncomeClientPayload({
+      clientName: params.clientName,
+      clientInn: params.clientInn,
+    }),
+    paymentType: "CASH",
+    ignoreMaxTotalIncomeRestriction: false,
+  };
+
+  try {
+    const res = await nalogoPostWithRetry(
+      "/v1/income",
+      payload,
+      timeoutMs,
+      { Authorization: `Bearer ${token}` },
+      proxy,
+    );
+    const data = await parseJsonSafe(res);
+    if (!res.ok) {
+      return {
+        error: `NaloGO income failed: ${extractErrorMessage(data, `HTTP ${res.status}`)}`.slice(0, 500),
+        status: res.status,
+        retryable: isRetryableStatus(res.status),
+      };
+    }
+
+    const uuid = extractReceiptUuid(data);
+    if (!uuid) {
+      return {
+        error: "NaloGO income succeeded but receipt UUID is missing",
+        status: 502,
+        retryable: true,
+      };
+    }
+    return { receiptUuid: uuid };
+  } catch (e) {
+    const message = formatNetworkError(e, "native-income");
+    return {
+      error: `NaloGO native income failed: ${message}`.slice(0, 500),
+      status: isTimeoutError(e) ? 504 : 502,
+      retryable: true,
+    };
+  }
+}
+
 async function nalogoPostWithRetry(
   path: string,
   body: Record<string, unknown>,
@@ -1080,26 +1444,91 @@ export async function testNalogoConnection(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const attempts = Math.min(
-    readPositiveIntEnv("NALOGO_BRIDGE_TEST_ATTEMPTS", DEFAULT_BRIDGE_TEST_ATTEMPTS),
-    5,
-  );
-  let lastError: { ok: false; error: string; status: number; retryable: boolean } | null = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = await testNalogoConnectionViaPythonBridge(config, timeoutMs);
-    if (result.ok) return result;
-    lastError = result;
-
-    const canRetry = result.retryable && isRetryableStatus(result.status) && attempt < attempts;
-    if (!canRetry) break;
-    await sleep(resolveBridgeRetryDelayMs(attempt));
+  const remoteRelayUrl = resolveRemoteRelayUrl();
+  const remoteRelayOnly = resolveRemoteRelayOnly();
+  let relayError: { ok: false; error: string; status: number; retryable: boolean } | null = null;
+  if (remoteRelayUrl) {
+    const remote = await callRemoteRelay<Record<string, unknown>>("/relay/nalogo/test", { config });
+    if (remote.ok) {
+      const parsed = parseRemoteTestPayload(remote.payload);
+      if (parsed.ok) return parsed;
+      relayError = parsed;
+    } else {
+      relayError = normalizeRelayError(remote);
+    }
+    if (remoteRelayOnly && relayError) {
+      return relayError;
+    }
   }
 
-  return lastError ?? {
+  const bridgeEnabled = resolvePythonBridgeEnabled(config);
+  const bridgeOnly = resolvePythonBridgeOnly(config);
+  const allowNativeFallback = resolveNativeFallbackOnBridgeError();
+
+  let bridgeError: { ok: false; error: string; status: number; retryable: boolean } | null = null;
+  if (bridgeEnabled) {
+    const attempts = Math.min(
+      readPositiveIntEnv("NALOGO_BRIDGE_TEST_ATTEMPTS", DEFAULT_BRIDGE_TEST_ATTEMPTS),
+      5,
+    );
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const result = await testNalogoConnectionViaPythonBridge(config, timeoutMs);
+      if (result.ok) return result;
+      bridgeError = result;
+
+      const canRetry = result.retryable && isRetryableStatus(result.status) && attempt < attempts;
+      if (!canRetry) break;
+      await sleep(resolveBridgeRetryDelayMs(attempt));
+    }
+  }
+
+  if (!bridgeOnly || allowNativeFallback) {
+    const nativeResult = await testNalogoConnectionViaNativeApi(config, timeoutMs);
+    if (nativeResult.ok) return nativeResult;
+    if (relayError && bridgeError) {
+      return {
+        ok: false,
+        status: nativeResult.status,
+        retryable: relayError.retryable || bridgeError.retryable || nativeResult.retryable,
+        error: `remote-relay: ${relayError.error}; python-bridge: ${bridgeError.error}; native: ${nativeResult.error}`.slice(0, 500),
+      };
+    }
+    if (relayError) {
+      return {
+        ok: false,
+        status: nativeResult.status,
+        retryable: relayError.retryable || nativeResult.retryable,
+        error: `remote-relay: ${relayError.error}; native: ${nativeResult.error}`.slice(0, 500),
+      };
+    }
+    if (bridgeError) {
+      return {
+        ok: false,
+        status: nativeResult.status,
+        retryable: bridgeError.retryable || nativeResult.retryable,
+        error: `python-bridge: ${bridgeError.error}; native: ${nativeResult.error}`.slice(0, 500),
+      };
+    }
+    return nativeResult;
+  }
+
+  if (relayError && bridgeError) {
+    return {
+      ok: false,
+      status: bridgeError.status,
+      retryable: relayError.retryable || bridgeError.retryable,
+      error: `remote-relay: ${relayError.error}; python-bridge: ${bridgeError.error}`.slice(0, 500),
+    };
+  }
+  if (relayError) return relayError;
+
+  return bridgeError ?? {
     ok: false,
-    error: "NaloGO bridge failed with unknown error",
+    error: bridgeEnabled
+      ? "NaloGO bridge failed with unknown error"
+      : "NaloGO bridge disabled and native fallback is disabled",
     status: 502,
-    retryable: true,
+    retryable: bridgeEnabled,
   };
 }
 
@@ -1128,28 +1557,71 @@ export async function createNalogoReceipt(
   }
 
   const timeoutMs = resolveTimeoutMs(config);
-  const attempts = Math.min(
-    readPositiveIntEnv("NALOGO_BRIDGE_CREATE_ATTEMPTS", DEFAULT_BRIDGE_CREATE_ATTEMPTS),
-    5,
-  );
-  let lastBridgeError: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const bridgeResult = await createNalogoReceiptViaPythonBridge(config, params, timeoutMs);
-    if (!bridgeResult) break;
-    if ("receiptUuid" in bridgeResult) return bridgeResult;
+  const remoteRelayUrl = resolveRemoteRelayUrl();
+  const remoteRelayOnly = resolveRemoteRelayOnly();
+  let relayError: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
+  if (remoteRelayUrl) {
+    const remote = await callRemoteRelay<Record<string, unknown>>("/relay/nalogo/create", {
+      config,
+      params,
+    });
+    if (remote.ok) {
+      const parsed = parseRemoteCreatePayload(remote.payload);
+      if ("receiptUuid" in parsed) return parsed;
+      relayError = parsed;
+    } else {
+      relayError = {
+        error: remote.error,
+        status: remote.status,
+        retryable: remote.retryable,
+      };
+    }
 
-    lastBridgeError = bridgeResult;
-    const canRetry = bridgeResult.retryable && isRetryableStatus(bridgeResult.status) && attempt < attempts;
-    if (!canRetry) break;
-    await sleep(resolveBridgeRetryDelayMs(attempt));
+    if (remoteRelayOnly && relayError) {
+      return relayError;
+    }
   }
-  if (lastBridgeError) {
-    return lastBridgeError;
+
+  const bridgeEnabled = resolvePythonBridgeEnabled(config);
+  const bridgeOnly = resolvePythonBridgeOnly(config);
+  const allowNativeFallback = resolveNativeFallbackOnBridgeError();
+  let lastBridgeError: Extract<NalogoCreateReceiptResult, { error: string }> | null = null;
+  if (bridgeEnabled) {
+    const attempts = Math.min(
+      readPositiveIntEnv("NALOGO_BRIDGE_CREATE_ATTEMPTS", DEFAULT_BRIDGE_CREATE_ATTEMPTS),
+      5,
+    );
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const bridgeResult = await createNalogoReceiptViaPythonBridge(config, params, timeoutMs);
+      if (!bridgeResult) break;
+      if ("receiptUuid" in bridgeResult) return bridgeResult;
+
+      lastBridgeError = bridgeResult;
+      const canRetry = bridgeResult.retryable && isRetryableStatus(bridgeResult.status) && attempt < attempts;
+      if (!canRetry) break;
+      await sleep(resolveBridgeRetryDelayMs(attempt));
+    }
   }
+
+  if (!bridgeOnly || allowNativeFallback) {
+    const nativeResult = await createNalogoReceiptViaNativeApi(config, params, timeoutMs);
+    if ("receiptUuid" in nativeResult) return nativeResult;
+    const localMerged = mergeBridgeAndNativeError(lastBridgeError, nativeResult);
+    return mergeRelayAndLocalError(relayError, localMerged);
+  }
+
+  if (relayError && lastBridgeError) {
+    return {
+      error: `remote-relay: ${relayError.error}; python-bridge: ${lastBridgeError.error}`.slice(0, 500),
+      status: lastBridgeError.status,
+      retryable: relayError.retryable || lastBridgeError.retryable,
+    };
+  }
+  if (relayError) return relayError;
 
   return {
-    error: "NaloGO official-library mode: bridge is unavailable",
-    status: 500,
-    retryable: false,
+    error: lastBridgeError?.error ?? "NaloGO bridge mode: no successful result",
+    status: lastBridgeError?.status ?? 500,
+    retryable: lastBridgeError?.retryable ?? false,
   };
 }

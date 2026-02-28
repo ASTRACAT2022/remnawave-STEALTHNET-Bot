@@ -22,6 +22,7 @@ export type NalogoRetryWorkerHandle = {
 export function startNalogoReceiptRetryWorker(): NalogoRetryWorkerHandle {
   let timer: NodeJS.Timeout | null = null;
   let inProgress = false;
+  let warnedNotConfigured = false;
 
   const tick = async () => {
     if (inProgress) return;
@@ -32,9 +33,14 @@ export function startNalogoReceiptRetryWorker(): NalogoRetryWorkerHandle {
       });
 
       if (!result.configured) {
+        if (!warnedNotConfigured) {
+          warnedNotConfigured = true;
+          console.warn("[NaloGO Retry Worker] Skipped: NaloGO is not configured");
+        }
         return;
       }
-      if (result.created > 0 || result.failed > 0) {
+      warnedNotConfigured = false;
+      if (result.scanned > 0 || result.created > 0 || result.failed > 0) {
         console.log("[NaloGO Retry Worker] Batch result", result);
       }
     } catch (e) {

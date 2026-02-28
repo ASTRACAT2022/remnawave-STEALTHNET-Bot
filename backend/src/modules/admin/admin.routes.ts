@@ -103,7 +103,9 @@ function resolveNalogoReceiptStatus(meta: NalogoReceiptMeta): "sent" | "in_progr
     return "retry_wait";
   }
   if (hasError) return "failed";
-  if (attempts > 0) return "in_progress";
+  // Если есть попытки, но нет свежего in-progress и окна nextRetry,
+  // считаем это завершившейся неуспешной попыткой, а не "в обработке".
+  if (attempts > 0) return "failed";
   return "pending";
 }
 

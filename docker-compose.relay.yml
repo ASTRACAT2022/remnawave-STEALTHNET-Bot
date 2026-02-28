@@ -1,0 +1,38 @@
+name: stealthnet-nalogo-relay
+
+services:
+  nalogo-relay:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.relay
+    container_name: stealthnet-nalogo-relay
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${RELAY_PORT:-7070}:7070"
+    environment:
+      NODE_ENV: production
+      RELAY_PORT: "7070"
+      RELAY_API_KEY: "${RELAY_API_KEY:?set RELAY_API_KEY in env}"
+      RELAY_CORS_ORIGIN: "${RELAY_CORS_ORIGIN:-*}"
+      NALOGO_BRIDGE_ENABLED: "${NALOGO_BRIDGE_ENABLED:-true}"
+      NALOGO_BRIDGE_ONLY: "${NALOGO_BRIDGE_ONLY:-true}"
+      NALOGO_BRIDGE_BIN: "${NALOGO_BRIDGE_BIN:-/opt/venv/bin/python}"
+      NALOGO_BRIDGE_PATH: "${NALOGO_BRIDGE_PATH:-/app/scripts/nalogo_bridge.py}"
+      NALOGO_BRIDGE_CREATE_ATTEMPTS: "${NALOGO_BRIDGE_CREATE_ATTEMPTS:-3}"
+      NALOGO_BRIDGE_TEST_ATTEMPTS: "${NALOGO_BRIDGE_TEST_ATTEMPTS:-3}"
+      NALOGO_BRIDGE_RETRY_BASE_MS: "${NALOGO_BRIDGE_RETRY_BASE_MS:-1200}"
+      NALOGO_BRIDGE_PY_ATTEMPTS: "${NALOGO_BRIDGE_PY_ATTEMPTS:-3}"
+      NALOGO_BRIDGE_PY_RETRY_BASE_MS: "${NALOGO_BRIDGE_PY_RETRY_BASE_MS:-1200}"
+      NALOGO_BRIDGE_PY_AUTH_TIMEOUT_MS: "${NALOGO_BRIDGE_PY_AUTH_TIMEOUT_MS:-30000}"
+      NALOGO_BRIDGE_PY_CREATE_TIMEOUT_MS: "${NALOGO_BRIDGE_PY_CREATE_TIMEOUT_MS:-45000}"
+      NALOGO_BRIDGE_PROCESS_OVERHEAD_MS: "${NALOGO_BRIDGE_PROCESS_OVERHEAD_MS:-7000}"
+      NALOGO_BRIDGE_PROCESS_MAX_TIMEOUT_MS: "${NALOGO_BRIDGE_PROCESS_MAX_TIMEOUT_MS:-120000}"
+      NALOGO_NATIVE_FALLBACK_ON_BRIDGE_ERROR: "${NALOGO_NATIVE_FALLBACK_ON_BRIDGE_ERROR:-true}"
+      NALOGO_PROXY_URL: "${NALOGO_PROXY_URL:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7070/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+

@@ -330,6 +330,48 @@ docker compose ps
 
 ---
 
+## NaloGO Relay (RU node -> DE panel)
+
+Режим для гео-разделения:
+- RU-нода: только отправка чеков через `Nalogovich` (сервис `nalogo-relay`).
+- DE-панель: отправляет запросы на RU relay.
+
+### RU-нода (2 команды)
+
+```bash
+cp relay.env.example .env
+docker compose -f docker-compose.relay.yml --env-file .env up -d --build
+```
+
+После запуска проксируйте `http://127.0.0.1:7070` наружу (через ваш reverse proxy) и защитите TLS.
+
+### DE-панель
+
+Добавьте в `.env`:
+
+```bash
+NALOGO_REMOTE_RELAY_URL=https://<ru-relay-domain>
+NALOGO_REMOTE_RELAY_KEY=<тот_же_RELAY_API_KEY_что_на_RU>
+NALOGO_REMOTE_RELAY_TIMEOUT_MS=60000
+NALOGO_REMOTE_RELAY_ONLY=true
+```
+
+И перезапустите API:
+
+```bash
+docker compose up -d --force-recreate api
+```
+
+### Relay API
+
+- `GET /health`
+- `POST /relay/nalogo/test`
+- `POST /relay/nalogo/create`
+
+Авторизация: `Authorization: Bearer <RELAY_API_KEY>` или `X-Relay-Key: <RELAY_API_KEY>`.
+
+---
+
 ## Полезные команды
 
 ```bash
