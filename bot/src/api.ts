@@ -37,7 +37,8 @@ function parseRetryAfterMs(value: string | null): number | null {
   return null;
 }
 
-function isRetryableMethod(method: string): boolean {
+function isRetryableMethod(method: string, retryableOverride?: boolean): boolean {
+  if (retryableOverride) return true;
   return method === "GET" || method === "HEAD" || method === "OPTIONS";
 }
 
@@ -59,9 +60,10 @@ function normalizeHttpError(status: number, message: string): string {
   return message;
 }
 
-async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string> }): Promise<T> {
+async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string>; retryable?: boolean }): Promise<T> {
   let lastErr: Error | null = null;
   const method = (opts?.method ?? "GET").toUpperCase();
+  const canRetry = isRetryableMethod(method, opts?.retryable);
   for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS; attempt += 1) {
     let res: Response;
     try {
@@ -73,7 +75,7 @@ async function fetchJson<T>(path: string, opts?: { method?: string; body?: unkno
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastErr = new Error(`NetworkError: API недоступен (${msg})`);
-      if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method)) {
+      if (attempt < API_RETRY_ATTEMPTS && canRetry) {
         await sleep(API_RETRY_BASE_MS * attempt);
         continue;
       }
@@ -86,7 +88,7 @@ async function fetchJson<T>(path: string, opts?: { method?: string; body?: unkno
     }
 
     const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
-    if (attempt < API_RETRY_ATTEMPTS && isRetryableMethod(method) && isRetryableStatus(res.status)) {
+    if (attempt < API_RETRY_ATTEMPTS && canRetry && isRetryableStatus(res.status)) {
       const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
       await sleep(retryAfterMs ?? API_RETRY_BASE_MS * attempt);
       continue;
@@ -251,7 +253,8 @@ export async function confirmTelegramStarsPayment(body: {
   providerPaymentChargeId?: string;
   invoicePayload?: string;
 }): Promise<{ paymentId: string; orderId: string; status: string; alreadyProcessed: boolean }> {
-  return fetchJson("/api/public/telegram-stars/confirm", { method: "POST", body });
+  // Idempotent endpoint: safe to retry on transient network/5xx errors.
+  return fetchJson("/api/public/telegram-stars/confirm", { method: "POST", body, retryable: true });
 }
 
 /** Обновить профиль (язык, валюта) */

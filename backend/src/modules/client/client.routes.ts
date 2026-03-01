@@ -63,6 +63,19 @@ function parseJsonObject(raw: string | null | undefined): Record<string, unknown
   }
 }
 
+function extractStarsPaymentId(payload: string | null | undefined): string | null {
+  const raw = (payload ?? "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("stars:")) {
+    const fromPrefixed = raw.slice("stars:".length).trim();
+    return fromPrefixed || null;
+  }
+  // Backward compatibility for legacy payload format where payment ID was sent directly.
+  return raw;
+}
+
+let starsConfirmWithoutKeyWarningLogged = false;
+
 function resolveBaseAppUrl(req: import("express").Request, configuredPublicUrl: string | null | undefined): string {
   const configured = (configuredPublicUrl ?? "").trim().replace(/\/$/, "");
   if (configured) return configured;
@@ -1959,22 +1972,27 @@ publicConfigRouter.get("/config", async (_req, res) => {
 });
 
 const confirmTelegramStarsPaymentSchema = z.object({
-  paymentId: z.string().min(1),
+  paymentId: z.string().min(1).optional(),
   telegramUserId: z.string().min(1),
   totalAmount: z.coerce.number().int().positive(),
   telegramPaymentChargeId: z.string().min(1),
   providerPaymentChargeId: z.string().optional(),
-  invoicePayload: z.string().optional(),
+  invoicePayload: z.string().min(1).optional(),
+}).refine((v) => Boolean(v.paymentId?.trim() || v.invoicePayload?.trim()), {
+  message: "Укажите paymentId или invoicePayload",
+  path: ["paymentId"],
 });
 
 publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
   const apiKey = env.BOT_INTERNAL_API_KEY?.trim();
-  if (!apiKey) {
-    return res.status(503).json({ message: "Bot internal key is not configured" });
-  }
-  const received = headerValue(req.headers["x-bot-internal-key"]).trim();
-  if (!received || received !== apiKey) {
-    return res.status(403).json({ message: "Forbidden" });
+  if (apiKey) {
+    const received = headerValue(req.headers["x-bot-internal-key"]).trim();
+    if (!received || received !== apiKey) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+  } else if (!starsConfirmWithoutKeyWarningLogged) {
+    starsConfirmWithoutKeyWarningLogged = true;
+    console.warn("[Telegram Stars] BOT_INTERNAL_API_KEY is empty: /telegram-stars/confirm is accepted without key (insecure mode)");
   }
 
   const parsed = confirmTelegramStarsPaymentSchema.safeParse(req.body);
@@ -1983,16 +2001,25 @@ publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
   }
 
   const {
-    paymentId,
+    paymentId: paymentIdInput,
     telegramUserId,
     totalAmount,
     telegramPaymentChargeId,
     providerPaymentChargeId,
     invoicePayload,
   } = parsed.data;
+  const paymentId = paymentIdInput?.trim() ?? "";
+  const paymentIdFromPayload = extractStarsPaymentId(invoicePayload);
+  if (paymentId && paymentIdFromPayload && paymentId !== paymentIdFromPayload) {
+    return res.status(400).json({ message: "paymentId не совпадает с invoicePayload" });
+  }
+  const targetPaymentId = paymentId || paymentIdFromPayload;
+  if (!targetPaymentId) {
+    return res.status(400).json({ message: "Не удалось определить paymentId" });
+  }
 
   const payment = await prisma.payment.findUnique({
-    where: { id: paymentId },
+    where: { id: targetPaymentId },
     select: {
       id: true,
       orderId: true,
@@ -2002,6 +2029,11 @@ publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
       provider: true,
       tariffId: true,
       metadata: true,
+      client: {
+        select: {
+          telegramId: true,
+        },
+      },
     },
   });
   if (!payment || payment.provider !== "telegram_stars") {
@@ -2017,10 +2049,14 @@ publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
   const meta = parseJsonObject(payment.metadata);
   const expectedStarsAmount = Number(meta.starsAmount);
   const expectedTelegramUserId = typeof meta.telegramUserId === "string" ? meta.telegramUserId.trim() : "";
+  const clientTelegramUserId = payment.client?.telegramId?.trim() || "";
+  const incomingTelegramUserId = telegramUserId.trim();
   if (!Number.isFinite(expectedStarsAmount) || expectedStarsAmount <= 0) {
     return res.status(409).json({ message: "Некорректные данные счёта Telegram Stars" });
   }
-  if (!expectedTelegramUserId || expectedTelegramUserId !== telegramUserId.trim()) {
+  const belongsToMetadata = !!expectedTelegramUserId && expectedTelegramUserId === incomingTelegramUserId;
+  const belongsToClient = !!clientTelegramUserId && clientTelegramUserId === incomingTelegramUserId;
+  if (!belongsToMetadata && !belongsToClient) {
     return res.status(403).json({ message: "Платёж не принадлежит этому Telegram пользователю" });
   }
   if (expectedStarsAmount !== totalAmount) {
@@ -2038,7 +2074,7 @@ publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
 
   const nextMeta = {
     ...meta,
-    telegramUserId: expectedTelegramUserId,
+    telegramUserId: incomingTelegramUserId,
     starsAmount: expectedStarsAmount,
     telegramPaymentChargeId,
     providerPaymentChargeId: providerPaymentChargeId ?? null,
