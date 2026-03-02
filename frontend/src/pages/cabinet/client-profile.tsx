@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { User, Wallet, Copy, Check, CreditCard, Loader2 } from "lucide-react";
+import { User, Wallet, Copy, Check, CreditCard, Loader2, Smartphone, Trash2 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetMiniapp } from "@/pages/cabinet/cabinet-layout";
 import { api } from "@/lib/api";
 import { openExternalLink } from "@/lib/open-link";
-import type { ClientPayment } from "@/lib/api";
+import type { ClientPayment, ClientHwidDevice } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +38,12 @@ function formatPaymentStatus(status: string): string {
   return status || "—";
 }
 
+function shortHwidHash(hash: string): string {
+  if (!hash) return "—";
+  if (hash.length <= 12) return hash;
+  return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
+}
+
 export function ClientProfilePage() {
   const navigate = useNavigate();
   const { state, refreshProfile } = useClientAuth();
@@ -58,6 +64,10 @@ export function ClientProfilePage() {
   const [topUpModalOpen, setTopUpModalOpen] = useState(false);
   const [topUpLoading, setTopUpLoading] = useState(false);
   const [topUpError, setTopUpError] = useState<string | null>(null);
+  const [hwidDevices, setHwidDevices] = useState<ClientHwidDevice[]>([]);
+  const [hwidLoading, setHwidLoading] = useState(false);
+  const [hwidMessage, setHwidMessage] = useState<string | null>(null);
+  const [hwidRevokingHash, setHwidRevokingHash] = useState<string | null>(null);
 
   const client = state.client;
   const token = state.token;
@@ -73,6 +83,19 @@ export function ClientProfilePage() {
     if (token) {
       api.clientPayments(token).then((r) => setPayments(r.items ?? [])).catch(() => {});
     }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    setHwidLoading(true);
+    api.clientGetHwidDevices(token)
+      .then((r) => {
+        setHwidDevices(Array.isArray(r.items) ? r.items : []);
+      })
+      .catch(() => {
+        setHwidDevices([]);
+      })
+      .finally(() => setHwidLoading(false));
   }, [token]);
 
   useEffect(() => {
@@ -195,6 +218,25 @@ export function ClientProfilePage() {
       setMessage(e instanceof Error ? e.message : "Ошибка");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function revokeHwidDevice(hwidHash: string) {
+    if (!token || !hwidHash || hwidRevokingHash) return;
+    setHwidRevokingHash(hwidHash);
+    setHwidMessage(null);
+    try {
+      const result = await api.clientRevokeHwidDevice(token, hwidHash);
+      if (result.ok) {
+        setHwidDevices((prev) => prev.filter((d) => d.hwidHash !== hwidHash));
+        setHwidMessage("Устройство отвязано");
+      } else {
+        setHwidMessage("Запрос принят. Обновите страницу через минуту.");
+      }
+    } catch (e) {
+      setHwidMessage(e instanceof Error ? e.message : "Ошибка отвязки устройства");
+    } finally {
+      setHwidRevokingHash(null);
     }
   }
 
@@ -336,6 +378,57 @@ export function ClientProfilePage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      <Card className={cardClass}>
+        <CardHeader className="min-w-0">
+          <CardTitle className="flex items-center gap-2 text-base min-w-0 truncate">
+            <Smartphone className="h-5 w-5 text-primary shrink-0" />
+            HWID устройства
+          </CardTitle>
+          <p className="text-sm text-muted-foreground break-words">
+            Здесь можно посмотреть устройства, привязанные к подписке, и отвязать лишние.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3 min-w-0 overflow-hidden">
+          {hwidLoading ? (
+            <p className="text-sm text-muted-foreground">Загрузка устройств…</p>
+          ) : hwidDevices.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Привязанных устройств пока нет.</p>
+          ) : (
+            <div className="space-y-2">
+              {hwidDevices.map((d, idx) => {
+                const title = [d.platform, d.osVersion, d.deviceModel].filter(Boolean).join(" · ") || "Неизвестное устройство";
+                return (
+                  <div key={d.hwidHash} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{idx + 1}. {title}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate" title={d.hwidHash}>
+                        #{shortHwidHash(d.hwidHash)} · Обновлено: {formatDate(d.updatedAt)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive w-full sm:w-auto"
+                      disabled={Boolean(hwidRevokingHash)}
+                      onClick={() => revokeHwidDevice(d.hwidHash)}
+                      title="Отвязать устройство"
+                    >
+                      {hwidRevokingHash === d.hwidHash ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
+                      Отвязать
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {hwidMessage && (
+            <p className={`text-sm ${hwidMessage === "Устройство отвязано" ? "text-green-600" : "text-destructive"}`}>
+              {hwidMessage}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {(plategaMethods.length > 0 || yoomoneyEnabled || yookassaEnabled) && (
         <Card id="topup" className={cardClass}>

@@ -30,9 +30,10 @@ const DEFAULT_BOT_BUTTONS: BotButtonItem[] = [
   { id: "referral", visible: true, label: "👥 Реферальная программа", order: 3, style: "primary", emojiKey: "LINK" },
   { id: "trial", visible: true, label: "🎁 Попробовать бесплатно", order: 4, style: "success", emojiKey: "TRIAL" },
   { id: "vpn", visible: true, label: "🌐 Подключиться к VPN", order: 5, style: "danger", emojiKey: "SERVERS" },
-  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 6, style: "primary", emojiKey: "SERVERS" },
-  { id: "support", visible: true, label: "🆘 Поддержка", order: 7, style: "primary", emojiKey: "NOTE" },
-  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 8, style: "primary", emojiKey: "STAR" },
+  { id: "devices", visible: true, label: "📱 Мои устройства", order: 6, style: "primary", emojiKey: "DEVICES" },
+  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 7, style: "primary", emojiKey: "SERVERS" },
+  { id: "support", visible: true, label: "🆘 Поддержка", order: 8, style: "primary", emojiKey: "NOTE" },
+  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 9, style: "primary", emojiKey: "STAR" },
 ];
 
 const BOT_EMOJI_KEYS = ["HEADER", "MAIN_MENU", "STATUS", "BALANCE", "TARIFFS", "PACKAGE", "PROFILE", "CARD", "TRIAL", "LINK", "SERVERS", "BACK", "PUZZLE", "DATE", "TIME", "TRAFFIC", "ACTIVE_GREEN", "ACTIVE_YELLOW", "INACTIVE", "CONNECT", "NOTE", "STAR", "CROWN", "DURATION", "DEVICES", "LOCATION", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3", "CUSTOM_4", "CUSTOM_5"] as const;

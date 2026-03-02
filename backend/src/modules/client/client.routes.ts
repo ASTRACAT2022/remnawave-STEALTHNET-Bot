@@ -611,6 +611,10 @@ const updateProfileSchema = z.object({
   preferredCurrency: z.string().max(10).optional(),
 });
 
+const clientRevokeHwidSchema = z.object({
+  hwidHash: z.string().regex(/^[a-f0-9]{8,64}$/i),
+});
+
 clientRouter.patch("/profile", async (req, res) => {
   const client = (req as unknown as { client: { id: string } }).client;
   const body = updateProfileSchema.safeParse(req.body);
@@ -628,6 +632,67 @@ clientRouter.patch("/profile", async (req, res) => {
     select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, remnawaveUuid: true, trialUsed: true, isBlocked: true },
   });
   return res.json(toClientShape(updated));
+});
+
+clientRouter.get("/hwid/devices", async (req, res) => {
+  const client = (req as unknown as { client: { remnawaveUuid: string | null } }).client;
+  if (!client.remnawaveUuid) return res.json({ items: [] });
+
+  const devicesRes = await remnaGetUserHwidDevices(client.remnawaveUuid);
+  if (devicesRes.error) {
+    return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
+  }
+
+  const items = extractRemnaUserHwidDevices(devicesRes.data)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .map((d) => ({
+      hwidHash: hashHwid(d.hwid).slice(0, 16),
+      platform: d.platform,
+      osVersion: d.osVersion,
+      deviceModel: d.deviceModel,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    }));
+
+  return res.json({ items });
+});
+
+clientRouter.post("/hwid/devices/revoke", async (req, res) => {
+  const client = (req as unknown as { client: { remnawaveUuid: string | null } }).client;
+  if (!client.remnawaveUuid) {
+    return res.status(404).json({ message: "Подписка не привязана к Remna" });
+  }
+
+  const parsed = clientRevokeHwidSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+  const hwidHash = parsed.data.hwidHash.trim().toLowerCase();
+
+  const devicesRes = await remnaGetUserHwidDevices(client.remnawaveUuid);
+  if (devicesRes.error) {
+    return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
+  }
+  const devices = extractRemnaUserHwidDevices(devicesRes.data);
+  const match = devices.find((d) => hashHwid(d.hwid).startsWith(hwidHash));
+  if (!match) {
+    return res.status(404).json({ message: "Устройство не найдено или уже отвязано" });
+  }
+
+  const deleteRes = await remnaDeleteUserHwidDevice({
+    userUuid: client.remnawaveUuid,
+    hwid: match.hwid,
+  });
+  if (deleteRes.error) {
+    return res.status(deleteRes.status >= 400 ? deleteRes.status : 500).json({ message: deleteRes.error });
+  }
+
+  return res.json({
+    ok: true,
+    hwidHash: hashHwid(match.hwid).slice(0, 16),
+    platform: match.platform,
+    deviceModel: match.deviceModel,
+  });
 });
 
 clientRouter.get("/referral-stats", async (req, res) => {

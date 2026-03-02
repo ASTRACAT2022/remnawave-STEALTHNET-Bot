@@ -37,6 +37,7 @@ const MENU_IDS: Record<string, string> = {
   referral: "menu:referral",
   trial: "menu:trial",
   vpn: "menu:vpn",
+  devices: "menu:devices",
   support: "menu:support",
   promocode: "menu:promocode",
 };
@@ -48,9 +49,10 @@ const DEFAULT_BUTTONS: BotButtonConfig[] = [
   { id: "referral", visible: true, label: "🔗 Реферальная программа", order: 3, style: "primary" },
   { id: "trial", visible: true, label: "🎁 Попробовать бесплатно", order: 4, style: "success" },
   { id: "vpn", visible: true, label: "🌐 Подключиться к VPN", order: 5, style: "danger" },
-  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 6, style: "primary" },
-  { id: "support", visible: true, label: "🆘 Поддержка", order: 7, style: "primary" },
-  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 8, style: "primary" },
+  { id: "devices", visible: true, label: "📱 Мои устройства", order: 6, style: "primary" },
+  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 7, style: "primary" },
+  { id: "support", visible: true, label: "🆘 Поддержка", order: 8, style: "primary" },
+  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 9, style: "primary" },
 ];
 
 function toStyle(s: string | undefined): ButtonStyle | undefined | null {

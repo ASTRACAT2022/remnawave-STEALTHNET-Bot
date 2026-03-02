@@ -787,6 +787,33 @@ function hwidDevicesMarkup(items: { hwidHash: string }[], backLabel?: string | n
   return { inline_keyboard: rows };
 }
 
+async function buildHwidDevicesView(userId: number, backLabel?: string | null): Promise<{ text: string; replyMarkup: InlineMarkup }> {
+  const result = await api.getTelegramHwidDevices({
+    telegramUserId: String(userId),
+  });
+  const items = Array.isArray(result.items) ? result.items : [];
+
+  if (items.length === 0) {
+    return {
+      text: "📱 У вас пока нет привязанных HWID-устройств.",
+      replyMarkup: backToMenu(backLabel ?? null),
+    };
+  }
+
+  const lines = ["📱 Ваши HWID-устройства:", ""];
+  const maxLines = Math.min(items.length, 12);
+  for (let i = 0; i < maxLines; i += 1) {
+    lines.push(formatHwidDeviceLine(i + 1, items[i]!));
+    lines.push("");
+  }
+  lines.push("Если видите чужое устройство, нажмите «Отвязать устройство».");
+
+  return {
+    text: lines.join("\n"),
+    replyMarkup: hwidDevicesMarkup(items, backLabel ?? null),
+  };
+}
+
 async function performBroadcast(adminId: number, text: string): Promise<{ total: number; sent: number; failed: number }> {
   const targets = await api.getBroadcastTargets();
   const ids = targets.items ?? [];
@@ -922,26 +949,9 @@ bot.command("devices", async (ctx) => {
 
   try {
     const config = await api.getPublicConfig().catch(() => null);
-    const result = await api.getTelegramHwidDevices({
-      telegramUserId: String(userId),
-    });
-
-    const items = Array.isArray(result.items) ? result.items : [];
-    if (items.length === 0) {
-      await ctx.reply("📱 У вас пока нет привязанных HWID-устройств.");
-      return;
-    }
-
-    const lines = ["📱 Ваши HWID-устройства:", ""];
-    const maxLines = Math.min(items.length, 12);
-    for (let i = 0; i < maxLines; i += 1) {
-      lines.push(formatHwidDeviceLine(i + 1, items[i]!));
-      lines.push("");
-    }
-    lines.push("Если видите чужое устройство, нажмите «Отвязать устройство».");
-
-    await ctx.reply(lines.join("\n"), {
-      reply_markup: hwidDevicesMarkup(items, config?.botBackLabel ?? null),
+    const view = await buildHwidDevicesView(userId, config?.botBackLabel ?? null);
+    await ctx.reply(view.text, {
+      reply_markup: view.replyMarkup,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Ошибка получения списка устройств";
@@ -1059,6 +1069,18 @@ bot.on("callback_query:data", async (ctx) => {
       await ctx.reply(`❌ ${msg}`).catch(() => {});
       return;
     }
+  }
+
+  if (data === "menu:devices") {
+    try {
+      const config = await api.getPublicConfig().catch(() => null);
+      const view = await buildHwidDevicesView(userId, config?.botBackLabel ?? null);
+      await editMessageContent(ctx, view.text, view.replyMarkup);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка получения списка устройств";
+      await ctx.reply(`❌ ${msg}`).catch(() => {});
+    }
+    return;
   }
 
   const token = getToken(userId);

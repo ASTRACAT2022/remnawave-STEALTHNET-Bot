@@ -73,9 +73,10 @@ const DEFAULT_BOT_BUTTONS: BotButtonConfig[] = [
   { id: "referral", visible: true, label: "🔗 Реферальная программа", order: 3, style: "primary" },
   { id: "trial", visible: true, label: "🎁 Попробовать бесплатно", order: 4, style: "success" },
   { id: "vpn", visible: true, label: "🌐 Подключиться к VPN", order: 5, style: "danger" },
-  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 6, style: "primary" },
-  { id: "support", visible: true, label: "🆘 Поддержка", order: 7, style: "primary" },
-  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 8, style: "primary" },
+  { id: "devices", visible: true, label: "📱 Мои устройства", order: 6, style: "primary" },
+  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 7, style: "primary" },
+  { id: "support", visible: true, label: "🆘 Поддержка", order: 8, style: "primary" },
+  { id: "promocode", visible: true, label: "🎟️ Промокод", order: 9, style: "primary" },
 ];
 
 export type BotMenuTexts = {
@@ -374,7 +375,7 @@ export async function getPublicConfig() {
   const trialEnabled = trialDays > 0 && Boolean(full.trialSquadUuid?.trim());
   const botEmojis = full.botEmojis ?? {};
   const defaultEmojiKeyByButtonId: Record<string, string> = {
-    trial: "TRIAL", tariffs: "PACKAGE", profile: "PUZZLE", topup: "CARD", referral: "LINK", vpn: "SERVERS", cabinet: "SERVERS",
+    trial: "TRIAL", tariffs: "PACKAGE", profile: "PUZZLE", topup: "CARD", referral: "LINK", vpn: "SERVERS", devices: "DEVICES", cabinet: "SERVERS",
   };
   const resolvedButtons: PublicBotButton[] = (full.botButtons ?? []).map((b) => {
     const emojiKey = b.emojiKey ?? defaultEmojiKeyByButtonId[b.id];

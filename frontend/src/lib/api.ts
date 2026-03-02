@@ -539,6 +539,14 @@ export const api = {
     return request("/client/subscription", { token });
   },
 
+  async clientGetHwidDevices(token: string): Promise<{ items: ClientHwidDevice[] }> {
+    return request("/client/hwid/devices", { token });
+  },
+
+  async clientRevokeHwidDevice(token: string, hwidHash: string): Promise<{ ok: boolean; hwidHash?: string; message?: string }> {
+    return request("/client/hwid/devices/revoke", { method: "POST", body: JSON.stringify({ hwidHash }), token });
+  },
+
   async clientPayments(token: string): Promise<{ items: ClientPayment[] }> {
     return request("/client/payments", { token });
   },
@@ -1102,6 +1110,15 @@ export interface ClientPayment {
   status: string;
   createdAt: string;
   paidAt: string | null;
+}
+
+export interface ClientHwidDevice {
+  hwidHash: string;
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PublicTariffCategory {
