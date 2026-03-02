@@ -168,6 +168,67 @@ export function remnaGetUser(uuid: string) {
   return remnaFetch<unknown>(`/api/users/${uuid}`);
 }
 
+export type RemnaHwidDevice = {
+  hwid: string;
+  userUuid: string;
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET /api/hwid/devices/{userUuid} */
+export function remnaGetUserHwidDevices(userUuid: string) {
+  const encoded = encodeURIComponent(userUuid);
+  return remnaFetch<unknown>(`/api/hwid/devices/${encoded}`);
+}
+
+/** POST /api/hwid/devices/delete */
+export function remnaDeleteUserHwidDevice(body: { userUuid: string; hwid: string }) {
+  return remnaFetch<unknown>("/api/hwid/devices/delete", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Извлекает список HWID-устройств из ответа Remna. */
+export function extractRemnaUserHwidDevices(data: unknown): RemnaHwidDevice[] {
+  if (!data || typeof data !== "object") return [];
+  const root = data as Record<string, unknown>;
+  const response = root.response;
+  const base = (response && typeof response === "object" ? response : root) as Record<string, unknown>;
+  const rawDevices = Array.isArray(base.devices)
+    ? base.devices
+    : Array.isArray(root.devices)
+      ? root.devices
+      : [];
+
+  const out: RemnaHwidDevice[] = [];
+  for (const item of rawDevices) {
+    if (!item || typeof item !== "object") continue;
+    const d = item as Record<string, unknown>;
+    const hwid = typeof d.hwid === "string" ? d.hwid.trim() : "";
+    const userUuid = typeof d.userUuid === "string" ? d.userUuid.trim() : "";
+    const createdAt = typeof d.createdAt === "string" ? d.createdAt : "";
+    const updatedAt = typeof d.updatedAt === "string" ? d.updatedAt : "";
+    if (!hwid || !userUuid || !createdAt || !updatedAt) continue;
+    out.push({
+      hwid,
+      userUuid,
+      platform: typeof d.platform === "string" ? d.platform : null,
+      osVersion: typeof d.osVersion === "string" ? d.osVersion : null,
+      deviceModel: typeof d.deviceModel === "string" ? d.deviceModel : null,
+      userAgent: typeof d.userAgent === "string" ? d.userAgent : null,
+      createdAt,
+      updatedAt,
+    });
+  }
+
+  return out;
+}
+
 /** GET /api/users/by-username/{username} */
 export function remnaGetUserByUsername(username: string) {
   const encoded = encodeURIComponent(username);

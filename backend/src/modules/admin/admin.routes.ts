@@ -24,11 +24,14 @@ import {
   remnaDisableNode,
   remnaRestartNode,
   remnaGetUser,
+  remnaGetUserHwidDevices,
   remnaUpdateUser,
   remnaRevokeUserSubscription,
   remnaDisableUser,
   remnaEnableUser,
   remnaResetUserTraffic,
+  remnaDeleteUserHwidDevice,
+  extractRemnaUserHwidDevices,
   extractRemnaActiveInternalSquadUuids,
   isRemnaConfigured,
 } from "../remna/remna.client.js";
@@ -827,6 +830,38 @@ adminRouter.get("/clients/:id/remna", async (req, res) => {
   const result = await remnaGetUser(remnaUuid);
   if (result.error) return res.status(result.status >= 400 ? result.status : 500).json({ message: result.error });
   return res.json(result.data ?? {});
+});
+
+const remnaDeviceDeleteBodySchema = z.object({
+  hwid: z.string().min(1).max(512),
+});
+
+adminRouter.get("/clients/:id/remna/hwid-devices", async (req, res) => {
+  const parsed = clientIdParam.safeParse(req.params);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
+  const remnaUuid = await getClientRemnaUuid(parsed.data.id);
+  if (!remnaUuid) return res.status(400).json({ message: "Клиент не привязан к Remna" });
+
+  const result = await remnaGetUserHwidDevices(remnaUuid);
+  if (result.error) return res.status(result.status >= 400 ? result.status : 500).json({ message: result.error });
+  const items = extractRemnaUserHwidDevices(result.data);
+  return res.json({ items, total: items.length });
+});
+
+adminRouter.post("/clients/:id/remna/hwid-devices/delete", async (req, res) => {
+  const parsed = clientIdParam.safeParse(req.params);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
+  const body = remnaDeviceDeleteBodySchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+  const remnaUuid = await getClientRemnaUuid(parsed.data.id);
+  if (!remnaUuid) return res.status(400).json({ message: "Клиент не привязан к Remna" });
+
+  const result = await remnaDeleteUserHwidDevice({
+    userUuid: remnaUuid,
+    hwid: body.data.hwid.trim(),
+  });
+  if (result.error) return res.status(result.status >= 400 ? result.status : 500).json({ message: result.error });
+  return res.json({ success: true, hwid: body.data.hwid.trim() });
 });
 
 const remnaUpdateBodySchema = z.object({

@@ -761,6 +761,32 @@ function parseStarsPayload(payload: string | undefined): string | null {
   return paymentId || null;
 }
 
+function formatHwidDeviceLine(index: number, item: {
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  updatedAt: string;
+}): string {
+  const label = [item.platform, item.osVersion, item.deviceModel].filter(Boolean).join(" · ") || "Неизвестное устройство";
+  const updated = item.updatedAt ? new Date(item.updatedAt).toLocaleString("ru-RU") : "—";
+  return `${index}. ${label}\n   Обновлено: ${updated}`;
+}
+
+function hwidDevicesMarkup(items: { hwidHash: string }[], backLabel?: string | null): InlineMarkup {
+  const rows: { text: string; callback_data: string; style?: "primary" | "success" | "danger" }[][] = [];
+  const maxButtons = Math.min(items.length, 12);
+  for (let i = 0; i < maxButtons; i += 1) {
+    rows.push([{
+      text: `🚫 Отвязать устройство #${i + 1}`,
+      callback_data: `hwid_revoke:${items[i]!.hwidHash}`,
+      style: "danger",
+    }]);
+  }
+  const backText = (backLabel && backLabel.trim()) || "◀️ В меню";
+  rows.push([{ text: backText, callback_data: "menu:main", style: "danger" }]);
+  return { inline_keyboard: rows };
+}
+
 async function performBroadcast(adminId: number, text: string): Promise<{ total: number; sent: number; failed: number }> {
   const targets = await api.getBroadcastTargets();
   const ids = targets.items ?? [];
@@ -890,6 +916,39 @@ bot.command("start", async (ctx) => {
   }
 });
 
+bot.command("devices", async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+
+  try {
+    const config = await api.getPublicConfig().catch(() => null);
+    const result = await api.getTelegramHwidDevices({
+      telegramUserId: String(userId),
+    });
+
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (items.length === 0) {
+      await ctx.reply("📱 У вас пока нет привязанных HWID-устройств.");
+      return;
+    }
+
+    const lines = ["📱 Ваши HWID-устройства:", ""];
+    const maxLines = Math.min(items.length, 12);
+    for (let i = 0; i < maxLines; i += 1) {
+      lines.push(formatHwidDeviceLine(i + 1, items[i]!));
+      lines.push("");
+    }
+    lines.push("Если видите чужое устройство, нажмите «Отвязать устройство».");
+
+    await ctx.reply(lines.join("\n"), {
+      reply_markup: hwidDevicesMarkup(items, config?.botBackLabel ?? null),
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Ошибка получения списка устройств";
+    await ctx.reply(`❌ ${msg}`);
+  }
+});
+
 bot.on("pre_checkout_query", async (ctx) => {
   const payload = ctx.preCheckoutQuery.invoice_payload;
   const paymentId = parseStarsPayload(payload);
@@ -976,6 +1035,30 @@ bot.on("callback_query:data", async (ctx) => {
       broadcastRunningAdmins.delete(userId);
     }
     return;
+  }
+
+  if (data.startsWith("hwid_revoke:")) {
+    const hwidHash = data.slice("hwid_revoke:".length).trim().toLowerCase();
+    if (!/^[a-f0-9]{8,64}$/.test(hwidHash)) {
+      await ctx.reply("❌ Некорректный идентификатор устройства.").catch(() => {});
+      return;
+    }
+    try {
+      const result = await api.revokeTelegramHwidByHash({
+        telegramUserId: String(userId),
+        hwidHash,
+      });
+      if (result.ok) {
+        await ctx.reply("✅ Устройство отвязано. Если это было ваше устройство, просто подключитесь заново.").catch(() => {});
+        return;
+      }
+      await ctx.reply("⏳ Запрос принят, проверьте список устройств через минуту.").catch(() => {});
+      return;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка отвязки устройства";
+      await ctx.reply(`❌ ${msg}`).catch(() => {});
+      return;
+    }
   }
 
   const token = getToken(userId);

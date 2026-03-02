@@ -1,4 +1,4 @@
-import { randomBytes, createHmac } from "crypto";
+import { randomBytes, createHmac, createHash } from "crypto";
 import { randomUUID } from "crypto";
 import { env } from "../../config/index.js";
 import { Router } from "express";
@@ -13,7 +13,21 @@ import {
   getPublicConfig,
 } from "./client.service.js";
 import { requireClientAuth } from "./client.middleware.js";
-import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, remnaEnsureUserInInternalSquads, extractRemnaActiveInternalSquadUuids, extractRemnaUuid } from "../remna/remna.client.js";
+import {
+  remnaCreateUser,
+  remnaUpdateUser,
+  isRemnaConfigured,
+  remnaGetUser,
+  remnaGetUserByUsername,
+  remnaGetUserByEmail,
+  remnaGetUserByTelegramId,
+  remnaGetUserHwidDevices,
+  remnaDeleteUserHwidDevice,
+  remnaEnsureUserInInternalSquads,
+  extractRemnaActiveInternalSquadUuids,
+  extractRemnaUserHwidDevices,
+  extractRemnaUuid,
+} from "../remna/remna.client.js";
 import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, getPlategaTransactionState, isPlategaConfigured } from "../platega/platega.service.js";
 import { createYookassaPayment, isYookassaConfigured } from "../yookassa/yookassa.service.js";
@@ -75,6 +89,11 @@ function extractStarsPaymentId(payload: string | null | undefined): string | nul
 }
 
 let starsConfirmWithoutKeyWarningLogged = false;
+let telegramHwidWithoutKeyWarningLogged = false;
+
+function hashHwid(rawHwid: string): string {
+  return createHash("sha256").update(rawHwid).digest("hex");
+}
 
 function resolveBaseAppUrl(req: import("express").Request, configuredPublicUrl: string | null | undefined): string {
   const configured = (configuredPublicUrl ?? "").trim().replace(/\/$/, "");
@@ -2138,6 +2157,113 @@ publicConfigRouter.post("/telegram-stars/confirm", async (req, res) => {
     orderId: payment.orderId,
     status: latest?.status ?? (paidNow ? "PAID" : "PENDING"),
     alreadyProcessed: !paidNow,
+  });
+});
+
+const revokeTelegramHwidByHashSchema = z.object({
+  telegramUserId: z.string().min(1),
+  hwidHash: z.string().regex(/^[a-f0-9]{8,64}$/i),
+});
+
+const listTelegramHwidSchema = z.object({
+  telegramUserId: z.string().min(1),
+});
+
+publicConfigRouter.post("/telegram/hwid/list", async (req, res) => {
+  const apiKey = env.BOT_INTERNAL_API_KEY?.trim();
+  if (apiKey) {
+    const received = headerValue(req.headers["x-bot-internal-key"]).trim();
+    if (!received || received !== apiKey) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+  } else if (!telegramHwidWithoutKeyWarningLogged) {
+    telegramHwidWithoutKeyWarningLogged = true;
+    console.warn("[Telegram HWID] BOT_INTERNAL_API_KEY is empty: /telegram/hwid/list is accepted without key (insecure mode)");
+  }
+
+  const parsed = listTelegramHwidSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+
+  const telegramUserId = parsed.data.telegramUserId.trim();
+  const client = await prisma.client.findUnique({
+    where: { telegramId: telegramUserId },
+    select: { remnawaveUuid: true },
+  });
+  if (!client?.remnawaveUuid) {
+    return res.json({ items: [] });
+  }
+
+  const devicesRes = await remnaGetUserHwidDevices(client.remnawaveUuid);
+  if (devicesRes.error) {
+    return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
+  }
+  const items = extractRemnaUserHwidDevices(devicesRes.data)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .map((d) => ({
+      hwidHash: hashHwid(d.hwid).slice(0, 16),
+      platform: d.platform,
+      osVersion: d.osVersion,
+      deviceModel: d.deviceModel,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    }));
+  return res.json({ items });
+});
+
+publicConfigRouter.post("/telegram/hwid/revoke-by-hash", async (req, res) => {
+  const apiKey = env.BOT_INTERNAL_API_KEY?.trim();
+  if (apiKey) {
+    const received = headerValue(req.headers["x-bot-internal-key"]).trim();
+    if (!received || received !== apiKey) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+  } else if (!telegramHwidWithoutKeyWarningLogged) {
+    telegramHwidWithoutKeyWarningLogged = true;
+    console.warn("[Telegram HWID] BOT_INTERNAL_API_KEY is empty: /telegram/hwid/revoke-by-hash is accepted without key (insecure mode)");
+  }
+
+  const parsed = revokeTelegramHwidByHashSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+
+  const telegramUserId = parsed.data.telegramUserId.trim();
+  const hwidHash = parsed.data.hwidHash.trim().toLowerCase();
+
+  const client = await prisma.client.findUnique({
+    where: { telegramId: telegramUserId },
+    select: { id: true, remnawaveUuid: true },
+  });
+  if (!client?.remnawaveUuid) {
+    return res.status(404).json({ message: "Клиент или привязка к Remna не найдены" });
+  }
+
+  const devicesRes = await remnaGetUserHwidDevices(client.remnawaveUuid);
+  if (devicesRes.error) {
+    return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
+  }
+  const devices = extractRemnaUserHwidDevices(devicesRes.data);
+  const match = devices.find((d) => hashHwid(d.hwid).startsWith(hwidHash));
+  if (!match) {
+    return res.status(404).json({ message: "Устройство не найдено или уже отвязано" });
+  }
+
+  const deleteRes = await remnaDeleteUserHwidDevice({
+    userUuid: client.remnawaveUuid,
+    hwid: match.hwid,
+  });
+  if (deleteRes.error) {
+    return res.status(deleteRes.status >= 400 ? deleteRes.status : 500).json({ message: deleteRes.error });
+  }
+
+  return res.json({
+    ok: true,
+    userUuid: client.remnawaveUuid,
+    hwidHash: hashHwid(match.hwid).slice(0, 16),
+    platform: match.platform,
+    deviceModel: match.deviceModel,
   });
 });
 

@@ -257,6 +257,30 @@ export async function confirmTelegramStarsPayment(body: {
   return fetchJson("/api/public/telegram-stars/confirm", { method: "POST", body, retryable: true });
 }
 
+/** Отвязать HWID-устройство по hash из Telegram-уведомления (вызывается ботом по X-Bot-Internal-Key). */
+export async function revokeTelegramHwidByHash(body: {
+  telegramUserId: string;
+  hwidHash: string;
+}): Promise<{ ok: boolean; hwidHash?: string; message?: string }> {
+  return fetchJson("/api/public/telegram/hwid/revoke-by-hash", { method: "POST", body, retryable: true });
+}
+
+/** Список HWID-устройств пользователя по Telegram ID (внутренний endpoint для бота). */
+export async function getTelegramHwidDevices(body: {
+  telegramUserId: string;
+}): Promise<{
+  items: {
+    hwidHash: string;
+    platform: string | null;
+    osVersion: string | null;
+    deviceModel: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }[];
+}> {
+  return fetchJson("/api/public/telegram/hwid/list", { method: "POST", body, retryable: true });
+}
+
 /** Обновить профиль (язык, валюта) */
 export async function updateProfile(
   token: string,

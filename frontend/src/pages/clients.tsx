@@ -3,6 +3,7 @@ import { useAuth } from "@/contexts/auth";
 import {
   api,
   type ClientRecord,
+  type RemnaHwidDevice,
   type UpdateClientPayload,
   type UpdateClientRemnaPayload,
 } from "@/lib/api";
@@ -21,6 +22,8 @@ export function ClientsPage() {
   const [editForm, setEditForm] = useState<UpdateClientPayload & Partial<UpdateClientRemnaPayload>>({});
   const [remnaData, setRemnaData] = useState<{ squads: { uuid: string; name?: string }[] }>({ squads: [] });
   const [clientRemnaSquads, setClientRemnaSquads] = useState<string[]>([]);
+  const [hwidDevices, setHwidDevices] = useState<RemnaHwidDevice[]>([]);
+  const [hwidLoading, setHwidLoading] = useState(false);
   const [settings, setSettings] = useState<{ activeLanguages: string[]; activeCurrencies: string[] } | null>(null);
   const [saving, setSaving] = useState(false);
   const [remnaActionBusy, setRemnaActionBusy] = useState(false);
@@ -69,9 +72,15 @@ export function ClientsPage() {
         const uuids = Array.isArray(arr) ? arr.map((s) => (typeof s === "string" ? s : s?.uuid)).filter((u): u is string => Boolean(u)) : [];
         setClientRemnaSquads(uuids);
       }).catch(() => setClientRemnaSquads([]));
+      setHwidLoading(true);
+      api.getClientRemnaHwidDevices(token, editing.id).then((res) => {
+        setHwidDevices(Array.isArray(res?.items) ? res.items : []);
+      }).catch(() => setHwidDevices([])).finally(() => setHwidLoading(false));
     } else {
       setRemnaData({ squads: [] });
       setClientRemnaSquads([]);
+      setHwidDevices([]);
+      setHwidLoading(false);
     }
   }, [token, editing?.id, editing?.remnawaveUuid]);
 
@@ -199,6 +208,17 @@ export function ClientsPage() {
     if (ok) setClientRemnaSquads((prev) => prev.filter((u) => u !== squadUuid));
   }
 
+  async function unlinkHwidDevice(hwid: string) {
+    if (!editing) return;
+    const ok = await remnaAction(
+      "Устройство отвязано",
+      () => api.deleteClientRemnaHwidDevice(token, editing.id, hwid),
+    );
+    if (ok) {
+      setHwidDevices((prev) => prev.filter((d) => d.hwid !== hwid));
+    }
+  }
+
   if (loading && !data) return <div className="text-muted-foreground">Загрузка…</div>;
   if (!data) return <div className="text-destructive">Ошибка загрузки</div>;
 
@@ -321,6 +341,8 @@ export function ClientsPage() {
           actionMessage={actionMessage}
           remnaData={remnaData}
           clientRemnaSquads={clientRemnaSquads}
+          hwidDevices={hwidDevices}
+          hwidLoading={hwidLoading}
           activeLanguages={settings?.activeLanguages ?? []}
           activeCurrencies={settings?.activeCurrencies ?? []}
           onClose={() => {
@@ -333,6 +355,7 @@ export function ClientsPage() {
           onRemnaAction={remnaAction}
           onSquadAdd={squadAdd}
           onSquadRemove={squadRemove}
+          onUnlinkHwidDevice={unlinkHwidDevice}
           onSetPassword={saveClientPassword}
           passwordForm={passwordForm}
           setPasswordForm={setPasswordForm}
@@ -353,12 +376,15 @@ function ClientEditModal({
   remnaActionBusy,
   actionMessage,
   remnaData,
+  hwidDevices,
+  hwidLoading,
   onClose,
   onSave,
   onSaveRemnaLimits,
   onRemnaAction,
   onSquadAdd,
   onSquadRemove,
+  onUnlinkHwidDevice,
   onSetPassword,
   passwordForm,
   setPasswordForm,
@@ -377,6 +403,8 @@ function ClientEditModal({
   actionMessage: string | null;
   remnaData: { squads: { uuid: string; name?: string }[] };
   clientRemnaSquads: string[];
+  hwidDevices: RemnaHwidDevice[];
+  hwidLoading: boolean;
   activeLanguages: string[];
   activeCurrencies: string[];
   onClose: () => void;
@@ -385,6 +413,7 @@ function ClientEditModal({
   onRemnaAction: (name: string, fn: () => Promise<unknown>) => Promise<boolean>;
   onSquadAdd: (squadUuid: string) => Promise<void>;
   onSquadRemove: (squadUuid: string) => Promise<void>;
+  onUnlinkHwidDevice: (hwid: string) => Promise<void>;
   onSetPassword: () => Promise<void>;
   passwordForm: { newPassword: string; confirm: string };
   setPasswordForm: React.Dispatch<React.SetStateAction<{ newPassword: string; confirm: string }>>;
@@ -672,6 +701,39 @@ function ClientEditModal({
                   </Button>
                 </div>
 
+                <div className="mt-4">
+                  <Label>HWID-устройства</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Список привязанных устройств. Можно отвязать любое устройство вручную.</p>
+                  {hwidLoading ? (
+                    <p className="text-sm text-muted-foreground">Загрузка устройств…</p>
+                  ) : hwidDevices.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Привязанных HWID-устройств нет.</p>
+                  ) : (
+                    <div className="space-y-2 mt-1">
+                      {hwidDevices.map((d) => (
+                        <div key={d.hwid} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded border p-2">
+                          <div className="text-xs">
+                            <div className="font-mono">{shortHwid(d.hwid)}</div>
+                            <div className="text-muted-foreground">
+                              {[d.platform, d.osVersion, d.deviceModel].filter(Boolean).join(" · ") || "Неизвестное устройство"}
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive"
+                            disabled={remnaActionBusy}
+                            onClick={() => onUnlinkHwidDevice(d.hwid)}
+                            title="Отвязать устройство"
+                          >
+                            Отвязать
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {remnaData.squads.length > 0 && (
                   <div className="mt-4">
                     <Label>Сквады</Label>
@@ -710,6 +772,11 @@ function ClientEditModal({
       </Card>
     </div>
   );
+}
+
+function shortHwid(hwid: string): string {
+  if (hwid.length <= 24) return hwid;
+  return `${hwid.slice(0, 12)}…${hwid.slice(-8)}`;
 }
 
 function Select({

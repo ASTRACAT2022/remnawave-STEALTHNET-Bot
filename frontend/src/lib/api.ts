@@ -278,6 +278,25 @@ export const api = {
     return request(`/admin/clients/${clientId}/remna/squads/remove`, { method: "POST", body: JSON.stringify({ squadUuid }), token });
   },
 
+  async getClientRemnaHwidDevices(
+    token: string,
+    clientId: string,
+  ): Promise<{ items: RemnaHwidDevice[]; total: number }> {
+    return request(`/admin/clients/${clientId}/remna/hwid-devices`, { token });
+  },
+
+  async deleteClientRemnaHwidDevice(
+    token: string,
+    clientId: string,
+    hwid: string,
+  ): Promise<{ success: boolean; hwid: string }> {
+    return request(`/admin/clients/${clientId}/remna/hwid-devices/delete`, {
+      method: "POST",
+      body: JSON.stringify({ hwid }),
+      token,
+    });
+  },
+
   async getRemnaSubscriptionTemplates(token: string): Promise<unknown> {
     return request("/admin/remna/subscription-templates", { token });
   },
@@ -820,6 +839,17 @@ export type UpdateClientRemnaPayload = {
   expireAt?: string;
   activeInternalSquads?: string[];
   status?: "ACTIVE" | "DISABLED";
+};
+
+export type RemnaHwidDevice = {
+  hwid: string;
+  userUuid: string;
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export interface AdminSettings {
