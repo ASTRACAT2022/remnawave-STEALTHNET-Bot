@@ -14,7 +14,8 @@ interface InlineButton {
 
 type WebAppButton = { text: string; web_app: { url: string }; icon_custom_emoji_id?: string };
 type UrlButton = { text: string; url: string; icon_custom_emoji_id?: string };
-export type InlineMarkup = { inline_keyboard: (InlineButton | WebAppButton | UrlButton)[][] };
+type CopyTextButton = { text: string; copy_text: { text: string } };
+export type InlineMarkup = { inline_keyboard: (InlineButton | WebAppButton | UrlButton | CopyTextButton)[][] };
 
 export type BotButtonConfig = { id: string; visible: boolean; label: string; order: number; style?: string; iconCustomEmojiId?: string };
 
@@ -86,6 +87,7 @@ export function mainMenu(opts: {
   showTrial: boolean;
   showVpn: boolean;
   appUrl: string | null;
+  vpnCopyUrl?: string | null;
   botButtons?: BotButtonConfig[] | null;
   botBackLabel?: string | null;
   hasSupportLinks?: boolean;
@@ -117,6 +119,9 @@ export function mainMenu(opts: {
     } else if (MENU_IDS[b.id]) {
       rows.push([btn(b.label, MENU_IDS[b.id], toStyle(b.style), iconId)]);
     }
+  }
+  if (opts.showVpn && opts.vpnCopyUrl?.trim()) {
+    rows.push([{ text: "📋 Скопировать ссылку подключения", copy_text: { text: opts.vpnCopyUrl.trim() } }]);
   }
   return { inline_keyboard: rows };
 }
