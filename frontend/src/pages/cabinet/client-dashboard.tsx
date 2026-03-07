@@ -24,6 +24,7 @@ import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetConfig } from "@/contexts/cabinet-config";
 import { useCabinetMiniapp } from "@/pages/cabinet/cabinet-layout";
 import { api } from "@/lib/api";
+import { copyText } from "@/lib/copy-text";
 import type { ClientPayment, ClientReferralStats } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,6 +72,7 @@ function getSubscriptionPayload(sub: unknown): Record<string, unknown> | null {
   if (raw.data && typeof raw.data === "object") {
     const d = raw.data as Record<string, unknown>;
     if (d.response && typeof d.response === "object") return d.response as Record<string, unknown>;
+    if (typeof d.subscriptionUrl === "string" || typeof d.subscription_url === "string") return d;
   }
   return raw;
 }
@@ -92,7 +94,10 @@ function parseSubscription(sub: unknown): {
     : typeof o.trafficUsed === "number"
       ? o.trafficUsed
       : undefined;
-  const subUrl = typeof o.subscriptionUrl === "string" ? o.subscriptionUrl : undefined;
+  const subscriptionUrlSnake = (o as Record<string, unknown>).subscription_url;
+  const subUrl = typeof o.subscriptionUrl === "string"
+    ? o.subscriptionUrl
+    : (typeof subscriptionUrlSnake === "string" ? subscriptionUrlSnake : undefined);
   const productName = typeof o.productName === "string" ? o.productName.trim() : undefined;
   const subscriptionProductName = typeof (o as Record<string, unknown>).subscriptionProductName === "string" ? (o as Record<string, unknown>).subscriptionProductName as string : undefined;
   return {
@@ -120,6 +125,8 @@ export function ClientDashboardPage() {
   const [trialError, setTrialError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [referralStats, setReferralStats] = useState<ClientReferralStats | null>(null);
+  const [referralCopied, setReferralCopied] = useState<"site" | "bot" | null>(null);
+  const [vpnCopied, setVpnCopied] = useState(false);
 
   const token = state.token;
   const isMiniapp = useCabinetMiniapp();
@@ -290,7 +297,6 @@ export function ClientDashboardPage() {
     || (hasActiveSubscription && client?.trialUsed ? "Триал" : null);
   // Ссылка на VPN берётся только из Remna (subscriptionUrl), без резервной ссылки из настроек
   const vpnUrl = subParsed.subscriptionUrl || null;
-  const [referralCopied, setReferralCopied] = useState<"site" | "bot" | null>(null);
   const siteOrigin = config?.publicAppUrl?.replace(/\/$/, "") || (typeof window !== "undefined" ? window.location.origin : "");
   const referralLinkSite =
     client.referralCode && siteOrigin
@@ -301,13 +307,27 @@ export function ClientDashboardPage() {
       ? `https://t.me/${config.telegramBotUsername.replace(/^@/, "")}?start=ref_${client.referralCode}`
       : "";
   const hasReferralLinks = Boolean(referralLinkSite || referralLinkBot);
-  const copyReferral = (which: "site" | "bot") => {
+  const copyReferral = async (which: "site" | "bot") => {
     const url = which === "site" ? referralLinkSite : referralLinkBot;
-    if (url) {
-      navigator.clipboard.writeText(url);
+    if (url && await copyText(url)) {
       setReferralCopied(which);
       setTimeout(() => setReferralCopied(null), 2000);
     }
+  };
+  const notifyCopyResult = (ok: boolean) => {
+    if (!isMiniapp) return;
+    window.Telegram?.WebApp?.showPopup?.({
+      title: ok ? "Скопировано" : "Ошибка",
+      message: ok ? "Ссылка в буфере обмена" : "Не удалось скопировать ссылку",
+    });
+  };
+  const copyVpnLink = async () => {
+    if (!vpnUrl) return;
+    const ok = await copyText(vpnUrl);
+    notifyCopyResult(ok);
+    if (!ok) return;
+    setVpnCopied(true);
+    setTimeout(() => setVpnCopied(false), 2000);
   };
   const trafficPercent = subParsed.trafficLimitBytes != null && subParsed.trafficLimitBytes > 0 && subParsed.trafficUsed != null
     ? Math.min(100, Math.round((subParsed.trafficUsed / subParsed.trafficLimitBytes) * 100))
@@ -444,13 +464,11 @@ export function ClientDashboardPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="shrink-0"
-                  onClick={() => {
-                    navigator.clipboard.writeText(vpnUrl);
-                    window.Telegram?.WebApp?.showPopup?.({ title: "Скопировано", message: "Ссылка в буфере обмена" });
-                  }}
+                  className="shrink-0 gap-1"
+                  onClick={copyVpnLink}
                 >
-                  <Copy className="h-4 w-4" />
+                  {vpnCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                  {vpnCopied ? "Скопировано" : "Копировать"}
                 </Button>
               </div>
               <Button className="w-full gap-2" size="lg" asChild>
@@ -795,17 +813,44 @@ export function ClientDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Справа от баланса: реферальные ссылки или ссылка VPN */}
+        {/* Справа от баланса: ссылка подключения + реферальные ссылки */}
         <Card className="sm:col-span-2 lg:col-span-1">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              {hasReferralLinks ? "Реферальные ссылки" : "Подключение"}
-            </CardTitle>
+            <CardTitle className="text-base">Подключение</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {hasReferralLinks ? (
+            {vpnUrl ? (
               <>
-                <p className="text-sm text-muted-foreground">Поделитесь с друзьями — при регистрации по ссылке вы получите бонус</p>
+                <p className="text-sm text-muted-foreground">Скопируйте ссылку и вставьте в ваше VPN-приложение.</p>
+                <div className="flex items-center gap-2">
+                  <code className="rounded bg-muted px-2 py-1.5 text-sm font-mono flex-1 truncate block" title={vpnUrl}>
+                    {vpnUrl}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copyVpnLink} className="shrink-0 gap-1" title="Копировать">
+                    {vpnCopied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {vpnCopied ? "Скопировано" : "Копировать"}
+                  </Button>
+                </div>
+                <Button variant="outline" size="sm" className="w-full gap-2" asChild>
+                  <Link to="/cabinet/subscribe">
+                    <Wifi className="h-4 w-4" />
+                    Подключиться к VPN
+                  </Link>
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">После оплаты тарифа здесь появится ссылка на подключение</p>
+                <Button variant="outline" size="sm" className="w-full" asChild>
+                  <Link to="/cabinet/tariffs">Выбрать тариф</Link>
+                </Button>
+              </>
+            )}
+
+            {hasReferralLinks && (
+              <>
+                <div className="h-px bg-border" />
+                <p className="text-sm text-muted-foreground">Поделитесь с друзьями и получите бонус за регистрацию по вашей ссылке.</p>
                 {referralLinkSite && (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-muted-foreground">Сайт</p>
@@ -832,23 +877,6 @@ export function ClientDashboardPage() {
                     </div>
                   </div>
                 )}
-              </>
-            ) : vpnUrl ? (
-              <>
-                <p className="text-sm text-muted-foreground">Добавление подписки</p>
-                <Button variant="outline" size="sm" className="w-full gap-2" asChild>
-                  <Link to="/cabinet/subscribe">
-                    <Wifi className="h-4 w-4" />
-                    Подключиться к VPN
-                  </Link>
-                </Button>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">После оплаты тарифа здесь появится ссылка на подключение</p>
-                <Button variant="outline" size="sm" className="w-full" asChild>
-                  <Link to="/cabinet/tariffs">Выбрать тариф</Link>
-                </Button>
               </>
             )}
           </CardContent>

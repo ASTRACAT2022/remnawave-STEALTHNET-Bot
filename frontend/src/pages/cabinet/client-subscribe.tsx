@@ -16,6 +16,7 @@ import {
 import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetMiniapp } from "@/pages/cabinet/cabinet-layout";
 import { api } from "@/lib/api";
+import { copyText } from "@/lib/copy-text";
 import type { SubscriptionPageConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -206,11 +207,13 @@ export function ClientSubscribePage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  const copyLink = () => {
+  const copyLink = async () => {
     if (subscriptionUrl) {
-      navigator.clipboard.writeText(subscriptionUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const ok = await copyText(subscriptionUrl);
+      if (ok) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     }
   };
 
@@ -325,7 +328,7 @@ export function ClientSubscribePage() {
                       if (isSubscription && isMiniapp) {
                         const openDeeplink = () => {
                           // Копируем ссылку подписки в буфер (на случай если приложение не откроется)
-                          try { navigator.clipboard?.writeText(subscriptionUrl); } catch { /* ignore */ }
+                          void copyText(subscriptionUrl);
                           // Открываем промежуточную страницу в системном браузере через Telegram API
                           const baseUrl = window.location.origin;
                           const redirectUrl = `${baseUrl}/api/public/deeplink?url=${encodeURIComponent(href)}`;
