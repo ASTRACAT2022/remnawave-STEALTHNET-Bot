@@ -103,7 +103,7 @@ export function mainMenu(opts: {
     })
     .sort((a, b) => a.order - b.order);
   const base = opts.appUrl?.replace(/\/$/, "") ?? "";
-  const rows: (InlineButton | WebAppButton)[][] = [];
+  const rows: InlineMarkup["inline_keyboard"] = [];
   for (const b of list) {
     const iconId = b.iconCustomEmojiId;
     if (b.id === "cabinet") {
