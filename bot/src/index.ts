@@ -572,6 +572,8 @@ function t(texts: Record<string, string> | null | undefined, key: string): strin
 }
 
 type CustomEmojiEntity = { type: "custom_emoji"; offset: number; length: number; custom_emoji_id: string };
+type CodeEntity = { type: "code"; offset: number; length: number };
+type BotTextEntity = CustomEmojiEntity | CodeEntity;
 
 /** Длина первого символа в UTF-16 (для entity) */
 function firstCharLengthUtf16(s: string): number {
@@ -613,12 +615,13 @@ function buildMainMenuText(opts: {
   tariffDisplayName?: string | null;
   menuTexts?: Record<string, string> | null;
   menuTextCustomEmojiIds?: Record<string, string> | null;
-}): { text: string; entities: CustomEmojiEntity[] } {
+}): { text: string; entities: BotTextEntity[] } {
   const { serviceName, balance, currency, subscription, tariffDisplayName, menuTexts, menuTextCustomEmojiIds } = opts;
   const name = serviceName.trim() || "Кабинет";
   const balanceStr = formatMoney(balance, currency);
   const lines: string[] = [];
   const lineStartKeys: (string | null)[] = [];
+  let urlLineIndex: number | null = null;
 
   lines.push(t(menuTexts, "welcomeGreeting"));
   lineStartKeys.push("welcomeGreeting");
@@ -700,6 +703,7 @@ function buildMainMenuText(opts: {
     if (url) {
       lines.push(t(menuTexts, "linkLabel"));
       lineStartKeys.push("linkLabel");
+      urlLineIndex = lines.length;
       lines.push(url);
       lineStartKeys.push(null);
       lines.push("📌 Happ: зажмите ссылку выше, скопируйте, откройте Happ, нажмите «+», вставьте из буфера.");
@@ -710,7 +714,7 @@ function buildMainMenuText(opts: {
   }
 
   const text = lines.join("\n");
-  const entities: CustomEmojiEntity[] = [];
+  const entities: BotTextEntity[] = [];
   if (menuTextCustomEmojiIds && Object.keys(menuTextCustomEmojiIds).length > 0) {
     let offset = 0;
     for (let i = 0; i < lines.length; i++) {
@@ -721,6 +725,14 @@ function buildMainMenuText(opts: {
         if (firstLen > 0) entities.push({ type: "custom_emoji", offset, length: firstLen, custom_emoji_id: menuTextCustomEmojiIds[key]! });
       }
       offset += lines[i]!.length + 1;
+    }
+  }
+  if (urlLineIndex != null && urlLineIndex >= 0 && urlLineIndex < lines.length) {
+    const urlLine = lines[urlLineIndex]!;
+    if (urlLine.trim()) {
+      let urlOffset = 0;
+      for (let i = 0; i < urlLineIndex; i++) urlOffset += lines[i]!.length + 1;
+      entities.push({ type: "code", offset: urlOffset, length: urlLine.length });
     }
   }
   return { text, entities };
@@ -753,10 +765,10 @@ function logoToPhotoSource(logo: string | null | undefined): InputFile | string 
 
 /** Редактировать сообщение: текст и клавиатура (если с фото — caption + caption_entities, иначе text + entities) */
 async function editMessageContent(ctx: {
-  editMessageCaption: (opts: { caption: string; caption_entities?: CustomEmojiEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
-  editMessageText: (text: string, opts?: { entities?: CustomEmojiEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  editMessageCaption: (opts: { caption: string; caption_entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  editMessageText: (text: string, opts?: { entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
   callbackQuery?: { message?: { photo?: unknown[] } };
-}, text: string, reply_markup: InlineMarkup, entities?: CustomEmojiEntity[]): Promise<unknown> {
+}, text: string, reply_markup: InlineMarkup, entities?: BotTextEntity[]): Promise<unknown> {
   const msg = ctx.callbackQuery?.message;
   const hasPhoto = msg && typeof msg === "object" && "photo" in msg && Array.isArray((msg as { photo: unknown[] }).photo) && (msg as { photo: unknown[] }).photo.length > 0;
   const caption = text.length > TELEGRAM_CAPTION_MAX ? text.slice(0, TELEGRAM_CAPTION_MAX - 3) + "..." : text;
