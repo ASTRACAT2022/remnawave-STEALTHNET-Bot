@@ -698,8 +698,12 @@ function buildMainMenuText(opts: {
     }
     lineStartKeys.push("trafficPrefix");
     if (url) {
-      lines.push(t(menuTexts, "linkLabel"), url);
-      lineStartKeys.push("linkLabel", null);
+      lines.push(t(menuTexts, "linkLabel"));
+      lineStartKeys.push("linkLabel");
+      lines.push(url);
+      lineStartKeys.push(null);
+      lines.push("📌 Happ: зажмите ссылку выше, скопируйте, откройте Happ, нажмите «+», вставьте из буфера.");
+      lineStartKeys.push(null);
     }
     lines.push(t(menuTexts, "chooseAction"));
     lineStartKeys.push("chooseAction");
