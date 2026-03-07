@@ -52,21 +52,23 @@ function writeCachedEncryptedLink(url: string, encryptedLink: string): void {
 }
 
 export async function encryptSubscriptionLinkWithHappCrypto(rawUrl: string): Promise<string> {
-  const url = rawUrl.trim();
-  if (!url || isHappCryptoLink(url)) return url;
-
-  const cached = readCachedEncryptedLink(url);
-  if (cached) return cached;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getCryptoTimeoutMs());
-
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
+    const url = rawUrl.trim();
+    if (!url || isHappCryptoLink(url)) return url;
+
+    const cached = readCachedEncryptedLink(url);
+    if (cached) return cached;
+
+    const abortSupported = typeof AbortController !== "undefined";
+    const controller = abortSupported ? new AbortController() : null;
+    timeout = controller ? setTimeout(() => controller.abort(), getCryptoTimeoutMs()) : null;
+
     const response = await fetch(getCryptoApiUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
-      signal: controller.signal,
+      signal: controller?.signal,
     });
 
     const payload = await response.json().catch(() => null);
@@ -90,9 +92,9 @@ export async function encryptSubscriptionLinkWithHappCrypto(rawUrl: string): Pro
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[happ-crypto] subscription link encryption failed:", message);
-    return url;
+    return rawUrl.trim();
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -117,6 +119,11 @@ async function replaceSubscriptionLinksDeep(value: unknown): Promise<unknown> {
 }
 
 export async function toHappCryptoSubscriptionPayload<T>(payload: T): Promise<T> {
-  return (await replaceSubscriptionLinksDeep(payload)) as T;
+  try {
+    return (await replaceSubscriptionLinksDeep(payload)) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[happ-crypto] payload conversion failed:", message);
+    return payload;
+  }
 }
-
