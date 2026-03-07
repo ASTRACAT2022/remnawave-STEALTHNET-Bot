@@ -523,6 +523,24 @@ function bytesToGb(bytes: number): string {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2);
 }
 
+function buildHappCopyInstruction(vpnUrl: string, withOpenPageHint: boolean): string {
+  const lines = [
+    "Подключиться к VPN (Happ)",
+    "",
+    "1. Скопируйте крипто-ссылку ниже:",
+    vpnUrl,
+    "",
+    "2. Откройте Happ.",
+    "3. Нажмите «+».",
+    "4. Вставьте ссылку из буфера обмена.",
+    "5. Готово.",
+  ];
+  if (withOpenPageHint) {
+    lines.push("", "Либо нажмите кнопку ниже и откройте страницу подключения.");
+  }
+  return lines.join("\n");
+}
+
 /** Прогресс-бар из символов (0..1), длина barLen */
 function progressBar(pct: number, barLen: number): string {
   const filled = Math.round(Math.max(0, Math.min(1, pct)) * barLen);
@@ -1727,10 +1745,10 @@ bot.on("callback_query:data", async (ctx) => {
       }
       const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
       if (appUrl) {
-        const vpnTitle = titleWithEmoji("SERVERS", "Подключиться к VPN\n\nНажмите кнопку ниже — откроется страница с приложениями и кнопкой «Добавить подписку» (как в кабинете).", config?.botEmojis);
+        const vpnTitle = titleWithEmoji("SERVERS", buildHappCopyInstruction(vpnUrl, true), config?.botEmojis);
         await editMessageContent(ctx, vpnTitle.text, openSubscribePageMarkup(appUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle.entities);
       } else {
-        const vpnTitle2 = titleWithEmoji("SERVERS", `Подключиться к VPN\n\nОткройте ссылку в приложении VPN:\n${vpnUrl}`, config?.botEmojis);
+        const vpnTitle2 = titleWithEmoji("SERVERS", buildHappCopyInstruction(vpnUrl, false), config?.botEmojis);
         await editMessageContent(ctx, vpnTitle2.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle2.entities);
       }
       return;
