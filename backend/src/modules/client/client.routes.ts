@@ -34,6 +34,7 @@ import { createYookassaPayment, isYookassaConfigured } from "../yookassa/yookass
 import { activateTariffByPaymentId, activateTariffForClient } from "../tariff/tariff-activation.service.js";
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { getAuthUrl, exchangeCodeForToken, requestPayment, processPayment } from "../yoomoney/yoomoney.service.js";
+import { toHappCryptoSubscriptionPayload } from "./subscription-link.service.js";
 
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
 function extractCurrentExpireAt(data: unknown): Date | null {
@@ -1154,7 +1155,10 @@ clientRouter.get("/subscription", async (req, res) => {
     const result = await remnaGetUser(effectiveRemnaUuid);
     if (!result.error) {
       const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null, client.id);
-      return res.json({ subscription: result.data ?? null, tariffDisplayName });
+      return res.json({
+        subscription: await toHappCryptoSubscriptionPayload(result.data ?? null),
+        tariffDisplayName,
+      });
     }
 
     if (!isRemnaUserNotFoundError(result.status, result.error)) {
@@ -1181,7 +1185,10 @@ clientRouter.get("/subscription", async (req, res) => {
       return res.json({ subscription: null, tariffDisplayName: null, message: recreatedUser.error });
     }
     const tariffDisplayName = await resolveTariffDisplayName(recreatedUser.data ?? null, client.id);
-    return res.json({ subscription: recreatedUser.data ?? null, tariffDisplayName });
+    return res.json({
+      subscription: await toHappCryptoSubscriptionPayload(recreatedUser.data ?? null),
+      tariffDisplayName,
+    });
   }
 
   if (found.uuid !== client.remnawaveUuid) {
@@ -1193,7 +1200,10 @@ clientRouter.get("/subscription", async (req, res) => {
     return res.json({ subscription: null, tariffDisplayName: null, message: relinked.error });
   }
   const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null, client.id);
-  return res.json({ subscription: relinked.data ?? null, tariffDisplayName });
+  return res.json({
+    subscription: await toHappCryptoSubscriptionPayload(relinked.data ?? null),
+    tariffDisplayName,
+  });
 });
 
 const createPlategaPaymentSchema = z.object({
