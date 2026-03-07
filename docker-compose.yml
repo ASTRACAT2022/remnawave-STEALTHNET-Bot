@@ -124,7 +124,7 @@ services:
     container_name: stealthnet-frontend-build
     volumes:
       - frontend_dist:/out
-    entrypoint: ["sh", "-c", "cp -r /dist/* /out/ && echo 'Frontend copied to volume'"]
+    entrypoint: ["sh", "-c", "find /out -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -r /dist/* /out/ && echo 'Frontend copied to volume (clean sync)'"]
 
   # ── Nginx (встроенный) ─────────────────────────────────────────
   # Включается когда USE_BUILTIN_NGINX=true
