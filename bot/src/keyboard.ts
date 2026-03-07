@@ -82,6 +82,8 @@ export type InnerEmojiIds = {
   connect?: string;
 };
 
+const MAX_COPY_TEXT_LENGTH = 256;
+
 /** Главное меню: кнопки из конфига. Эмодзи в label (Unicode) и/или icon_custom_emoji_id (премиум). Поддержка показывается только если задана хотя бы одна ссылка. */
 export function mainMenu(opts: {
   showTrial: boolean;
@@ -120,8 +122,9 @@ export function mainMenu(opts: {
       rows.push([btn(b.label, MENU_IDS[b.id], toStyle(b.style), iconId)]);
     }
   }
-  if (opts.showVpn && opts.vpnCopyUrl?.trim()) {
-    rows.push([{ text: "📋 Скопировать ссылку подключения", copy_text: { text: opts.vpnCopyUrl.trim() } }]);
+  const vpnCopyUrl = opts.vpnCopyUrl?.trim() ?? "";
+  if (opts.showVpn && vpnCopyUrl && vpnCopyUrl.length <= MAX_COPY_TEXT_LENGTH) {
+    rows.push([{ text: "📋 Скопировать ссылку подключения", copy_text: { text: vpnCopyUrl } }]);
   }
   return { inline_keyboard: rows };
 }
