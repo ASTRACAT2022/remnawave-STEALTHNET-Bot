@@ -623,6 +623,13 @@ export const api = {
     return request("/client/profile", { method: "PATCH", body: JSON.stringify(data), token });
   },
 
+  async clientAiChat(
+    token: string,
+    data: { messages: { role: "user" | "assistant" | "system"; content: string }[] },
+  ): Promise<{ reply: string }> {
+    return request("/client/ai/chat", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async getClientReferralStats(token: string): Promise<ClientReferralStats> {
     return request("/client/referral-stats", { token });
   },

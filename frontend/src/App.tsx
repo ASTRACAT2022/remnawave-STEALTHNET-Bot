@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "@/contexts/auth";
 import { ClientAuthProvider, useClientAuth } from "@/contexts/client-auth";
 import { ThemeProvider } from "@/contexts/theme";
 import type { ThemeAccent } from "@/contexts/theme";
+import { AnimatedBackground } from "@/components/animated-background";
 import { api } from "@/lib/api";
 import { LoginPage } from "@/pages/login";
 import { ChangePasswordPage } from "@/pages/change-password";
@@ -205,6 +206,12 @@ function AppRoutes() {
   );
 }
 
+function CabinetBackgroundLayer() {
+  const location = useLocation();
+  if (!location.pathname.startsWith("/cabinet")) return null;
+  return <AnimatedBackground />;
+}
+
 function TitleAndThemeSync({ onAccent }: { onAccent: (a: ThemeAccent | null) => void }) {
   const location = useLocation();
   const [config, setConfig] = useState<{ serviceName: string; favicon: string | null } | null>(null);
@@ -263,6 +270,7 @@ export default function App() {
     <ThemeProvider forcedAccent={globalAccent}>
       <AuthProvider>
         <BrowserRouter future={routerFutureFlags}>
+          <CabinetBackgroundLayer />
           <TitleAndThemeSync onAccent={setGlobalAccent} />
           <AppRoutes />
         </BrowserRouter>

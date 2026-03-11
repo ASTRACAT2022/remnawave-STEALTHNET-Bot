@@ -5,6 +5,7 @@ import { CabinetConfigProvider, useCabinetConfig } from "@/contexts/cabinet-conf
 import { createContext, useContext } from "react";
 import { useIsMiniapp } from "@/hooks/use-is-miniapp";
 import { Button } from "@/components/ui/button";
+import { FloatingChat } from "@/components/floating-chat";
 import { LayoutDashboard, Package, User, LogOut, Shield, Users, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/contexts/theme";
 
@@ -50,7 +51,8 @@ function MobileCabinetShell() {
   const logo = config?.logo && !logoError ? config.logo : null;
 
   return (
-    <div className="min-h-svh flex flex-col bg-gradient-to-b from-background to-muted/20 min-w-0 overflow-x-hidden">
+    <div className="min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden">
+      <FloatingChat />
       <header
         className="sticky top-0 z-50 isolate border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 shrink-0"
         style={{ background: "hsl(var(--background))", paddingTop: "env(safe-area-inset-top)" }}
@@ -136,7 +138,8 @@ function CabinetShell() {
   }
 
   return (
-    <div className="min-h-svh flex flex-col bg-gradient-to-b from-background to-muted/20">
+    <div className="min-h-svh flex flex-col bg-transparent">
+      <FloatingChat />
       <header className="sticky top-0 z-50 isolate border-b border-border bg-background shadow-sm" style={{ background: "hsl(var(--background))" }}>
         <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
           <Link to="/cabinet/dashboard" className="flex items-center gap-2.5 font-semibold text-lg tracking-tight shrink-0">
