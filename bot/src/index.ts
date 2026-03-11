@@ -6,7 +6,7 @@
 
 import "dotenv/config";
 import { createServer } from "node:http";
-import { Bot, InputFile } from "grammy";
+import { Bot, GrammyError, InputFile } from "grammy";
 import * as api from "./api.js";
 import {
   mainMenu,
@@ -72,8 +72,16 @@ type PendingBroadcast = {
   createdAt: number;
 };
 
+type PendingHwidAliasRename = {
+  hwidHash: string;
+  createdAt: number;
+};
+
 const pendingBroadcastByAdmin = new Map<number, PendingBroadcast>();
 const broadcastRunningAdmins = new Set<number>();
+const pendingHwidAliasRenameByUser = new Map<number, PendingHwidAliasRename>();
+const HWID_ALIAS_MAX_LEN = 32;
+const HWID_ALIAS_PENDING_TTL_MS = 5 * 60 * 1000;
 
 type WatchdogState = {
   startedAt: number;
@@ -365,13 +373,13 @@ async function enforceSubscription(
 }
 
 function isStartCommand(text: string | undefined): boolean {
-  const raw = (text ?? "").trim().toLowerCase();
-  return raw === "/start" || raw.startsWith("/start ");
+  const raw = (text ?? "").trim();
+  return /^\/start(?:@[a-z0-9_]+)?(?:\s|$)/i.test(raw);
 }
 
 function isBroadcastCommand(text: string | undefined): boolean {
-  const raw = (text ?? "").trim().toLowerCase();
-  return raw === "/broadcast" || raw.startsWith("/broadcast ");
+  const raw = (text ?? "").trim();
+  return /^\/broadcast(?:@[a-z0-9_]+)?(?:\s|$)/i.test(raw);
 }
 
 function shouldSkipGlobalSubscribeGuard(ctx: {
@@ -796,13 +804,18 @@ function parseStarsPayload(payload: string | undefined): string | null {
 }
 
 function formatHwidDeviceLine(index: number, item: {
+  alias: string | null;
   platform: string | null;
   osVersion: string | null;
   deviceModel: string | null;
   updatedAt: string;
 }): string {
+  const alias = (item.alias ?? "").trim();
   const label = [item.platform, item.osVersion, item.deviceModel].filter(Boolean).join(" · ") || "Неизвестное устройство";
   const updated = item.updatedAt ? new Date(item.updatedAt).toLocaleString("ru-RU") : "—";
+  if (alias) {
+    return `${index}. ${alias}\n   ${label}\n   Обновлено: ${updated}`;
+  }
   return `${index}. ${label}\n   Обновлено: ${updated}`;
 }
 
@@ -810,15 +823,37 @@ function hwidDevicesMarkup(items: { hwidHash: string }[], backLabel?: string | n
   const rows: { text: string; callback_data: string; style?: "primary" | "success" | "danger" }[][] = [];
   const maxButtons = Math.min(items.length, 12);
   for (let i = 0; i < maxButtons; i += 1) {
-    rows.push([{
-      text: `🚫 Отвязать устройство #${i + 1}`,
-      callback_data: `hwid_revoke:${items[i]!.hwidHash}`,
-      style: "danger",
-    }]);
+    rows.push([
+      {
+        text: `✏️ Имя #${i + 1}`,
+        callback_data: `hwid_rename:${items[i]!.hwidHash}`,
+        style: "primary",
+      },
+      {
+        text: `🚫 Отвязать #${i + 1}`,
+        callback_data: `hwid_revoke:${items[i]!.hwidHash}`,
+        style: "danger",
+      },
+    ]);
   }
   const backText = (backLabel && backLabel.trim()) || "◀️ В меню";
   rows.push([{ text: backText, callback_data: "menu:main", style: "danger" }]);
   return { inline_keyboard: rows };
+}
+
+function hwidRenameCancelMarkup(): InlineMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: "❌ Отменить", callback_data: "hwid_rename_cancel", style: "danger" }],
+    ],
+  };
+}
+
+function normalizeHwidAliasInput(input: string): string {
+  const compact = input.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  if (compact.length <= HWID_ALIAS_MAX_LEN) return compact;
+  return compact.slice(0, HWID_ALIAS_MAX_LEN).trim();
 }
 
 async function buildHwidDevicesView(userId: number, backLabel?: string | null): Promise<{ text: string; replyMarkup: InlineMarkup }> {
@@ -840,7 +875,7 @@ async function buildHwidDevicesView(userId: number, backLabel?: string | null): 
     lines.push(formatHwidDeviceLine(i + 1, items[i]!));
     lines.push("");
   }
-  lines.push("Если видите чужое устройство, нажмите «Отвязать устройство».");
+  lines.push("Если видите чужое устройство, нажмите «Отвязать».");
 
   return {
     text: lines.join("\n"),
@@ -848,19 +883,58 @@ async function buildHwidDevicesView(userId: number, backLabel?: string | null): 
   };
 }
 
+function extractRetryAfterSeconds(error: unknown): number | null {
+  if (error instanceof GrammyError && error.error_code === 429) {
+    const retryAfter = error.parameters?.retry_after;
+    if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+      return Math.ceil(retryAfter);
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /retry after\s+(\d+)/i.exec(message);
+  if (!match) return null;
+  const sec = Number(match[1]);
+  return Number.isFinite(sec) && sec > 0 ? Math.ceil(sec) : null;
+}
+
+async function sendBroadcastMessageWithRetry(chatId: string, text: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await bot.api.sendMessage(chatId, text);
+      return true;
+    } catch (error: unknown) {
+      if (error instanceof GrammyError) {
+        if (error.error_code === 403 || error.error_code === 400) return false;
+        if (error.error_code === 429) {
+          const retryAfterSec = extractRetryAfterSeconds(error) ?? 1;
+          await sleep((retryAfterSec + 1) * 1000);
+          continue;
+        }
+      }
+
+      if (attempt >= 3) return false;
+      await sleep(500 * attempt);
+    }
+  }
+  return false;
+}
+
 async function performBroadcast(adminId: number, text: string): Promise<{ total: number; sent: number; failed: number }> {
   const targets = await api.getBroadcastTargets();
-  const ids = targets.items ?? [];
+  const ids = Array.from(
+    new Set(
+      (targets.items ?? [])
+        .map((id) => String(id).trim())
+        .filter((id) => /^\d+$/.test(id)),
+    ),
+  );
   let sent = 0;
   let failed = 0;
 
   for (const chatId of ids) {
-    try {
-      await bot.api.sendMessage(chatId, text);
-      sent += 1;
-    } catch {
-      failed += 1;
-    }
+    const ok = await sendBroadcastMessageWithRetry(chatId, text);
+    if (ok) sent += 1;
+    else failed += 1;
     await sleep(40);
   }
 
@@ -899,6 +973,8 @@ bot.command("broadcast", async (ctx) => {
 bot.command("start", async (ctx) => {
   const from = ctx.from;
   if (!from) return;
+  pendingHwidAliasRenameByUser.delete(from.id);
+  awaitingPromoCode.delete(from.id);
   const telegramId = String(from.id);
   const telegramUsername = from.username ?? undefined;
   const payload = ctx.match?.trim() || "";
@@ -981,6 +1057,7 @@ bot.command("start", async (ctx) => {
 bot.command("devices", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
+  pendingHwidAliasRenameByUser.delete(userId);
 
   try {
     const config = await api.getPublicConfig().catch(() => null);
@@ -1093,6 +1170,7 @@ bot.on("callback_query:data", async (ctx) => {
         telegramUserId: String(userId),
         hwidHash,
       });
+      pendingHwidAliasRenameByUser.delete(userId);
       if (result.ok) {
         await ctx.reply("✅ Устройство отвязано. Если это было ваше устройство, просто подключитесь заново.").catch(() => {});
         return;
@@ -1106,7 +1184,28 @@ bot.on("callback_query:data", async (ctx) => {
     }
   }
 
+  if (data.startsWith("hwid_rename:")) {
+    const hwidHash = data.slice("hwid_rename:".length).trim().toLowerCase();
+    if (!/^[a-f0-9]{8,64}$/.test(hwidHash)) {
+      await ctx.reply("❌ Некорректный идентификатор устройства.").catch(() => {});
+      return;
+    }
+    pendingHwidAliasRenameByUser.set(userId, { hwidHash, createdAt: Date.now() });
+    await ctx.reply(
+      `✏️ Отправьте имя устройства (до ${HWID_ALIAS_MAX_LEN} символов).\n\nЧтобы убрать имя, отправьте: -`,
+      { reply_markup: hwidRenameCancelMarkup() },
+    ).catch(() => {});
+    return;
+  }
+
+  if (data === "hwid_rename_cancel") {
+    pendingHwidAliasRenameByUser.delete(userId);
+    await ctx.reply("❌ Переименование устройства отменено.").catch(() => {});
+    return;
+  }
+
   if (data === "menu:devices") {
+    pendingHwidAliasRenameByUser.delete(userId);
     try {
       const config = await api.getPublicConfig().catch(() => null);
       const view = await buildHwidDevicesView(userId, config?.botBackLabel ?? null);
@@ -1784,6 +1883,44 @@ bot.on("message:text", async (ctx) => {
   if (ctx.message.text?.startsWith("/")) return;
   const userId = ctx.from?.id;
   if (!userId) return;
+  const renamePending = pendingHwidAliasRenameByUser.get(userId);
+  if (renamePending) {
+    if (Date.now() - renamePending.createdAt > HWID_ALIAS_PENDING_TTL_MS) {
+      pendingHwidAliasRenameByUser.delete(userId);
+      await ctx.reply("⌛ Время ожидания истекло. Нажмите «Имя #N» ещё раз.").catch(() => {});
+      return;
+    }
+
+    const rawInput = ctx.message.text ?? "";
+    const clearRequested = rawInput.trim() === "-" || /^очистить$/i.test(rawInput.trim()) || /^clear$/i.test(rawInput.trim());
+    const normalized = clearRequested ? "" : normalizeHwidAliasInput(rawInput);
+    if (!clearRequested && !normalized) {
+      await ctx.reply("❌ Имя устройства пустое. Введите текст или отправьте «-» для очистки.").catch(() => {});
+      return;
+    }
+
+    try {
+      await api.setTelegramHwidAlias({
+        telegramUserId: String(userId),
+        hwidHash: renamePending.hwidHash,
+        alias: normalized,
+      });
+      pendingHwidAliasRenameByUser.delete(userId);
+      if (clearRequested) {
+        await ctx.reply("✅ Имя устройства очищено.").catch(() => {});
+      } else {
+        await ctx.reply(`✅ Имя устройства сохранено: ${normalized}`).catch(() => {});
+      }
+      const config = await api.getPublicConfig().catch(() => null);
+      const view = await buildHwidDevicesView(userId, config?.botBackLabel ?? null);
+      await ctx.reply(view.text, { reply_markup: view.replyMarkup }).catch(() => {});
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка сохранения имени устройства";
+      await ctx.reply(`❌ ${msg}`).catch(() => {});
+    }
+    return;
+  }
+
   const token = getToken(userId);
   if (!token) return;
   const publicConfig = await api.getPublicConfig().catch(() => null);

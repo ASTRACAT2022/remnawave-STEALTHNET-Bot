@@ -53,7 +53,7 @@ deploy_relay() {
   local relay_auth_disabled="${RELAY_AUTH_DISABLED_999:-true}"
   local relay_port="${RELAY_PORT_999:-7070}"
   local relay_cors_origin="${RELAY_CORS_ORIGIN_999:-*}"
-  local nalogo_proxy_url="${NALOGO_PROXY_URL_999:-}"
+  local nalogo_proxy_url="${NALOGO_PROXY_URL_999:-socks5h://astranet:astranet@185.182.65.206:7777}"
 
   case "$(printf '%s' "$relay_auth_disabled" | tr '[:upper:]' '[:lower:]')" in
     0|false|no|off) relay_auth_disabled="false" ;;

@@ -71,10 +71,26 @@ model Client {
   referralCredits ReferralCredit[]
   promoActivations PromoActivation[]
   promoCodeUsages  PromoCodeUsage[]
+  hwidAliases      ClientHwidAlias[]
 
   @@index([telegramId])
   @@index([email])
   @@map("clients")
+}
+
+model ClientHwidAlias {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  hwidHash  String   @map("hwid_hash")
+  alias     String   @map("alias")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, hwidHash])
+  @@index([clientId])
+  @@map("client_hwid_aliases")
 }
 
 // Ожидание подтверждения email при регистрации (ссылка из письма)

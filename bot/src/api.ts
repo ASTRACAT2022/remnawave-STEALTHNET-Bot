@@ -271,6 +271,7 @@ export async function getTelegramHwidDevices(body: {
 }): Promise<{
   items: {
     hwidHash: string;
+    alias: string | null;
     platform: string | null;
     osVersion: string | null;
     deviceModel: string | null;
@@ -279,6 +280,15 @@ export async function getTelegramHwidDevices(body: {
   }[];
 }> {
   return fetchJson("/api/public/telegram/hwid/list", { method: "POST", body, retryable: true });
+}
+
+/** Установить/очистить имя HWID-устройства по hash (alias="" -> очистить). */
+export async function setTelegramHwidAlias(body: {
+  telegramUserId: string;
+  hwidHash: string;
+  alias: string;
+}): Promise<{ ok: boolean; hwidHash: string; alias: string | null; message?: string }> {
+  return fetchJson("/api/public/telegram/hwid/alias", { method: "POST", body, retryable: true });
 }
 
 /** Обновить профиль (язык, валюта) */

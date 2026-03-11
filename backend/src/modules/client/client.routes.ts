@@ -2240,6 +2240,12 @@ const revokeTelegramHwidByHashSchema = z.object({
   hwidHash: z.string().regex(/^[a-f0-9]{8,64}$/i),
 });
 
+const setTelegramHwidAliasSchema = z.object({
+  telegramUserId: z.string().min(1),
+  hwidHash: z.string().regex(/^[a-f0-9]{8,64}$/i),
+  alias: z.string().max(64),
+});
+
 const listTelegramHwidSchema = z.object({
   telegramUserId: z.string().min(1),
 });
@@ -2264,9 +2270,9 @@ publicConfigRouter.post("/telegram/hwid/list", async (req, res) => {
   const telegramUserId = parsed.data.telegramUserId.trim();
   const client = await prisma.client.findUnique({
     where: { telegramId: telegramUserId },
-    select: { remnawaveUuid: true },
+    select: { id: true, remnawaveUuid: true },
   });
-  if (!client?.remnawaveUuid) {
+  if (!client?.id || !client?.remnawaveUuid) {
     return res.json({ items: [] });
   }
 
@@ -2274,17 +2280,116 @@ publicConfigRouter.post("/telegram/hwid/list", async (req, res) => {
   if (devicesRes.error) {
     return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
   }
-  const items = extractRemnaUserHwidDevices(devicesRes.data)
+  const rawItems = extractRemnaUserHwidDevices(devicesRes.data)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .map((d) => ({
-      hwidHash: hashHwid(d.hwid).slice(0, 16),
-      platform: d.platform,
-      osVersion: d.osVersion,
-      deviceModel: d.deviceModel,
-      createdAt: d.createdAt,
-      updatedAt: d.updatedAt,
-    }));
+    .map((d) => {
+      const fullHash = hashHwid(d.hwid);
+      return {
+        fullHash,
+        hwidHash: fullHash.slice(0, 16),
+        platform: d.platform,
+        osVersion: d.osVersion,
+        deviceModel: d.deviceModel,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+      };
+    });
+
+  const hashes = rawItems.map((i) => i.fullHash);
+  const aliases = hashes.length
+    ? await prisma.clientHwidAlias.findMany({
+      where: { clientId: client.id, hwidHash: { in: hashes } },
+      select: { hwidHash: true, alias: true },
+    })
+    : [];
+  const aliasByHash = new Map(aliases.map((a) => [a.hwidHash, a.alias]));
+  const items = rawItems.map((i) => ({
+    hwidHash: i.hwidHash,
+    alias: aliasByHash.get(i.fullHash) ?? null,
+    platform: i.platform,
+    osVersion: i.osVersion,
+    deviceModel: i.deviceModel,
+    createdAt: i.createdAt,
+    updatedAt: i.updatedAt,
+  }));
+
   return res.json({ items });
+});
+
+publicConfigRouter.post("/telegram/hwid/alias", async (req, res) => {
+  const apiKey = env.BOT_INTERNAL_API_KEY?.trim();
+  if (apiKey) {
+    const received = headerValue(req.headers["x-bot-internal-key"]).trim();
+    if (!received || received !== apiKey) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+  } else if (!telegramHwidWithoutKeyWarningLogged) {
+    telegramHwidWithoutKeyWarningLogged = true;
+    console.warn("[Telegram HWID] BOT_INTERNAL_API_KEY is empty: /telegram/hwid/alias is accepted without key (insecure mode)");
+  }
+
+  const parsed = setTelegramHwidAliasSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+
+  const telegramUserId = parsed.data.telegramUserId.trim();
+  const hwidHash = parsed.data.hwidHash.trim().toLowerCase();
+  const alias = parsed.data.alias.trim();
+
+  const client = await prisma.client.findUnique({
+    where: { telegramId: telegramUserId },
+    select: { id: true, remnawaveUuid: true },
+  });
+  if (!client?.id || !client?.remnawaveUuid) {
+    return res.status(404).json({ message: "Клиент или привязка к Remna не найдены" });
+  }
+
+  const devicesRes = await remnaGetUserHwidDevices(client.remnawaveUuid);
+  if (devicesRes.error) {
+    return res.status(devicesRes.status >= 400 ? devicesRes.status : 500).json({ message: devicesRes.error });
+  }
+  const devices = extractRemnaUserHwidDevices(devicesRes.data);
+  const match = devices.find((d) => hashHwid(d.hwid).startsWith(hwidHash));
+  if (!match) {
+    return res.status(404).json({ message: "Устройство не найдено или уже отвязано" });
+  }
+
+  const fullHash = hashHwid(match.hwid);
+  if (!alias) {
+    await prisma.clientHwidAlias.deleteMany({
+      where: { clientId: client.id, hwidHash: fullHash },
+    });
+    return res.json({
+      ok: true,
+      hwidHash: fullHash.slice(0, 16),
+      alias: null,
+      message: "Имя устройства очищено",
+    });
+  }
+
+  await prisma.clientHwidAlias.upsert({
+    where: {
+      clientId_hwidHash: {
+        clientId: client.id,
+        hwidHash: fullHash,
+      },
+    },
+    create: {
+      clientId: client.id,
+      hwidHash: fullHash,
+      alias,
+    },
+    update: {
+      alias,
+    },
+  });
+
+  return res.json({
+    ok: true,
+    hwidHash: fullHash.slice(0, 16),
+    alias,
+  });
 });
 
 publicConfigRouter.post("/telegram/hwid/revoke-by-hash", async (req, res) => {
@@ -2333,6 +2438,10 @@ publicConfigRouter.post("/telegram/hwid/revoke-by-hash", async (req, res) => {
     return res.status(deleteRes.status >= 400 ? deleteRes.status : 500).json({ message: deleteRes.error });
   }
 
+  await prisma.clientHwidAlias.deleteMany({
+    where: { clientId: client.id, hwidHash: hashHwid(match.hwid) },
+  });
+
   return res.json({
     ok: true,
     userUuid: client.remnawaveUuid,
@@ -2356,7 +2465,13 @@ publicConfigRouter.get("/broadcast-targets", async (req, res) => {
     where: { telegramId: { not: null }, isBlocked: false },
     select: { telegramId: true },
   });
-  const ids = Array.from(new Set(clients.map((c) => c.telegramId).filter((v): v is string => typeof v === "string" && v.trim().length > 0)));
+  const ids = Array.from(
+    new Set(
+      clients
+        .map((c) => (typeof c.telegramId === "string" ? c.telegramId.trim() : ""))
+        .filter((v): v is string => /^\d+$/.test(v)),
+    ),
+  );
   return res.json({ items: ids, count: ids.length });
 });
 
