@@ -1112,6 +1112,13 @@ const updateSettingsSchema = z.object({
   yookassaTrustedProxyNetworks: z.string().max(2000).nullable().optional(),
   telegramStarsEnabled: z.boolean().optional(),
   telegramStarsRate: z.number().positive().max(100000).optional(),
+  groqApiKey: z.string().max(500).nullable().optional(),
+  groqModel: z.string().max(100).nullable().optional(),
+  groqFallback1: z.string().max(100).nullable().optional(),
+  groqFallback2: z.string().max(100).nullable().optional(),
+  groqFallback3: z.string().max(100).nullable().optional(),
+  aiSystemPrompt: z.string().max(5000).nullable().optional(),
+  aiChatEnabled: z.boolean().optional(),
   nalogoEnabled: z.boolean().optional(),
   nalogoInn: z.string().max(20).nullable().optional(),
   nalogoPassword: z.string().max(500).nullable().optional(),
@@ -1389,6 +1396,34 @@ adminRouter.patch("/settings", async (req, res) => {
       create: { key: "telegram_stars_rate", value: String(updates.telegramStarsRate) },
       update: { value: String(updates.telegramStarsRate) },
     });
+  }
+  if (updates.groqApiKey !== undefined) {
+    const val = updates.groqApiKey ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "groq_api_key" }, create: { key: "groq_api_key", value: val }, update: { value: val } });
+  }
+  if (updates.groqModel !== undefined) {
+    const val = updates.groqModel ?? "llama3-8b-8192";
+    await prisma.systemSetting.upsert({ where: { key: "groq_model" }, create: { key: "groq_model", value: val }, update: { value: val } });
+  }
+  if (updates.groqFallback1 !== undefined) {
+    const val = updates.groqFallback1 ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "groq_fallback_1" }, create: { key: "groq_fallback_1", value: val }, update: { value: val } });
+  }
+  if (updates.groqFallback2 !== undefined) {
+    const val = updates.groqFallback2 ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "groq_fallback_2" }, create: { key: "groq_fallback_2", value: val }, update: { value: val } });
+  }
+  if (updates.groqFallback3 !== undefined) {
+    const val = updates.groqFallback3 ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "groq_fallback_3" }, create: { key: "groq_fallback_3", value: val }, update: { value: val } });
+  }
+  if (updates.aiSystemPrompt !== undefined) {
+    const val = updates.aiSystemPrompt ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "ai_system_prompt" }, create: { key: "ai_system_prompt", value: val }, update: { value: val } });
+  }
+  if (updates.aiChatEnabled !== undefined) {
+    const val = updates.aiChatEnabled ? "true" : "false";
+    await prisma.systemSetting.upsert({ where: { key: "ai_chat_enabled" }, create: { key: "ai_chat_enabled", value: val }, update: { value: val } });
   }
   if (updates.nalogoEnabled !== undefined) {
     await prisma.systemSetting.upsert({

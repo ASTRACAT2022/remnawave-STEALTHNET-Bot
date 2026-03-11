@@ -97,6 +97,40 @@ function hashHwid(rawHwid: string): string {
   return createHash("sha256").update(rawHwid).digest("hex");
 }
 
+type AiChatRole = "user" | "assistant" | "system";
+type AiChatMessage = { role: AiChatRole; content: string };
+
+type GroqChatCompletionResponse = {
+  choices?: Array<{ message?: { content?: string } }>;
+};
+
+function toRemnaResponseObject(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object") return {};
+  const root = data as Record<string, unknown>;
+  const nested = root.response ?? root.data;
+  if (!nested || typeof nested !== "object") return root;
+  return nested as Record<string, unknown>;
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function bytesToGbLabel(value: number | null): string {
+  if (value == null || value <= 0) return "Безлимит";
+  return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function usedBytesToGbLabel(value: number | null): string {
+  if (value == null || value < 0) return "0.00 GB";
+  return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
 function resolveBaseAppUrl(req: import("express").Request, configuredPublicUrl: string | null | undefined): string {
   const configured = (configuredPublicUrl ?? "").trim().replace(/\/$/, "");
   if (configured) return configured;
@@ -1254,6 +1288,144 @@ clientRouter.post("/subscription/reissue", async (req, res) => {
     subscription: await toHappCryptoSubscriptionPayload(revokeRes.data ?? null),
     tariffDisplayName,
   });
+});
+
+const aiChatSchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.enum(["user", "assistant", "system"]),
+      content: z.string().trim().min(1).max(4000),
+    }),
+  ).min(1).max(50),
+});
+
+clientRouter.post("/ai/chat", async (req, res) => {
+  const client = (req as unknown as { client: { id: string; remnawaveUuid: string | null } }).client;
+  const parsed = aiChatSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Неверный формат сообщений", errors: parsed.error.flatten() });
+  }
+
+  const config = await getSystemConfig();
+  if (config.aiChatEnabled === false) {
+    return res.status(403).json({ message: "AI-чат отключен администратором" });
+  }
+
+  const apiKey = config.groqApiKey?.trim() || (process.env.GROQ_API_KEY ?? "").trim();
+  if (!apiKey) {
+    return res.status(503).json({ message: "AI-чат не настроен: укажите Groq API Key в настройках" });
+  }
+
+  const preferredModel = config.groqModel?.trim() || "llama3-8b-8192";
+  const modelsToTry = [...new Set([
+    preferredModel,
+    config.groqFallback1?.trim() || "",
+    config.groqFallback2?.trim() || "",
+    config.groqFallback3?.trim() || "",
+  ].filter(Boolean))];
+
+  const [publicConfig, tariffs, dbClient] = await Promise.all([
+    getPublicConfig(),
+    prisma.tariff.findMany({
+      select: { name: true, price: true, currency: true, durationDays: true },
+      orderBy: [{ price: "asc" }, { durationDays: "asc" }],
+    }),
+    prisma.client.findUnique({
+      where: { id: client.id },
+      select: { balance: true, preferredCurrency: true, remnawaveUuid: true },
+    }),
+  ]);
+
+  const tariffContext = tariffs.length > 0
+    ? `Тарифы: ${tariffs.map((t) => `${t.name} (${t.price} ${t.currency.toUpperCase()} / ${t.durationDays} дн.)`).join(", ")}.`
+    : "Тарифы пока не настроены.";
+
+  const paymentMethods: string[] = [];
+  if (publicConfig.yookassaEnabled) paymentMethods.push("YooKassa");
+  if (publicConfig.yoomoneyEnabled) paymentMethods.push("YooMoney");
+  if (publicConfig.telegramStarsEnabled) paymentMethods.push("Telegram Stars");
+  if (Array.isArray(publicConfig.plategaMethods) && publicConfig.plategaMethods.length > 0) {
+    paymentMethods.push(`Platega (${publicConfig.plategaMethods.map((m) => m.label).join(", ")})`);
+  }
+  const paymentContext = paymentMethods.length > 0
+    ? `Доступные способы оплаты: ${paymentMethods.join(", ")}.`
+    : "Автоматические способы оплаты сейчас не настроены.";
+
+  let vpnContext = "VPN: подписка не привязана.";
+  const effectiveRemnaUuid = client.remnawaveUuid ?? dbClient?.remnawaveUuid ?? null;
+  if (effectiveRemnaUuid) {
+    const remnaRes = await remnaGetUser(effectiveRemnaUuid);
+    if (!remnaRes.error) {
+      const remnaData = toRemnaResponseObject(remnaRes.data);
+      const expireAt = extractCurrentExpireAt(remnaRes.data);
+      const trafficLimitBytes = toNumberOrNull(remnaData.trafficLimitBytes ?? remnaData.trafficLimit);
+      const trafficUsedBytes = toNumberOrNull(remnaData.trafficUsedBytes ?? remnaData.trafficUsed);
+      const hwidLimit = toNumberOrNull(remnaData.hwidDeviceLimit ?? remnaData.deviceLimit);
+      const squads = extractRemnaActiveInternalSquadUuids(remnaRes.data);
+      vpnContext = [
+        `VPN активна до: ${expireAt ? expireAt.toISOString().slice(0, 10) : "не активна"}.`,
+        `Трафик: ${usedBytesToGbLabel(trafficUsedBytes)} / ${bytesToGbLabel(trafficLimitBytes)}.`,
+        `Лимит устройств: ${hwidLimit && hwidLimit > 0 ? hwidLimit : "Безлимит"}.`,
+        squads.length ? `Активные группы: ${squads.join(", ")}.` : "Активные группы: нет.",
+      ].join(" ");
+    }
+  }
+
+  const userContext = `Баланс: ${dbClient?.balance ?? 0} ${(dbClient?.preferredCurrency ?? "usd").toUpperCase()}. ${vpnContext}`;
+  const systemPrompt = [
+    config.aiSystemPrompt?.trim()
+      || "Ты — AI-ассистент VPN-сервиса. Отвечай на русском, кратко и по делу, давай только рабочие шаги.",
+    "Правила: не выдумывай недоступные функции и способы оплаты; если данных не хватает, попроси уточнение.",
+    tariffContext,
+    paymentContext,
+    `Текущий пользователь: ${userContext}`,
+  ].join("\n\n");
+
+  const modelMessages: AiChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...parsed.data.messages.map((m) => ({ role: m.role, content: m.content.trim() })),
+  ];
+
+  let lastError = "AI service unavailable";
+  for (const model of modelsToTry) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: modelMessages,
+          temperature: 0.4,
+          max_tokens: 900,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!groqRes.ok) {
+        const errorText = (await groqRes.text().catch(() => "")).trim();
+        lastError = errorText || `Groq error (${groqRes.status})`;
+        continue;
+      }
+
+      const data = await groqRes.json() as GroqChatCompletionResponse;
+      const reply = data.choices?.[0]?.message?.content?.trim();
+      if (reply) {
+        return res.json({ reply });
+      }
+      lastError = "Empty AI response";
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return res.status(502).json({ message: `AI сервис временно недоступен: ${lastError}` });
 });
 
 const createPlategaPaymentSchema = z.object({

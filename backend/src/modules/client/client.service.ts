@@ -51,6 +51,8 @@ const SYSTEM_CONFIG_KEYS = [
   "yookassa_vat_code", "yookassa_sbp_enabled", "yookassa_payment_mode", "yookassa_payment_subject",
   "yookassa_trusted_proxy_networks",
   "telegram_stars_enabled", "telegram_stars_rate",
+  "groq_api_key", "groq_model", "groq_fallback_1", "groq_fallback_2", "groq_fallback_3", "ai_system_prompt",
+  "ai_chat_enabled",
   "nalogo_enabled", "nalogo_inn", "nalogo_password", "nalogo_device_id", "nalogo_timeout",
   "nalogo_python_bridge_enabled", "nalogo_python_bridge_only",
   "bot_buttons", "bot_back_label", "bot_menu_texts", "bot_inner_button_styles",
@@ -288,6 +290,15 @@ export async function getSystemConfig() {
     telegramStarsRate: Number.isFinite(parseFloat(map.telegram_stars_rate || "1")) && parseFloat(map.telegram_stars_rate || "1") > 0
       ? parseFloat(map.telegram_stars_rate || "1")
       : 1,
+    groqApiKey: (map.groq_api_key ?? "").trim() || null,
+    groqModel: (map.groq_model ?? "").trim() || "llama3-8b-8192",
+    groqFallback1: (map.groq_fallback_1 ?? "").trim() || null,
+    groqFallback2: (map.groq_fallback_2 ?? "").trim() || null,
+    groqFallback3: (map.groq_fallback_3 ?? "").trim() || null,
+    aiSystemPrompt:
+      map.ai_system_prompt
+      || "Ты — AI-ассистент VPN-сервиса. Отвечай вежливо, кратко и по делу. Не выдумывай недоступные функции и способы оплаты.",
+    aiChatEnabled: map.ai_chat_enabled !== "false" && map.ai_chat_enabled !== "0",
     nalogoEnabled: map.nalogo_enabled === "true" || map.nalogo_enabled === "1",
     nalogoInn: map.nalogo_inn || null,
     nalogoPassword: map.nalogo_password || null,
@@ -425,6 +436,7 @@ export async function getPublicConfig() {
     // В проекте используется только YooKassa СБП.
     yookassaSbpEnabled: yookassaEnabled,
     telegramStarsEnabled: Boolean(full.telegramStarsEnabled && full.telegramStarsRate > 0),
+    aiChatEnabled: full.aiChatEnabled ?? true,
     trialEnabled,
     trialDays,
     botButtons: resolvedButtons,

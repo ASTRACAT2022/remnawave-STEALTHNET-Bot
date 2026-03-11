@@ -797,6 +797,13 @@ export type UpdateSettingsPayload = {
   yookassaPaymentMode?: string | null;
   yookassaPaymentSubject?: string | null;
   yookassaTrustedProxyNetworks?: string | null;
+  groqApiKey?: string | null;
+  groqModel?: string | null;
+  groqFallback1?: string | null;
+  groqFallback2?: string | null;
+  groqFallback3?: string | null;
+  aiSystemPrompt?: string | null;
+  aiChatEnabled?: boolean;
   nalogoEnabled?: boolean;
   nalogoInn?: string | null;
   nalogoPassword?: string | null;
@@ -909,6 +916,13 @@ export interface AdminSettings {
   yookassaPaymentMode?: string | null;
   yookassaPaymentSubject?: string | null;
   yookassaTrustedProxyNetworks?: string | null;
+  groqApiKey?: string | null;
+  groqModel?: string | null;
+  groqFallback1?: string | null;
+  groqFallback2?: string | null;
+  groqFallback3?: string | null;
+  aiSystemPrompt?: string | null;
+  aiChatEnabled?: boolean;
   nalogoEnabled?: boolean;
   nalogoInn?: string | null;
   nalogoPassword?: string | null;
@@ -1256,6 +1270,7 @@ export interface PublicConfig {
   yoomoneyEnabled?: boolean;
   yookassaEnabled?: boolean;
   yookassaSbpEnabled?: boolean;
+  aiChatEnabled?: boolean;
   trialEnabled?: boolean;
   trialDays?: number;
   themeAccent?: string;

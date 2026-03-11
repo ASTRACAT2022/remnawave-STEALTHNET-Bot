@@ -208,7 +208,16 @@ function AppRoutes() {
 
 function CabinetBackgroundLayer() {
   const location = useLocation();
-  if (!location.pathname.startsWith("/cabinet")) return null;
+  const isCabinetRoute = location.pathname.startsWith("/cabinet");
+
+  useEffect(() => {
+    document.body.classList.toggle("cabinet-bg-active", isCabinetRoute);
+    return () => {
+      document.body.classList.remove("cabinet-bg-active");
+    };
+  }, [isCabinetRoute]);
+
+  if (!isCabinetRoute) return null;
   return <AnimatedBackground />;
 }
 

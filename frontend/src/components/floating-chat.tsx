@@ -52,6 +52,7 @@ function buildFallbackReply(input: string, serviceName: string): string {
 export function FloatingChat() {
   const { state } = useClientAuth();
   const config = useCabinetConfig();
+  const aiChatEnabled = config?.aiChatEnabled !== false;
   const serviceName = (config?.serviceName ?? "Сервис").trim() || "Сервис";
   const token = state.token ?? null;
 
@@ -110,8 +111,11 @@ export function FloatingChat() {
         if (typeof res.reply === "string" && res.reply.trim()) {
           replyText = res.reply.trim();
         }
-      } catch {
-        // fallback below
+      } catch (err) {
+        if (err instanceof Error && err.message.trim()) {
+          // Показываем серверную причину (например: AI отключен/не настроен), иначе локальный fallback.
+          replyText = err.message.trim();
+        }
       }
     }
     if (!replyText) {
@@ -128,6 +132,8 @@ export function FloatingChat() {
     if (!isOpen) setUnread((v) => v + 1);
     setLoading(false);
   }
+
+  if (!aiChatEnabled) return null;
 
   return (
     <div className="fixed bottom-24 right-4 z-[100] sm:bottom-6 sm:right-6">

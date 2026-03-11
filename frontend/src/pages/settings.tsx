@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { RefreshCw, Download, Upload, Link2, Settings2, Gift, Users, ArrowLeftRight, Mail, MessageCircle, CreditCard, ChevronDown, Copy, Check, Bot, FileJson, Palette, Wallet } from "lucide-react";
+import { RefreshCw, Download, Upload, Link2, Settings2, Gift, Users, ArrowLeftRight, Mail, MessageCircle, CreditCard, ChevronDown, Copy, Check, Bot, FileJson, Palette, Wallet, Sparkles } from "lucide-react";
 import { ACCENT_PALETTES } from "@/contexts/theme";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -119,6 +119,15 @@ export function SettingsPage() {
         yookassaSbpEnabled: Boolean((data as AdminSettings).yookassaSbpEnabled),
         yookassaPaymentMode: (data as AdminSettings).yookassaPaymentMode ?? "full_payment",
         yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
+        groqApiKey: (data as AdminSettings).groqApiKey ?? null,
+        groqModel: (data as AdminSettings).groqModel ?? "llama3-8b-8192",
+        groqFallback1: (data as AdminSettings).groqFallback1 ?? null,
+        groqFallback2: (data as AdminSettings).groqFallback2 ?? null,
+        groqFallback3: (data as AdminSettings).groqFallback3 ?? null,
+        aiSystemPrompt:
+          (data as AdminSettings).aiSystemPrompt
+          ?? "Ты — AI-ассистент VPN-сервиса. Отвечай на русском, кратко и по делу, давай только рабочие шаги.",
+        aiChatEnabled: (data as AdminSettings).aiChatEnabled !== false,
         nalogoEnabled: Boolean((data as AdminSettings).nalogoEnabled),
         nalogoTimeout: (data as AdminSettings).nalogoTimeout ?? 30,
         nalogoPythonBridgeEnabled: (data as AdminSettings).nalogoPythonBridgeEnabled ?? true,
@@ -290,6 +299,13 @@ export function SettingsPage() {
         yookassaPaymentMode: settings.yookassaPaymentMode ?? "full_payment",
         yookassaPaymentSubject: settings.yookassaPaymentSubject ?? "service",
         yookassaTrustedProxyNetworks: settings.yookassaTrustedProxyNetworks ?? null,
+        groqApiKey: settings.groqApiKey && settings.groqApiKey !== "********" ? settings.groqApiKey : undefined,
+        groqModel: settings.groqModel ?? "llama3-8b-8192",
+        groqFallback1: settings.groqFallback1 ?? null,
+        groqFallback2: settings.groqFallback2 ?? null,
+        groqFallback3: settings.groqFallback3 ?? null,
+        aiSystemPrompt: settings.aiSystemPrompt ?? null,
+        aiChatEnabled: settings.aiChatEnabled !== false,
         nalogoEnabled: settings.nalogoEnabled ?? false,
         nalogoInn: settings.nalogoInn ?? null,
         nalogoPassword: settings.nalogoPassword && settings.nalogoPassword !== "********" ? settings.nalogoPassword : undefined,
@@ -319,6 +335,8 @@ export function SettingsPage() {
           ...u,
           nalogoPythonBridgeEnabled: u.nalogoPythonBridgeEnabled ?? true,
           nalogoPythonBridgeOnly: u.nalogoPythonBridgeOnly ?? true,
+          groqModel: u.groqModel ?? "llama3-8b-8192",
+          aiChatEnabled: u.aiChatEnabled !== false,
           botAdminIds: Array.isArray(u.botAdminIds)
             ? Array.from(new Set(u.botAdminIds.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v))))
             : [],
@@ -1663,6 +1681,88 @@ export function SettingsPage() {
                     value={settings.telegramBotUsername ?? ""}
                     onChange={(e) => setSettings((s) => (s ? { ...s, telegramBotUsername: e.target.value || null } : s))}
                     placeholder="MyStealthNetBot"
+                  />
+                </div>
+                {message && <p className="text-sm text-muted-foreground">{message}</p>}
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Сохранение…" : "Сохранить"}
+                </Button>
+              </CardContent>
+            </Card>
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5" />
+                  AI-ассистент (Groq)
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Полноценный AI-чат в кабинете клиента. Получите ключ на
+                  {" "}
+                  <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-primary underline">
+                    console.groq.com
+                  </a>
+                  .
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="aiChatEnabled"
+                    checked={settings.aiChatEnabled !== false}
+                    onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, aiChatEnabled: checked === true } : s))}
+                  />
+                  <Label htmlFor="aiChatEnabled">Включить AI-чат в кабинете</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label>Groq API Key</Label>
+                  <Input
+                    type="password"
+                    value={settings.groqApiKey ?? ""}
+                    onChange={(e) => setSettings((s) => (s ? { ...s, groqApiKey: e.target.value || null } : s))}
+                    placeholder="gsk_..."
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Основная модель</Label>
+                    <Input
+                      value={settings.groqModel ?? "llama3-8b-8192"}
+                      onChange={(e) => setSettings((s) => (s ? { ...s, groqModel: e.target.value || "llama3-8b-8192" } : s))}
+                      placeholder="llama3-8b-8192"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Fallback #1</Label>
+                    <Input
+                      value={settings.groqFallback1 ?? ""}
+                      onChange={(e) => setSettings((s) => (s ? { ...s, groqFallback1: e.target.value || null } : s))}
+                      placeholder="llama-3.3-70b-versatile"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Fallback #2</Label>
+                    <Input
+                      value={settings.groqFallback2 ?? ""}
+                      onChange={(e) => setSettings((s) => (s ? { ...s, groqFallback2: e.target.value || null } : s))}
+                      placeholder="mixtral-8x7b-32768"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Fallback #3</Label>
+                    <Input
+                      value={settings.groqFallback3 ?? ""}
+                      onChange={(e) => setSettings((s) => (s ? { ...s, groqFallback3: e.target.value || null } : s))}
+                      placeholder="openai/gpt-oss-120b"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>System prompt</Label>
+                  <textarea
+                    className="min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    value={settings.aiSystemPrompt ?? ""}
+                    onChange={(e) => setSettings((s) => (s ? { ...s, aiSystemPrompt: e.target.value } : s))}
+                    placeholder="Инструкции для AI-ассистента..."
                   />
                 </div>
                 {message && <p className="text-sm text-muted-foreground">{message}</p>}
