@@ -184,6 +184,15 @@ export async function getSubscription(token: string): Promise<{ subscription: un
   return fetchJson("/api/client/subscription", { token });
 }
 
+/** Перевыпустить подписку (новая ссылка/ключи, старые деактивируются). */
+export async function reissueSubscription(token: string): Promise<{
+  message: string;
+  subscription: unknown;
+  tariffDisplayName?: string | null;
+}> {
+  return fetchJson("/api/client/subscription/reissue", { method: "POST", body: {}, token, retryable: true });
+}
+
 /** Публичный список тарифов по категориям (emoji из админки по коду ordinary/premium) */
 export async function getPublicTariffs(): Promise<{
   items: {

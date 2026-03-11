@@ -22,7 +22,6 @@ import {
   langButtons,
   currencyButtons,
   trialConfirmButton,
-  openSubscribePageMarkup,
   type InlineMarkup,
   type InnerEmojiIds,
 } from "./keyboard.js";
@@ -547,6 +546,36 @@ function buildHappCopyInstruction(vpnUrl: string, withOpenPageHint: boolean): st
     lines.push("", "Либо нажмите кнопку ниже и откройте страницу подключения.");
   }
   return lines.join("\n");
+}
+
+function vpnActionsMarkup(params: {
+  appUrl: string | null;
+  backLabel?: string | null;
+  backStyle?: string;
+  connectEmojiId?: string;
+  backEmojiId?: string;
+}): InlineMarkup {
+  const rows: InlineMarkup["inline_keyboard"] = [];
+  const appUrl = params.appUrl?.replace(/\/$/, "") ?? "";
+  if (appUrl) {
+    const connectBtn: { text: string; web_app: { url: string }; icon_custom_emoji_id?: string } = {
+      text: "📲 Открыть страницу подключения",
+      web_app: { url: `${appUrl}/cabinet/subscribe` },
+    };
+    if (params.connectEmojiId) connectBtn.icon_custom_emoji_id = params.connectEmojiId;
+    rows.push([connectBtn]);
+  }
+  rows.push([{
+    text: "♻️ Перевыпустить подписку",
+    callback_data: "vpn:reissue",
+    style: "danger",
+  }]);
+  return {
+    inline_keyboard: [
+      ...rows,
+      ...backToMenu(params.backLabel ?? null, params.backStyle, { back: params.backEmojiId }).inline_keyboard,
+    ],
+  };
 }
 
 /** Прогресс-бар из символов (0..1), длина barLen */
@@ -1861,13 +1890,49 @@ bot.on("callback_query:data", async (ctx) => {
         return;
       }
       const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
-      if (appUrl) {
-        const vpnTitle = titleWithEmoji("SERVERS", buildHappCopyInstruction(vpnUrl, true), config?.botEmojis);
-        await editMessageContent(ctx, vpnTitle.text, openSubscribePageMarkup(appUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle.entities);
-      } else {
-        const vpnTitle2 = titleWithEmoji("SERVERS", buildHappCopyInstruction(vpnUrl, false), config?.botEmojis);
-        await editMessageContent(ctx, vpnTitle2.text, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), vpnTitle2.entities);
+      const vpnTitle = titleWithEmoji("SERVERS", buildHappCopyInstruction(vpnUrl, Boolean(appUrl)), config?.botEmojis);
+      await editMessageContent(
+        ctx,
+        vpnTitle.text,
+        vpnActionsMarkup({
+          appUrl,
+          backLabel: config?.botBackLabel ?? null,
+          backStyle: innerStyles?.back,
+          connectEmojiId: innerEmojiIds?.connect,
+          backEmojiId: innerEmojiIds?.back,
+        }),
+        vpnTitle.entities,
+      );
+      return;
+    }
+
+    if (data === "vpn:reissue") {
+      const result = await api.reissueSubscription(token);
+      const subRes = await api.getSubscription(token).catch(() => ({ subscription: result.subscription }));
+      const vpnUrl = getSubscriptionUrl(subRes.subscription);
+      if (!vpnUrl) {
+        await editMessageContent(
+          ctx,
+          `✅ ${result.message}\n\nНе удалось получить новую ссылку автоматически. Нажмите /start через несколько секунд.`,
+          backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds),
+        );
+        return;
       }
+      const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
+      const text = `✅ ${result.message}\n\n${buildHappCopyInstruction(vpnUrl, Boolean(appUrl))}`;
+      const vpnTitle = titleWithEmoji("SERVERS", text, config?.botEmojis);
+      await editMessageContent(
+        ctx,
+        vpnTitle.text,
+        vpnActionsMarkup({
+          appUrl,
+          backLabel: config?.botBackLabel ?? null,
+          backStyle: innerStyles?.back,
+          connectEmojiId: innerEmojiIds?.connect,
+          backEmojiId: innerEmojiIds?.back,
+        }),
+        vpnTitle.entities,
+      );
       return;
     }
 

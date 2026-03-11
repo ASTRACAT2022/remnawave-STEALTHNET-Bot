@@ -23,6 +23,7 @@ import {
   remnaGetUserByTelegramId,
   remnaGetUserHwidDevices,
   remnaDeleteUserHwidDevice,
+  remnaRevokeUserSubscription,
   remnaEnsureUserInInternalSquads,
   extractRemnaActiveInternalSquadUuids,
   extractRemnaUserHwidDevices,
@@ -1202,6 +1203,55 @@ clientRouter.get("/subscription", async (req, res) => {
   const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null, client.id);
   return res.json({
     subscription: await toHappCryptoSubscriptionPayload(relinked.data ?? null),
+    tariffDisplayName,
+  });
+});
+
+clientRouter.post("/subscription/reissue", async (req, res) => {
+  const client = (req as unknown as {
+    client: { id: string; remnawaveUuid: string | null; email: string | null; telegramId: string | null };
+  }).client;
+
+  if (!isRemnaConfigured()) {
+    return res.status(503).json({ message: "Remna API not configured" });
+  }
+
+  let effectiveRemnaUuid = client.remnawaveUuid;
+  if (effectiveRemnaUuid) {
+    const userRes = await remnaGetUser(effectiveRemnaUuid);
+    if (!userRes.error) {
+      // uuid валиден, продолжаем
+    } else if (isRemnaUserNotFoundError(userRes.status, userRes.error)) {
+      effectiveRemnaUuid = null;
+    } else {
+      return res.status(toHttpErrorStatus(userRes.status)).json({ message: userRes.error });
+    }
+  }
+
+  if (!effectiveRemnaUuid) {
+    const found = await findExistingRemnaUserForClient(client);
+    if (!found.uuid) {
+      return res.status(404).json({ message: "Подписка не привязана" });
+    }
+    effectiveRemnaUuid = found.uuid;
+  }
+
+  if (effectiveRemnaUuid !== client.remnawaveUuid) {
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { remnawaveUuid: effectiveRemnaUuid },
+    });
+  }
+
+  const revokeRes = await remnaRevokeUserSubscription(effectiveRemnaUuid);
+  if (revokeRes.error) {
+    return res.status(toHttpErrorStatus(revokeRes.status)).json({ message: revokeRes.error });
+  }
+
+  const tariffDisplayName = await resolveTariffDisplayName(revokeRes.data ?? null, client.id);
+  return res.json({
+    message: "Подписка перевыпущена. Старые ключи деактивированы.",
+    subscription: await toHappCryptoSubscriptionPayload(revokeRes.data ?? null),
     tariffDisplayName,
   });
 });
