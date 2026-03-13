@@ -1,28 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { UserPlus, Shield, Mail } from "lucide-react";
+import { Shield, UserPlus, Users } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-declare global {
-  interface Window {
-    TelegramLoginWidget?: {
-      dataOnauth: (user: { id: number; first_name?: string; username?: string }) => void;
-    };
-  }
-}
-
 export function ClientRegisterPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
   const [brand, setBrand] = useState<{ serviceName: string; logo: string | null }>({
     serviceName: "",
     logo: null,
@@ -33,8 +19,9 @@ export function ClientRegisterPage() {
   const telegramWidgetRef = useRef<HTMLDivElement>(null);
   const [searchParams] = useSearchParams();
   const refCode = searchParams.get("ref")?.trim() || undefined;
-  const { state, register, registerByTelegram } = useClientAuth();
+  const { state, registerByTelegram } = useClientAuth();
   const navigate = useNavigate();
+  const isMiniapp = typeof window !== "undefined" && Boolean(window.Telegram?.WebApp?.initData);
 
   useEffect(() => {
     api
@@ -58,45 +45,23 @@ export function ClientRegisterPage() {
     script.setAttribute("data-telegram-login", telegramBotUsername);
     script.setAttribute("data-size", "large");
     script.setAttribute("data-radius", "8");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-onauth", "onTelegramRegisterAuth(user)");
     script.async = true;
-    (window as unknown as { onTelegramAuth: (user: { id: number; first_name?: string; username?: string }) => void }).onTelegramAuth = (user) => {
+    (window as unknown as { onTelegramRegisterAuth: (user: { id: number; username?: string }) => void }).onTelegramRegisterAuth = (user) => {
+      setError("");
       registerByTelegram({
         telegramId: String(user.id),
         telegramUsername: user.username ?? undefined,
         preferredLang: defaults.lang,
         preferredCurrency: defaults.currency,
         referralCode: refCode,
-      }).then(() => navigate("/cabinet/dashboard", { replace: true })).catch(() => {});
+      }).then(() => navigate("/cabinet/dashboard", { replace: true })).catch((err) => {
+        setError(err instanceof Error ? err.message : "Ошибка регистрации через Telegram");
+      });
     };
     telegramWidgetRef.current.innerHTML = "";
     telegramWidgetRef.current.appendChild(script);
   }, [telegramBotUsername, registerByTelegram, navigate, defaults.lang, defaults.currency, refCode]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setEmailSent(false);
-    setLoading(true);
-    try {
-      const result = await register({
-        email,
-        password,
-        preferredLang: defaults.lang,
-        preferredCurrency: defaults.currency,
-        referralCode: refCode,
-      });
-      if (result?.requiresVerification) {
-        setEmailSent(true);
-      } else {
-        navigate("/cabinet/dashboard", { replace: true });
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка регистрации");
-    } finally {
-      setLoading(false);
-    }
-  }
 
   if (state.blocked) {
     return (
@@ -148,61 +113,46 @@ export function ClientRegisterPage() {
                 <UserPlus className="h-10 w-10 text-primary" />
               </div>
             </div>
-            <CardTitle className="text-2xl">Регистрация</CardTitle>
-            <p className="text-muted-foreground text-sm">Создайте аккаунт в кабинете</p>
+            <CardTitle className="text-2xl">Регистрация через Telegram</CardTitle>
+            <p className="text-muted-foreground text-sm">Клиентская регистрация и вход работают только через Telegram.</p>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="your@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
+          <CardContent className="space-y-4">
+            {(error || state.miniappAuthError) && (
+              <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
+                {error || state.miniappAuthError}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Пароль</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="new-password"
-                />
+            )}
+            {refCode && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+                <div className="flex items-center gap-2 font-medium">
+                  <Users className="h-4 w-4" />
+                  Реферальная регистрация
+                </div>
+                <p className="mt-2 text-muted-foreground">После входа через Telegram вы зарегистрируетесь по реферальному коду: <strong>{refCode}</strong>.</p>
               </div>
-              {emailSent && (
-                <div className="rounded-md bg-green-500/10 text-green-700 dark:text-green-400 text-sm p-3 flex items-center gap-2">
-                  <Mail className="h-4 w-4 shrink-0" />
-                  На вашу почту отправлена ссылка для подтверждения. Перейдите по ней, чтобы завершить регистрацию.
-                </div>
-              )}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Регистрация…" : "Зарегистрироваться"}
-              </Button>
-              {telegramBotUsername && (
-                <div className="space-y-2">
-                  <p className="text-center text-sm text-muted-foreground">или</p>
-                  <div ref={telegramWidgetRef} className="flex justify-center min-h-[44px]" />
-                </div>
-              )}
-              <p className="text-center text-sm text-muted-foreground">
-                Уже есть аккаунт?{" "}
-                <Link to="/cabinet/login" className="text-primary hover:underline">
-                  Войти
-                </Link>
-              </p>
-            </form>
+            )}
+            {telegramBotUsername && !isMiniapp ? (
+              <div className="space-y-3">
+                <div ref={telegramWidgetRef} className="flex justify-center min-h-[44px]" />
+                <p className="text-center text-sm text-muted-foreground">
+                  Если аккаунт уже существует, Telegram просто выполнит вход без создания дубля.
+                </p>
+              </div>
+            ) : isMiniapp ? (
+              <div className="rounded-md bg-muted p-4 text-sm text-muted-foreground">
+                Внутри Mini App регистрация должна пройти автоматически после открытия. Если этого не произошло, проверьте `BOT_TOKEN` в `api` и `bot` и перезапустите контейнеры.
+              </div>
+            ) : (
+              <div className="rounded-md bg-muted p-4 text-sm text-muted-foreground">
+                Telegram-вход пока не настроен. Укажите username бота в настройках.
+              </div>
+            )}
+            <p className="text-center text-sm text-muted-foreground">
+              Уже есть аккаунт?{" "}
+              <Link to="/cabinet/login" className="text-primary hover:underline">
+                Войти через Telegram
+              </Link>
+            </p>
           </CardContent>
         </Card>
       </motion.div>

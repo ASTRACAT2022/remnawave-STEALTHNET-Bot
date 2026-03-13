@@ -1,12 +1,10 @@
-import { randomBytes, createHmac, createHash } from "crypto";
+import { createHmac, createHash } from "crypto";
 import { randomUUID } from "crypto";
 import { env } from "../../config/index.js";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import {
-  hashPassword,
-  verifyPassword,
   signClientToken,
   generateReferralCode,
   getSystemConfig,
@@ -29,7 +27,6 @@ import {
   extractRemnaUserHwidDevices,
   extractRemnaUuid,
 } from "../remna/remna.client.js";
-import { sendVerificationEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, getPlategaTransactionState, isPlategaConfigured } from "../platega/platega.service.js";
 import { createYookassaPayment, isYookassaConfigured } from "../yookassa/yookassa.service.js";
 import { activateTariffByPaymentId, activateTariffForClient } from "../tariff/tariff-activation.service.js";
@@ -158,9 +155,7 @@ async function ensureUserInSquadsOrError(res: import("express").Response, userUu
 export const clientAuthRouter = Router();
 
 const registerSchema = z.object({
-  email: z.string().email().optional(),
-  password: z.string().min(8).optional(),
-  telegramId: z.string().optional(),
+  telegramId: z.string().min(1),
   telegramUsername: z.string().optional(),
   preferredLang: z.string().max(5).default("ru"),
   preferredCurrency: z.string().max(5).default("usd"),
@@ -174,94 +169,22 @@ clientAuthRouter.post("/register", async (req, res) => {
   }
 
   const data = body.data;
-  const hasEmail = data.email && data.password;
-  const hasTelegram = data.telegramId;
-
-  if (!hasEmail && !hasTelegram) {
-    return res.status(400).json({ message: "Provide email+password or telegramId" });
-  }
-
-  // Регистрация по email: создаём ожидание и отправляем письмо с ссылкой
-  if (hasEmail) {
-    const existing = await prisma.client.findUnique({ where: { email: data.email! } });
-    if (existing) return res.status(400).json({ message: "Email already registered" });
-
-    const config = await getSystemConfig();
-    const smtpConfig = {
-      host: config.smtpHost || "",
-      port: config.smtpPort,
-      secure: config.smtpSecure,
-      user: config.smtpUser,
-      password: config.smtpPassword,
-      fromEmail: config.smtpFromEmail,
-      fromName: config.smtpFromName,
-    };
-    if (!isSmtpConfigured(smtpConfig)) {
-      return res.status(503).json({ message: "Email registration is not configured. Contact administrator." });
+  const existing = await prisma.client.findUnique({ where: { telegramId: data.telegramId } });
+  if (existing) {
+    if (existing.isBlocked) {
+      return res.status(403).json({
+        message: "Account is blocked",
+        isBlocked: true,
+        blockReason: existing.blockReason ?? null,
+      });
     }
-
-    const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    if (!appUrl) {
-      return res.status(503).json({ message: "Public app URL is not set in settings." });
-    }
-
-    const verificationToken = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 ч
-
-    const referralCode = generateReferralCode();
-    let referrerId: string | null = null;
-    if (data.referralCode) {
-      const referrer = await prisma.client.findFirst({ where: { referralCode: data.referralCode } });
-      if (referrer) referrerId = referrer.id;
-    }
-    const passwordHash = await hashPassword(data.password!);
-
-    await prisma.pendingEmailRegistration.create({
-      data: {
-        email: data.email!,
-        passwordHash,
-        preferredLang: data.preferredLang,
-        preferredCurrency: data.preferredCurrency,
-        referralCode: data.referralCode || null,
-        verificationToken,
-        expiresAt,
-      },
-    });
-
-    const verificationLink = `${appUrl}/cabinet/verify-email?token=${verificationToken}`;
-    const sendResult = await sendVerificationEmail(
-      smtpConfig,
-      data.email!,
-      verificationLink,
-      config.serviceName
-    );
-    if (!sendResult.ok) {
-      await prisma.pendingEmailRegistration.deleteMany({ where: { verificationToken } }).catch(() => {});
-      return res.status(500).json({ message: "Failed to send verification email. Try again later." });
-    }
-
-    return res.status(201).json({ message: "Check your email to complete registration", requiresVerification: true });
-  }
-
-  // Регистрация / вход по Telegram
-  if (hasTelegram) {
-    const existing = await prisma.client.findUnique({ where: { telegramId: data.telegramId! } });
-    if (existing) {
-      if (existing.isBlocked) {
-        return res.status(403).json({
-          message: "Account is blocked",
-          isBlocked: true,
-          blockReason: existing.blockReason ?? null,
-        });
-      }
-      const token = signClientToken(existing.id);
-      return res.json({ token, client: toClientShape(existing) });
-    }
+    const token = signClientToken(existing.id);
+    return res.json({ token, client: toClientShape(existing) });
   }
 
   let remnawaveUuid: string | null = null;
   if (isRemnaConfigured()) {
-    const rawName = data.email?.split("@")[0] || `tg${data.telegramId}`;
+    const rawName = `tg${data.telegramId}`;
     const username = rawName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "user_" + Date.now().toString(36);
     // Пользователь без активной подписки — доступ после триала или оплаты
     const remnaBody: Record<string, unknown> = {
@@ -270,10 +193,8 @@ clientAuthRouter.post("/register", async (req, res) => {
       trafficLimitStrategy: "NO_RESET",
       expireAt: new Date(Date.now() - 1000).toISOString(),
     };
-    if (data.telegramId) {
-      const tid = parseInt(data.telegramId, 10);
-      if (!Number.isNaN(tid)) remnaBody.telegramId = tid;
-    }
+    const tid = parseInt(data.telegramId, 10);
+    if (!Number.isNaN(tid)) remnaBody.telegramId = tid;
     const remnaRes = await remnaCreateUser(remnaBody);
     remnawaveUuid = extractRemnaUuid(remnaRes.data);
     if (remnaRes.error || remnawaveUuid == null) {
@@ -288,17 +209,16 @@ clientAuthRouter.post("/register", async (req, res) => {
     if (referrer) referrerId = referrer.id;
   }
 
-  const passwordHash = data.password ? await hashPassword(data.password) : null;
   const client = await prisma.client.create({
     data: {
-      email: data.email ?? null,
-      passwordHash,
+      email: null,
+      passwordHash: null,
       remnawaveUuid,
       referralCode,
       referrerId,
       preferredLang: data.preferredLang,
       preferredCurrency: data.preferredCurrency,
-      telegramId: data.telegramId ?? null,
+      telegramId: data.telegramId,
       telegramUsername: data.telegramUsername ?? null,
     },
   });
@@ -307,98 +227,12 @@ clientAuthRouter.post("/register", async (req, res) => {
   return res.status(201).json({ token, client: toClientShape(client) });
 });
 
-const verifyEmailSchema = z.object({ token: z.string().min(1) });
 clientAuthRouter.post("/verify-email", async (req, res) => {
-  const parse = verifyEmailSchema.safeParse(req.body);
-  if (!parse.success) return res.status(400).json({ message: "Invalid input" });
-  const { token } = parse.data;
-
-  const pending = await prisma.pendingEmailRegistration.findUnique({
-    where: { verificationToken: token },
-  });
-  if (!pending) return res.status(400).json({ message: "Invalid or expired link" });
-  if (new Date() > pending.expiresAt) {
-    await prisma.pendingEmailRegistration.delete({ where: { id: pending.id } }).catch(() => {});
-    return res.status(400).json({ message: "Link expired. Please register again." });
-  }
-
-  const existingClient = await prisma.client.findUnique({ where: { email: pending.email } });
-  if (existingClient) {
-    await prisma.pendingEmailRegistration.delete({ where: { id: pending.id } }).catch(() => {});
-    const signToken = signClientToken(existingClient.id);
-    return res.json({ token: signToken, client: toClientShape(existingClient) });
-  }
-
-  let remnawaveUuid: string | null = null;
-  if (isRemnaConfigured()) {
-    const username = pending.email.split("@")[0].replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 36) || "u_" + Date.now().toString(36);
-    const remnaRes = await remnaCreateUser({
-      username: username.length >= 3 ? username : "u_" + username,
-      trafficLimitBytes: 0,
-      trafficLimitStrategy: "NO_RESET",
-      expireAt: new Date(Date.now() - 1000).toISOString(),
-    });
-    remnawaveUuid = extractRemnaUuid(remnaRes.data);
-    if (remnaRes.error || remnawaveUuid == null) {
-      return res.status(503).json({ message: "Сервис временно недоступен. Не удалось создать учётную запись VPN. Попробуйте позже." });
-    }
-  }
-
-  const referralCode = generateReferralCode();
-  let referrerId: string | null = null;
-  if (pending.referralCode) {
-    const referrer = await prisma.client.findFirst({ where: { referralCode: pending.referralCode } });
-    if (referrer) referrerId = referrer.id;
-  }
-
-  const client = await prisma.client.create({
-    data: {
-      email: pending.email,
-      passwordHash: pending.passwordHash,
-      remnawaveUuid,
-      referralCode,
-      referrerId,
-      preferredLang: pending.preferredLang,
-      preferredCurrency: pending.preferredCurrency,
-      telegramId: null,
-      telegramUsername: null,
-    },
-  });
-
-  await prisma.pendingEmailRegistration.delete({ where: { id: pending.id } }).catch(() => {});
-
-  const signToken = signClientToken(client.id);
-  return res.status(201).json({ token: signToken, client: toClientShape(client) });
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  return res.status(410).json({ message: "Регистрация по email отключена. Используйте Telegram." });
 });
 
 clientAuthRouter.post("/login", async (req, res) => {
-  const body = loginSchema.safeParse(req.body);
-  if (!body.success) {
-    return res.status(400).json({ message: "Invalid input" });
-  }
-
-  const client = await prisma.client.findUnique({ where: { email: body.data.email } });
-  if (!client || !client.passwordHash) {
-    return res.status(401).json({ message: "Invalid email or password" });
-  }
-  if (client.isBlocked) {
-    return res.status(403).json({
-      message: "Account is blocked",
-      isBlocked: true,
-      blockReason: client.blockReason ?? null,
-    });
-  }
-
-  const valid = await verifyPassword(body.data.password, client.passwordHash);
-  if (!valid) return res.status(401).json({ message: "Invalid email or password" });
-
-  const token = signClientToken(client.id);
-  return res.json({ token, client: toClientShape(client) });
+  return res.status(410).json({ message: "Вход по email и паролю отключён. Используйте Telegram." });
 });
 
 /** Валидация initData из Telegram Web App (Mini App). https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app */
@@ -437,13 +271,24 @@ function parseTelegramUser(initData: string): { id: number; username?: string } 
 
 const telegramMiniappSchema = z.object({ initData: z.string().min(1) });
 
+function resolveTelegramBotToken(configToken: string | null | undefined): string {
+  const fromSettings = configToken?.trim();
+  if (fromSettings) return fromSettings;
+  const fromEnv = process.env.BOT_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  return "";
+}
+
 clientAuthRouter.post("/telegram-miniapp", async (req, res) => {
   const body = telegramMiniappSchema.safeParse(req.body);
   if (!body.success) {
     return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
   }
   const config = await getSystemConfig();
-  const botToken = config.telegramBotToken ?? "";
+  const botToken = resolveTelegramBotToken(config.telegramBotToken);
+  if (!botToken) {
+    return res.status(503).json({ message: "Telegram Mini App не настроен: отсутствует токен бота" });
+  }
   if (!validateTelegramInitData(body.data.initData, botToken)) {
     return res.status(401).json({ message: "Invalid or expired Telegram data" });
   }

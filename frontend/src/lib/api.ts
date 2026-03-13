@@ -514,24 +514,10 @@ export const api = {
   },
 
   // ——— Кабинет клиента (клиентский API) ———
-  async clientLogin(email: string, password: string): Promise<ClientAuthResponse> {
-    return request("/client/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-  },
-
-  async clientRegister(data: ClientRegisterPayload): Promise<ClientAuthResponse | { message: string; requiresVerification: true }> {
+  async clientRegister(data: ClientRegisterPayload): Promise<ClientAuthResponse> {
     return request("/client/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
-    });
-  },
-
-  async clientVerifyEmail(token: string): Promise<ClientAuthResponse> {
-    return request("/client/auth/verify-email", {
-      method: "POST",
-      body: JSON.stringify({ token }),
     });
   },
 
@@ -1131,9 +1117,7 @@ export interface ClientAuthResponse {
 }
 
 export type ClientRegisterPayload = {
-  email?: string;
-  password?: string;
-  telegramId?: string;
+  telegramId: string;
   telegramUsername?: string;
   preferredLang?: string;
   preferredCurrency?: string;

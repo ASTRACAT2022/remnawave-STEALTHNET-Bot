@@ -1,19 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { LogIn, Shield } from "lucide-react";
+import { LogIn, MessageCircle, Shield } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function ClientLoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const [brand, setBrand] = useState<{ serviceName: string; logo: string | null }>({
     serviceName: "",
     logo: null,
@@ -21,8 +16,9 @@ export function ClientLoginPage() {
   const [telegramBotUsername, setTelegramBotUsername] = useState<string | null>(null);
   const [supportLink, setSupportLink] = useState<string | null>(null);
   const telegramWidgetRef = useRef<HTMLDivElement>(null);
-  const { state, login, registerByTelegram } = useClientAuth();
+  const { state, registerByTelegram } = useClientAuth();
   const navigate = useNavigate();
+  const isMiniapp = typeof window !== "undefined" && Boolean(window.Telegram?.WebApp?.initData);
 
   useEffect(() => {
     api
@@ -45,28 +41,17 @@ export function ClientLoginPage() {
     script.setAttribute("data-onauth", "onTelegramLoginAuth(user)");
     script.async = true;
     (window as unknown as { onTelegramLoginAuth: (user: { id: number; username?: string }) => void }).onTelegramLoginAuth = (user) => {
+      setError("");
       registerByTelegram({
         telegramId: String(user.id),
         telegramUsername: user.username,
-      }).then(() => navigate("/cabinet/dashboard", { replace: true })).catch(() => {});
+      }).then(() => navigate("/cabinet/dashboard", { replace: true })).catch((err) => {
+        setError(err instanceof Error ? err.message : "Ошибка входа через Telegram");
+      });
     };
     telegramWidgetRef.current.innerHTML = "";
     telegramWidgetRef.current.appendChild(script);
   }, [telegramBotUsername, registerByTelegram, navigate]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      await login(email, password);
-      navigate("/cabinet/dashboard", { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка входа");
-    } finally {
-      setLoading(false);
-    }
-  }
 
   if (state.blocked) {
     return (
@@ -118,55 +103,44 @@ export function ClientLoginPage() {
                 <LogIn className="h-10 w-10 text-primary" />
               </div>
             </div>
-            <CardTitle className="text-2xl">Вход</CardTitle>
-            <p className="text-muted-foreground text-sm">Вход в личный кабинет</p>
+            <CardTitle className="text-2xl">Вход через Telegram</CardTitle>
+            <p className="text-muted-foreground text-sm">Email и пароль для клиентов отключены. Вход и регистрация работают только через Telegram.</p>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="your@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
+          <CardContent className="space-y-4">
+            {(error || state.miniappAuthError) && (
+              <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
+                {error || state.miniappAuthError}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Пароль</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                />
+            )}
+            {telegramBotUsername && !isMiniapp ? (
+              <div className="space-y-3">
+                <div ref={telegramWidgetRef} className="flex justify-center min-h-[44px]" />
+                <p className="text-center text-sm text-muted-foreground">
+                  Если вы входите впервые, аккаунт создастся автоматически после входа через Telegram.
+                </p>
               </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Вход…" : "Войти"}
-              </Button>
-              {telegramBotUsername && (
-                <div className="space-y-2">
-                  <p className="text-center text-sm text-muted-foreground">или войти через Telegram</p>
-                  <div ref={telegramWidgetRef} className="flex justify-center min-h-[44px]" />
-                </div>
-              )}
-              <p className="text-center text-sm text-muted-foreground">
-                Нет аккаунта?{" "}
+            ) : isMiniapp ? (
+              <div className="rounded-md bg-muted p-4 text-sm text-muted-foreground">
+                Mini App должен авторизовать пользователя автоматически. Если вход не прошёл, проверьте `BOT_TOKEN` в `api` и `bot` и перезапустите контейнеры.
+              </div>
+            ) : (
+              <div className="rounded-md bg-muted p-4 text-sm text-muted-foreground">
+                Telegram-вход пока не настроен. Укажите username бота в настройках.
+              </div>
+            )}
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 font-medium text-foreground">
+                <MessageCircle className="h-4 w-4" />
+                Нужна регистрация по реферальной ссылке?
+              </div>
+              <p className="mt-2">
+                Откройте страницу{" "}
                 <Link to="/cabinet/register" className="text-primary hover:underline">
-                  Зарегистрироваться
-                </Link>
+                  регистрации
+                </Link>{" "}
+                и войдите там через Telegram.
               </p>
-            </form>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
