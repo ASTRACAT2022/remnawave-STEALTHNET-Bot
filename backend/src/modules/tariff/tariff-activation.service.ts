@@ -12,8 +12,10 @@ import {
   isRemnaConfigured,
   remnaGetUserByTelegramId,
   remnaGetUserByEmail,
+  extractRemnaActiveInternalSquadUuids,
   extractRemnaUuid,
 } from "../remna/remna.client.js";
+import { getSystemConfig } from "../client/client.service.js";
 
 export type ActivationResult = { ok: true } | { ok: false; error: string; status: number };
 
@@ -47,6 +49,37 @@ function calculateExpireAt(currentExpireAt: Date | null, durationDays: number): 
   return new Date(base.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+function normalizeUuid(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeUuidList(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const normalized = normalizeUuid(value);
+    if (normalized) seen.add(normalized);
+  }
+  return [...seen];
+}
+
+function shouldResetExpireAtForPaidActivation(
+  currentUserData: unknown,
+  nextSquadUuids: readonly string[],
+  trialSquadUuid: string | null | undefined,
+): boolean {
+  const normalizedTrialSquadUuid = typeof trialSquadUuid === "string" ? normalizeUuid(trialSquadUuid) : "";
+  if (!normalizedTrialSquadUuid) return false;
+
+  const currentSquads = normalizeUuidList(extractRemnaActiveInternalSquadUuids(currentUserData));
+  if (!currentSquads.length || currentSquads.some((uuid) => uuid !== normalizedTrialSquadUuid)) {
+    return false;
+  }
+
+  const targetSquads = normalizeUuidList(nextSquadUuids);
+  return targetSquads.some((uuid) => uuid !== normalizedTrialSquadUuid);
+}
+
 /**
  * Активирует тариф для клиента в Remnawave:
  * - обновляет/создаёт пользователя с expireAt, trafficLimit, deviceLimit
@@ -59,6 +92,7 @@ export async function activateTariffForClient(
 ): Promise<ActivationResult> {
   if (!isRemnaConfigured()) return { ok: false, error: "Сервис временно недоступен", status: 503 };
 
+  const config = await getSystemConfig();
   const trafficLimitBytes = tariff.trafficLimitBytes != null ? Number(tariff.trafficLimitBytes) : 0;
   const hwidDeviceLimit = tariff.deviceLimit ?? null;
   const squadUuids = tariff.internalSquadUuids;
@@ -69,7 +103,12 @@ export async function activateTariffForClient(
     if (userRes.error) {
       return { ok: false, error: userRes.error, status: userRes.status >= 400 ? userRes.status : 500 };
     }
-    const currentExpireAt = extractCurrentExpireAt(userRes.data);
+    const shouldResetExpireAt = shouldResetExpireAtForPaidActivation(
+      userRes.data,
+      squadUuids,
+      config.trialSquadUuid,
+    );
+    const currentExpireAt = shouldResetExpireAt ? null : extractCurrentExpireAt(userRes.data);
     const expireAt = calculateExpireAt(currentExpireAt, tariff.durationDays);
 
     const updateRes = await remnaUpdateUser({
@@ -89,16 +128,27 @@ export async function activateTariffForClient(
   } else {
     let existingUuid: string | null = null;
     let currentExpireAt: Date | null = null;
+    let existingUserData: unknown = null;
 
     if (client.telegramId?.trim()) {
       const byTgRes = await remnaGetUserByTelegramId(client.telegramId.trim());
       existingUuid = extractRemnaUuid(byTgRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byTgRes.data);
+      if (existingUuid) {
+        existingUserData = byTgRes.data ?? null;
+        currentExpireAt = extractCurrentExpireAt(byTgRes.data);
+      }
     }
     if (!existingUuid && client.email?.trim()) {
       const byEmailRes = await remnaGetUserByEmail(client.email.trim());
       existingUuid = extractRemnaUuid(byEmailRes.data);
-      if (existingUuid) currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
+      if (existingUuid) {
+        existingUserData = byEmailRes.data ?? null;
+        currentExpireAt = extractCurrentExpireAt(byEmailRes.data);
+      }
+    }
+
+    if (existingUuid && shouldResetExpireAtForPaidActivation(existingUserData, squadUuids, config.trialSquadUuid)) {
+      currentExpireAt = null;
     }
 
     const expireAt = calculateExpireAt(currentExpireAt, tariff.durationDays);

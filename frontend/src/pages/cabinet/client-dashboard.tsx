@@ -19,6 +19,7 @@ import {
   Users,
   Percent,
   Tag,
+  RotateCcw,
 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetConfig } from "@/contexts/cabinet-config";
@@ -127,6 +128,9 @@ export function ClientDashboardPage() {
   const [referralStats, setReferralStats] = useState<ClientReferralStats | null>(null);
   const [referralCopied, setReferralCopied] = useState<"site" | "bot" | null>(null);
   const [vpnCopied, setVpnCopied] = useState(false);
+  const [reissueLoading, setReissueLoading] = useState(false);
+  const [reissueError, setReissueError] = useState<string | null>(null);
+  const [reissueSuccess, setReissueSuccess] = useState<string | null>(null);
 
   const token = state.token;
   const isMiniapp = useCabinetMiniapp();
@@ -329,6 +333,21 @@ export function ClientDashboardPage() {
     setVpnCopied(true);
     setTimeout(() => setVpnCopied(false), 2000);
   };
+  const reissueVpnLink = async () => {
+    if (!token) return;
+    setReissueError(null);
+    setReissueSuccess(null);
+    setReissueLoading(true);
+    try {
+      const result = await api.clientReissueSubscription(token);
+      setReissueSuccess(result.message || "Ссылка перевыпущена. Старые ключи отключены.");
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setReissueError(e instanceof Error ? e.message : "Не удалось перевыпустить ссылку");
+    } finally {
+      setReissueLoading(false);
+    }
+  };
   const trafficPercent = subParsed.trafficLimitBytes != null && subParsed.trafficLimitBytes > 0 && subParsed.trafficUsed != null
     ? Math.min(100, Math.round((subParsed.trafficUsed / subParsed.trafficLimitBytes) * 100))
     : null;
@@ -477,6 +496,13 @@ export function ClientDashboardPage() {
                   Подключиться к VPN
                 </Link>
               </Button>
+              <Button className="w-full gap-2" size="lg" variant="outline" onClick={reissueVpnLink} disabled={reissueLoading}>
+                {reissueLoading ? <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> : <RotateCcw className="h-5 w-5 shrink-0" />}
+                Сменить ссылку
+              </Button>
+              <p className="text-xs text-muted-foreground">После смены старая ссылка и старые ключи перестанут работать.</p>
+              {reissueSuccess && <p className="text-sm text-green-600 break-words">{reissueSuccess}</p>}
+              {reissueError && <p className="text-sm text-destructive break-words">{reissueError}</p>}
             </div>
           ) : showTrial ? (
             <div className="space-y-3">
@@ -837,6 +863,13 @@ export function ClientDashboardPage() {
                     Подключиться к VPN
                   </Link>
                 </Button>
+                <Button variant="outline" size="sm" className="w-full gap-2" onClick={reissueVpnLink} disabled={reissueLoading}>
+                  {reissueLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  Сменить ссылку
+                </Button>
+                <p className="text-xs text-muted-foreground">Старая ссылка и старые ключи отключатся сразу после перевыпуска.</p>
+                {reissueSuccess && <p className="text-sm text-green-600 break-words">{reissueSuccess}</p>}
+                {reissueError && <p className="text-sm text-destructive break-words">{reissueError}</p>}
               </>
             ) : (
               <>

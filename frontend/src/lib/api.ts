@@ -551,6 +551,10 @@ export const api = {
     return request("/client/subscription", { token });
   },
 
+  async clientReissueSubscription(token: string): Promise<{ message: string; subscription: unknown; tariffDisplayName?: string | null }> {
+    return request("/client/subscription/reissue", { method: "POST", body: JSON.stringify({}), token });
+  },
+
   async clientGetHwidDevices(token: string): Promise<{ items: ClientHwidDevice[] }> {
     return request("/client/hwid/devices", { token });
   },

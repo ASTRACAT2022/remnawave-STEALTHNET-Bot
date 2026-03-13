@@ -1304,10 +1304,12 @@ clientRouter.post("/subscription/reissue", async (req, res) => {
     return res.status(toHttpErrorStatus(revokeRes.status)).json({ message: revokeRes.error });
   }
 
-  const tariffDisplayName = await resolveTariffDisplayName(revokeRes.data ?? null, client.id);
+  const refreshedUserRes = await remnaGetUser(effectiveRemnaUuid);
+  const subscriptionPayload = refreshedUserRes.error ? (revokeRes.data ?? null) : (refreshedUserRes.data ?? null);
+  const tariffDisplayName = await resolveTariffDisplayName(subscriptionPayload, client.id);
   return res.json({
     message: "Подписка перевыпущена. Старые ключи деактивированы.",
-    subscription: await toHappCryptoSubscriptionPayload(revokeRes.data ?? null),
+    subscription: await toHappCryptoSubscriptionPayload(subscriptionPayload),
     tariffDisplayName,
   });
 });

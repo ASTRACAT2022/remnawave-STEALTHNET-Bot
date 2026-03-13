@@ -11,7 +11,7 @@ import {
   Smartphone,
   ArrowLeft,
   Monitor,
-  Info,
+  RotateCcw,
 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { useCabinetMiniapp } from "@/pages/cabinet/cabinet-layout";
@@ -191,6 +191,9 @@ export function ClientSubscribePage() {
   const [pageConfig, setPageConfig] = useState<SubscriptionPageConfig>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [reissueLoading, setReissueLoading] = useState(false);
+  const [reissueMessage, setReissueMessage] = useState<string | null>(null);
+  const [reissueError, setReissueError] = useState<string | null>(null);
 
   const subscriptionUrl = getSubscriptionUrl(subscription);
   const platform = detectPlatform();
@@ -214,6 +217,22 @@ export function ClientSubscribePage() {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }
+    }
+  };
+
+  const reissueLink = async () => {
+    if (!token) return;
+    setReissueLoading(true);
+    setReissueMessage(null);
+    setReissueError(null);
+    try {
+      const result = await api.clientReissueSubscription(token);
+      setSubscription(result.subscription ?? null);
+      setReissueMessage(result.message || "Ссылка перевыпущена. Старые ключи отключены.");
+    } catch (e) {
+      setReissueError(e instanceof Error ? e.message : "Не удалось перевыпустить ссылку");
+    } finally {
+      setReissueLoading(false);
     }
   };
 
@@ -417,6 +436,17 @@ export function ClientSubscribePage() {
           {copied ? "Скопировано" : "Копировать"}
         </Button>
       </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={reissueLink} className="gap-2" disabled={reissueLoading}>
+          {reissueLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+          Сменить ссылку
+        </Button>
+        <p className="text-xs text-muted-foreground self-center">
+          После перевыпуска старая ссылка и старые ключи перестанут работать.
+        </p>
+      </div>
+      {reissueMessage && <p className="text-sm text-green-600">{reissueMessage}</p>}
+      {reissueError && <p className="text-sm text-destructive">{reissueError}</p>}
     </motion.div>
   );
 
