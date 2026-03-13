@@ -912,7 +912,11 @@ async function showBlockedScreen(
   );
 
   if (ctx.callbackQuery && ctx.editMessageCaption && ctx.editMessageText) {
-    await editMessageContent(ctx, text, replyMarkup).catch(async () => {
+    await editMessageContent({
+      callbackQuery: ctx.callbackQuery,
+      editMessageCaption: ctx.editMessageCaption,
+      editMessageText: ctx.editMessageText,
+    }, text, replyMarkup).catch(async () => {
       await ctx.reply(text, { reply_markup: replyMarkup }).catch(() => {});
     });
     return;
