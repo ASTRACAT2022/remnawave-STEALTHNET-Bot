@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 const routerFutureFlags = {
   v7_startTransition: true,
@@ -59,6 +60,9 @@ function RequireClientAuth({ children }: { children: React.ReactNode }) {
   const { state } = useClientAuth();
   const inTelegram = typeof window !== "undefined" && Boolean((window as { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData);
   const showMiniappLoading = state.miniappAuthLoading || (inTelegram && !state.token && !state.miniappAuthAttempted);
+  if (state.blocked) {
+    return <BlockedClientScreen message={state.blocked.message} reason={state.blocked.reason} />;
+  }
   if (showMiniappLoading) {
     return (
       <div className="min-h-svh flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-background to-muted/20">
@@ -77,6 +81,9 @@ function CabinetIndexRedirect() {
   const { state } = useClientAuth();
   const inTelegram = typeof window !== "undefined" && Boolean((window as { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData);
   const showMiniappLoading = state.miniappAuthLoading || (inTelegram && !state.token && !state.miniappAuthAttempted);
+  if (state.blocked) {
+    return <BlockedClientScreen message={state.blocked.message} reason={state.blocked.reason} />;
+  }
   if (showMiniappLoading) {
     return (
       <div className="min-h-svh flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-background to-muted/20">
@@ -86,6 +93,30 @@ function CabinetIndexRedirect() {
     );
   }
   return <Navigate to={state.token ? "/cabinet/dashboard" : "/cabinet/login"} replace />;
+}
+
+function BlockedClientScreen({ message, reason }: { message: string; reason: string | null }) {
+  const [supportLink, setSupportLink] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getPublicConfig().then((cfg) => setSupportLink(cfg.supportLink?.trim() || null)).catch(() => setSupportLink(null));
+  }, []);
+
+  return (
+    <div className="min-h-svh flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-background to-muted/20 px-4 text-center">
+      <div className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-lg">
+        <h1 className="text-2xl font-semibold">Аккаунт заблокирован</h1>
+        <p className="mt-3 text-sm text-muted-foreground">{message}</p>
+        {reason ? <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-sm">Причина: {reason}</p> : null}
+        <p className="mt-3 text-sm text-muted-foreground">Доступ к кабинету отключён.</p>
+        {supportLink ? (
+          <Button asChild className="mt-5 w-full">
+            <a href={supportLink} target="_blank" rel="noreferrer">Написать в поддержку</a>
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function AppRoutes() {

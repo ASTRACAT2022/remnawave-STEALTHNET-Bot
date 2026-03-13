@@ -2108,7 +2108,10 @@ bot.on("message:text", async (ctx) => {
   }
 
   const token = getToken(userId);
-  if (!token) return;
+  if (!token) {
+    await ctx.reply("Доступ к действиям сейчас недоступен. Отправьте /start, чтобы получить статус аккаунта.").catch(() => {});
+    return;
+  }
   const publicConfig = await api.getPublicConfig().catch(() => null);
   const currentClient = await ensureClientAccess(ctx, token, publicConfig);
   if (!currentClient) return;

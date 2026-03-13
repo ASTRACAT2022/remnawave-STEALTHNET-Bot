@@ -19,8 +19,9 @@ export function ClientLoginPage() {
     logo: null,
   });
   const [telegramBotUsername, setTelegramBotUsername] = useState<string | null>(null);
+  const [supportLink, setSupportLink] = useState<string | null>(null);
   const telegramWidgetRef = useRef<HTMLDivElement>(null);
-  const { login, registerByTelegram } = useClientAuth();
+  const { state, login, registerByTelegram } = useClientAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -29,6 +30,7 @@ export function ClientLoginPage() {
       .then((c) => {
         setBrand({ serviceName: c.serviceName ?? "", logo: c.logo ?? null });
         setTelegramBotUsername(c.telegramBotUsername ?? null);
+        setSupportLink(c.supportLink?.trim() || null);
       })
       .catch(() => {});
   }, []);
@@ -46,7 +48,7 @@ export function ClientLoginPage() {
       registerByTelegram({
         telegramId: String(user.id),
         telegramUsername: user.username,
-      }).then(() => navigate("/cabinet/dashboard", { replace: true }));
+      }).then(() => navigate("/cabinet/dashboard", { replace: true })).catch(() => {});
     };
     telegramWidgetRef.current.innerHTML = "";
     telegramWidgetRef.current.appendChild(script);
@@ -64,6 +66,29 @@ export function ClientLoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (state.blocked) {
+    return (
+      <div className="min-h-svh flex flex-col items-center justify-center bg-gradient-to-b from-background to-muted/20 p-4">
+        <Card className="w-full max-w-md border shadow-lg">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Аккаунт заблокирован</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-sm text-muted-foreground">{state.blocked.message}</p>
+            {state.blocked.reason ? (
+              <div className="rounded-md bg-muted p-3 text-sm">Причина: {state.blocked.reason}</div>
+            ) : null}
+            {supportLink ? (
+              <Button asChild className="w-full">
+                <a href={supportLink} target="_blank" rel="noreferrer">Написать в поддержку</a>
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (

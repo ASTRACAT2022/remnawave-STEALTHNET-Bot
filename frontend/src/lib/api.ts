@@ -75,6 +75,18 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
 }
 
+export class ApiRequestError extends Error {
+  status: number;
+  data: unknown;
+
+  constructor(status: number, message: string, data: unknown) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit & { token?: string; _retry?: boolean; _attempt?: number } = {}
@@ -119,7 +131,7 @@ async function request<T>(
       return request<T>(path, { ...options, _attempt: attempt + 1 });
     }
     const message = normalizeApiErrorMessage((data as { message?: string })?.message, res.status, res.statusText);
-    throw new Error(message);
+    throw new ApiRequestError(res.status, message, data);
   }
 
   if (text && data === undefined) {
@@ -1104,6 +1116,7 @@ export interface ClientProfile {
   remnawaveUuid: string | null;
   trialUsed: boolean;
   isBlocked: boolean;
+  blockReason?: string | null;
   /** Кошелёк ЮMoney подключён (токен сохранён) */
   yoomoneyConnected?: boolean;
 }
@@ -1273,5 +1286,6 @@ export interface PublicConfig {
   aiChatEnabled?: boolean;
   trialEnabled?: boolean;
   trialDays?: number;
+  supportLink?: string | null;
   themeAccent?: string;
 }

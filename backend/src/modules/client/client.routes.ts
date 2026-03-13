@@ -383,8 +383,15 @@ clientAuthRouter.post("/login", async (req, res) => {
   }
 
   const client = await prisma.client.findUnique({ where: { email: body.data.email } });
-  if (!client || !client.passwordHash || client.isBlocked) {
+  if (!client || !client.passwordHash) {
     return res.status(401).json({ message: "Invalid email or password" });
+  }
+  if (client.isBlocked) {
+    return res.status(403).json({
+      message: "Account is blocked",
+      isBlocked: true,
+      blockReason: client.blockReason ?? null,
+    });
   }
 
   const valid = await verifyPassword(body.data.password, client.passwordHash);
@@ -447,7 +454,13 @@ clientAuthRouter.post("/telegram-miniapp", async (req, res) => {
   const telegramUsername = tgUser.username?.trim() ?? null;
   const existing = await prisma.client.findUnique({ where: { telegramId } });
   if (existing) {
-    if (existing.isBlocked) return res.status(403).json({ message: "Account is blocked" });
+    if (existing.isBlocked) {
+      return res.status(403).json({
+        message: "Account is blocked",
+        isBlocked: true,
+        blockReason: existing.blockReason ?? null,
+      });
+    }
     const token = signClientToken(existing.id);
     return res.json({ token, client: toClientShape(existing) });
   }
@@ -491,7 +504,7 @@ clientAuthRouter.get("/me", requireClientAuth, async (req, res) => {
   const client = (req as unknown as { client: { id: string } }).client;
   const full = await prisma.client.findUnique({
     where: { id: client.id },
-    select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, referralPercent: true, remnawaveUuid: true, trialUsed: true, isBlocked: true, yoomoneyAccessToken: true },
+    select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, referralPercent: true, remnawaveUuid: true, trialUsed: true, isBlocked: true, blockReason: true, yoomoneyAccessToken: true },
   });
   if (!full) return res.status(401).json({ message: "Unauthorized" });
   return res.json(toClientShape(full));

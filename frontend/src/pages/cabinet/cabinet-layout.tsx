@@ -193,7 +193,7 @@ export function CabinetLayout() {
   const isAuthPage = location.pathname === "/cabinet/login" || location.pathname === "/cabinet/register";
   const isLoggedIn = Boolean(state.token);
 
-  if (isAuthPage || !isLoggedIn) {
+  if (isAuthPage || !isLoggedIn || state.blocked) {
     return <Outlet />;
   }
 

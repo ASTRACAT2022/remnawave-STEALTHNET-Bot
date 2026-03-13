@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ClientProfile, ClientAuthResponse } from "@/lib/api";
-import { api } from "@/lib/api";
+import { ApiRequestError, api } from "@/lib/api";
 
 const STORAGE_TOKEN = "stealthnet_client_token";
 const STORAGE_CLIENT = "stealthnet_client_profile";
@@ -8,6 +8,7 @@ const STORAGE_CLIENT = "stealthnet_client_profile";
 type ClientAuthState = {
   token: string | null;
   client: ClientProfile | null;
+  blocked: { message: string; reason: string | null } | null;
   /** Идёт авторизация по Telegram Mini App (initData) */
   miniappAuthLoading: boolean;
   /** Попытка входа по initData уже была (успех или ошибка) */
@@ -26,11 +27,28 @@ type ClientAuthValue = {
 
 const ClientAuthContext = createContext<ClientAuthValue | null>(null);
 
-function loadState(): Pick<ClientAuthState, "token" | "client"> {
+function toBlockedState(error: unknown): { message: string; reason: string | null } | null {
+  if (!(error instanceof ApiRequestError) || error.status !== 403) return null;
+  const data = error.data && typeof error.data === "object" ? (error.data as Record<string, unknown>) : null;
+  const isBlocked = data?.isBlocked === true || /blocked/i.test(error.message);
+  if (!isBlocked) return null;
+  return {
+    message: "Ваш аккаунт заблокирован. Доступ к кабинету закрыт.",
+    reason: typeof data?.blockReason === "string" && data.blockReason.trim() ? data.blockReason.trim() : null,
+  };
+}
+
+function loadState(): Pick<ClientAuthState, "token" | "client" | "blocked"> {
   const token = localStorage.getItem(STORAGE_TOKEN);
   const raw = localStorage.getItem(STORAGE_CLIENT);
   const client = raw ? (JSON.parse(raw) as ClientProfile) : null;
-  return { token, client };
+  const blocked = client?.isBlocked
+    ? {
+        message: "Ваш аккаунт заблокирован. Доступ к кабинету закрыт.",
+        reason: client.blockReason?.trim() || null,
+      }
+    : null;
+  return { token, client, blocked };
 }
 
 function saveState(token: string | null, client: ClientProfile | null) {
@@ -61,10 +79,16 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
     api
       .clientAuthByTelegramMiniapp(initData)
       .then((res) => {
-        setState({ token: res.token, client: res.client, miniappAuthLoading: false, miniappAuthAttempted: true });
+        setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true });
         saveState(res.token, res.client);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        const blocked = toBlockedState(error);
+        if (blocked) {
+          setState({ token: null, client: null, blocked, miniappAuthLoading: false, miniappAuthAttempted: true });
+          saveState(null, null);
+          return;
+        }
         setState((prev) => ({ ...prev, miniappAuthLoading: false, miniappAuthAttempted: true }));
       });
   }, [state.token]);
@@ -74,20 +98,35 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
     try {
       const client = await api.clientMe(state.token);
       setState((prev) => {
-        const next = { ...prev, client };
+        const next = { ...prev, client, blocked: client.isBlocked ? { message: "Ваш аккаунт заблокирован. Доступ к кабинету закрыт.", reason: client.blockReason?.trim() || null } : null };
         saveState(prev.token, client);
         return next;
       });
-    } catch {
-      setState({ token: null, client: null, miniappAuthLoading: false, miniappAuthAttempted: false });
+    } catch (error: unknown) {
+      const blocked = toBlockedState(error);
+      if (blocked) {
+        setState({ token: null, client: null, blocked, miniappAuthLoading: false, miniappAuthAttempted: true });
+        saveState(null, null);
+        return;
+      }
+      setState({ token: null, client: null, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: false });
       saveState(null, null);
     }
   }, [state.token]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await api.clientLogin(email, password);
-    setState({ token: res.token, client: res.client, miniappAuthLoading: false, miniappAuthAttempted: true });
-    saveState(res.token, res.client);
+    try {
+      const res = await api.clientLogin(email, password);
+      setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true });
+      saveState(res.token, res.client);
+    } catch (error: unknown) {
+      const blocked = toBlockedState(error);
+      if (blocked) {
+        setState({ token: null, client: null, blocked, miniappAuthLoading: false, miniappAuthAttempted: true });
+        saveState(null, null);
+      }
+      throw error;
+    }
   }, []);
 
   const register = useCallback(
@@ -103,7 +142,7 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
         return { requiresVerification: true as const };
       }
       const authRes = res as ClientAuthResponse;
-      setState({ token: authRes.token, client: authRes.client, miniappAuthLoading: false, miniappAuthAttempted: true });
+      setState({ token: authRes.token, client: authRes.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true });
       saveState(authRes.token, authRes.client);
     },
     []
@@ -111,16 +150,25 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
 
   const registerByTelegram = useCallback(
     async (data: { telegramId: string; telegramUsername?: string; preferredLang?: string; preferredCurrency?: string; referralCode?: string }) => {
-      const res = await api.clientRegister({
-        telegramId: data.telegramId,
-        telegramUsername: data.telegramUsername,
-        preferredLang: data.preferredLang ?? "ru",
-        preferredCurrency: data.preferredCurrency ?? "usd",
-        referralCode: data.referralCode,
-      });
-      if ("token" in res && res.token) {
-        setState({ token: res.token, client: res.client, miniappAuthLoading: false, miniappAuthAttempted: true });
-        saveState(res.token, res.client);
+      try {
+        const res = await api.clientRegister({
+          telegramId: data.telegramId,
+          telegramUsername: data.telegramUsername,
+          preferredLang: data.preferredLang ?? "ru",
+          preferredCurrency: data.preferredCurrency ?? "usd",
+          referralCode: data.referralCode,
+        });
+        if ("token" in res && res.token) {
+          setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true });
+          saveState(res.token, res.client);
+        }
+      } catch (error: unknown) {
+        const blocked = toBlockedState(error);
+        if (blocked) {
+          setState({ token: null, client: null, blocked, miniappAuthLoading: false, miniappAuthAttempted: true });
+          saveState(null, null);
+        }
+        throw error;
       }
     },
     []
@@ -128,12 +176,12 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
 
   const verifyEmail = useCallback(async (token: string) => {
     const res = await api.clientVerifyEmail(token);
-    setState({ token: res.token, client: res.client, miniappAuthLoading: false, miniappAuthAttempted: true });
+    setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true });
     saveState(res.token, res.client);
   }, []);
 
   const logout = useCallback(() => {
-    setState({ token: null, client: null, miniappAuthLoading: false, miniappAuthAttempted: false });
+    setState({ token: null, client: null, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: false });
     saveState(null, null);
   }, []);
 
