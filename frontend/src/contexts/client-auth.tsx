@@ -56,6 +56,18 @@ function saveState(token: string | null, client: ClientProfile | null) {
   else localStorage.removeItem(STORAGE_CLIENT);
 }
 
+function getMiniappFallbackUser(): { telegramId: string; telegramUsername?: string } | null {
+  if (typeof window === "undefined") return null;
+  const rawUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  if (!rawUser || rawUser.id == null) return null;
+  const telegramId = String(rawUser.id).trim();
+  if (!telegramId) return null;
+  const telegramUsername = typeof rawUser.username === "string" && rawUser.username.trim()
+    ? rawUser.username.trim()
+    : undefined;
+  return { telegramId, telegramUsername };
+}
+
 export function ClientAuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<ClientAuthState>(() => ({ ...loadState(), miniappAuthLoading: false, miniappAuthAttempted: false, miniappAuthError: null }));
   const miniappAttemptedRef = useRef(false);
@@ -80,12 +92,38 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
         setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true, miniappAuthError: null });
         saveState(res.token, res.client);
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         const blocked = toBlockedState(error);
         if (blocked) {
           setState({ token: null, client: null, blocked, miniappAuthLoading: false, miniappAuthAttempted: true, miniappAuthError: null });
           saveState(null, null);
           return;
+        }
+        const fallbackUser = getMiniappFallbackUser();
+        if (fallbackUser) {
+          try {
+            const res = await api.clientRegister({
+              telegramId: fallbackUser.telegramId,
+              telegramUsername: fallbackUser.telegramUsername,
+            });
+            setState({ token: res.token, client: res.client, blocked: null, miniappAuthLoading: false, miniappAuthAttempted: true, miniappAuthError: null });
+            saveState(res.token, res.client);
+            return;
+          } catch (fallbackError: unknown) {
+            const fallbackBlocked = toBlockedState(fallbackError);
+            if (fallbackBlocked) {
+              setState({ token: null, client: null, blocked: fallbackBlocked, miniappAuthLoading: false, miniappAuthAttempted: true, miniappAuthError: null });
+              saveState(null, null);
+              return;
+            }
+            setState((prev) => ({
+              ...prev,
+              miniappAuthLoading: false,
+              miniappAuthAttempted: true,
+              miniappAuthError: fallbackError instanceof Error ? fallbackError.message : "Ошибка авторизации Mini App",
+            }));
+            return;
+          }
         }
         setState((prev) => ({
           ...prev,
