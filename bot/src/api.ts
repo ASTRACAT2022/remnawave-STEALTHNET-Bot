@@ -60,6 +60,18 @@ function normalizeHttpError(status: number, message: string): string {
   return message;
 }
 
+export class ApiRequestError extends Error {
+  status: number;
+  data: unknown;
+
+  constructor(status: number, message: string, data: unknown) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string; extraHeaders?: Record<string, string>; retryable?: boolean }): Promise<T> {
   let lastErr: Error | null = null;
   const method = (opts?.method ?? "GET").toUpperCase();
@@ -94,7 +106,7 @@ async function fetchJson<T>(path: string, opts?: { method?: string; body?: unkno
       continue;
     }
 
-    lastErr = new Error(normalizeHttpError(res.status, msg));
+    lastErr = new ApiRequestError(res.status, normalizeHttpError(res.status, msg), data);
     break;
   }
 
@@ -161,7 +173,7 @@ export async function registerByTelegram(body: {
   preferredLang?: string;
   preferredCurrency?: string;
   referralCode?: string;
-}): Promise<{ token: string; client: { id: string; telegramUsername?: string | null; preferredCurrency: string; balance: number; trialUsed?: boolean; referralCode?: string | null } }> {
+}): Promise<{ token: string; client: { id: string; telegramUsername?: string | null; preferredCurrency: string; balance: number; trialUsed?: boolean; referralCode?: string | null; isBlocked?: boolean; blockReason?: string | null } }> {
   return fetchJson("/api/client/auth/register", { method: "POST", body });
 }
 
@@ -175,6 +187,8 @@ export async function getMe(token: string): Promise<{
   referralCode?: string | null;
   referralPercent?: number | null;
   trialUsed?: boolean;
+  isBlocked?: boolean;
+  blockReason?: string | null;
 }> {
   return fetchJson("/api/client/auth/me", { token });
 }

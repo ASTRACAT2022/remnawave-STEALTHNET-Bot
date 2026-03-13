@@ -160,6 +160,22 @@ export function backToMenu(backLabel?: string | null, backStyle?: string, emojiI
   return { inline_keyboard: [[btn(text, "menu:main", resolveStyle(toStyle(backStyle), "danger"), emojiIds?.back)]] };
 }
 
+export function blockedSupportMarkup(
+  supportUrl: string | null | undefined,
+  backLabel?: string | null,
+  backStyle?: string,
+  emojiIds?: InnerEmojiIds
+): InlineMarkup {
+  const rows: InlineMarkup["inline_keyboard"] = [];
+  const support = (supportUrl ?? "").trim();
+  if (support) {
+    rows.push([{ text: "✍️ Написать в поддержку", url: support }]);
+  }
+  const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
+  rows.push([btn(back, "menu:main", resolveStyle(toStyle(backStyle), "danger"), emojiIds?.back)]);
+  return { inline_keyboard: rows };
+}
+
 /** Кнопка «Оплатить» (открывает paymentUrl) + «В меню» */
 export function payUrlMarkup(
   paymentUrl: string,

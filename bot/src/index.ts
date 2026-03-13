@@ -11,6 +11,7 @@ import * as api from "./api.js";
 import {
   mainMenu,
   backToMenu,
+  blockedSupportMarkup,
   supportSubMenu,
   topUpPresets,
   tariffPayButtons,
@@ -825,6 +826,126 @@ function clipText(input: string, max: number): string {
   return input.slice(0, Math.max(1, max - 1)).trimEnd();
 }
 
+function extractApiErrorData(error: unknown): Record<string, unknown> | null {
+  if (!(error instanceof api.ApiRequestError)) return null;
+  return error.data && typeof error.data === "object" ? (error.data as Record<string, unknown>) : null;
+}
+
+function getBlockedReason(error: unknown): string | null {
+  const data = extractApiErrorData(error);
+  const fromPayload = typeof data?.blockReason === "string" ? data.blockReason.trim() : "";
+  if (fromPayload) return fromPayload;
+  if (error instanceof api.ApiRequestError && error.status === 403 && /blocked/i.test(error.message)) return null;
+  return null;
+}
+
+function isBlockedApiError(error: unknown): boolean {
+  if (!(error instanceof api.ApiRequestError)) return false;
+  if (error.status !== 403) return false;
+  const data = extractApiErrorData(error);
+  if (data?.isBlocked === true) return true;
+  return /blocked/i.test(error.message);
+}
+
+function isUnauthorizedApiError(error: unknown): boolean {
+  return error instanceof api.ApiRequestError && error.status === 401;
+}
+
+function buildBlockedText(reason?: string | null): string {
+  const lines = [
+    "⛔ Ваш аккаунт заблокирован.",
+    "",
+    "Доступ к функциям бота отключён.",
+  ];
+  const normalizedReason = (reason ?? "").trim();
+  if (normalizedReason) {
+    lines.push("", `Причина: ${normalizedReason}`);
+  }
+  lines.push("", "Если считаете это ошибкой, напишите в поддержку.");
+  return lines.join("\n");
+}
+
+function buildInnerStyles(config: Awaited<ReturnType<typeof api.getPublicConfig>>) {
+  const rawStyles = config?.botInnerButtonStyles;
+  return {
+    tariffPay: rawStyles?.tariffPay !== undefined ? rawStyles.tariffPay : "success",
+    topup: rawStyles?.topup !== undefined ? rawStyles.topup : "primary",
+    back: rawStyles?.back !== undefined ? rawStyles.back : "danger",
+    profile: rawStyles?.profile !== undefined ? rawStyles.profile : "primary",
+    trialConfirm: rawStyles?.trialConfirm !== undefined ? rawStyles.trialConfirm : "success",
+    lang: rawStyles?.lang !== undefined ? rawStyles.lang : "primary",
+    currency: rawStyles?.currency !== undefined ? rawStyles.currency : "primary",
+  };
+}
+
+function buildInnerEmojiIds(config: Awaited<ReturnType<typeof api.getPublicConfig>>): InnerEmojiIds | undefined {
+  const botEmojis = config?.botEmojis;
+  if (!botEmojis) return undefined;
+  return {
+    back: botEmojis.BACK?.tgEmojiId,
+    card: botEmojis.CARD?.tgEmojiId,
+    tariff: botEmojis.PACKAGE?.tgEmojiId || botEmojis.TARIFFS?.tgEmojiId,
+    trial: botEmojis.TRIAL?.tgEmojiId,
+    profile: botEmojis.PUZZLE?.tgEmojiId || botEmojis.PROFILE?.tgEmojiId,
+    connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
+  };
+}
+
+async function showBlockedScreen(
+  ctx: {
+    reply: (text: string, opts?: { reply_markup?: InlineMarkup }) => Promise<unknown>;
+    callbackQuery?: { message?: { photo?: unknown[] } };
+    editMessageCaption?: (opts: { caption: string; caption_entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+    editMessageText?: (text: string, opts?: { entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  },
+  config: Awaited<ReturnType<typeof api.getPublicConfig>>,
+  reason?: string | null,
+): Promise<void> {
+  const innerStyles = buildInnerStyles(config);
+  const innerEmojiIds = buildInnerEmojiIds(config);
+  const text = buildBlockedText(reason);
+  const replyMarkup = blockedSupportMarkup(
+    config?.supportLink,
+    config?.botBackLabel ?? null,
+    innerStyles.back,
+    innerEmojiIds,
+  );
+
+  if (ctx.callbackQuery && ctx.editMessageCaption && ctx.editMessageText) {
+    await editMessageContent(ctx, text, replyMarkup).catch(async () => {
+      await ctx.reply(text, { reply_markup: replyMarkup }).catch(() => {});
+    });
+    return;
+  }
+
+  await ctx.reply(text, { reply_markup: replyMarkup }).catch(() => {});
+}
+
+async function ensureClientAccess(
+  ctx: {
+    reply: (text: string, opts?: { reply_markup?: InlineMarkup }) => Promise<unknown>;
+    callbackQuery?: { message?: { photo?: unknown[] } };
+    editMessageCaption?: (opts: { caption: string; caption_entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+    editMessageText?: (text: string, opts?: { entities?: BotTextEntity[]; reply_markup?: InlineMarkup }) => Promise<unknown>;
+  },
+  token: string,
+  config: Awaited<ReturnType<typeof api.getPublicConfig>>,
+): Promise<Awaited<ReturnType<typeof api.getMe>> | null> {
+  try {
+    return await api.getMe(token);
+  } catch (error: unknown) {
+    if (isBlockedApiError(error)) {
+      await showBlockedScreen(ctx, config, getBlockedReason(error));
+      return null;
+    }
+    if (isUnauthorizedApiError(error)) {
+      await ctx.reply("Сессия истекла. Отправьте /start").catch(() => {});
+      return null;
+    }
+    throw error;
+  }
+}
+
 function parseStarsPayload(payload: string | undefined): string | null {
   const raw = (payload ?? "").trim();
   if (!raw.startsWith("stars:")) return null;
@@ -1078,6 +1199,11 @@ bot.command("start", async (ctx) => {
       await ctx.reply(text, { entities: entities.length ? entities : undefined, reply_markup: markup });
     }
   } catch (e: unknown) {
+    if (isBlockedApiError(e)) {
+      const config = await api.getPublicConfig().catch(() => null);
+      await showBlockedScreen(ctx, config, getBlockedReason(e));
+      return;
+    }
     const msg = e instanceof Error ? e.message : "Ошибка входа";
     await ctx.reply(`❌ ${msg}`);
   }
@@ -1087,9 +1213,16 @@ bot.command("devices", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
   pendingHwidAliasRenameByUser.delete(userId);
+  const token = getToken(userId);
+  if (!token) {
+    await ctx.reply("Сессия истекла. Отправьте /start").catch(() => {});
+    return;
+  }
 
   try {
     const config = await api.getPublicConfig().catch(() => null);
+    const client = await ensureClientAccess(ctx, token, config);
+    if (!client) return;
     const view = await buildHwidDevicesView(userId, config?.botBackLabel ?? null);
     await ctx.reply(view.text, {
       reply_markup: view.replyMarkup,
@@ -1300,31 +1433,15 @@ bot.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    const currentClient = await ensureClientAccess(ctx, token, config);
+    if (!currentClient) return;
+
     const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
-    const rawStyles = config?.botInnerButtonStyles;
-    const innerStyles = {
-      tariffPay: rawStyles?.tariffPay !== undefined ? rawStyles.tariffPay : "success",
-      topup: rawStyles?.topup !== undefined ? rawStyles.topup : "primary",
-      back: rawStyles?.back !== undefined ? rawStyles.back : "danger",
-      profile: rawStyles?.profile !== undefined ? rawStyles.profile : "primary",
-      trialConfirm: rawStyles?.trialConfirm !== undefined ? rawStyles.trialConfirm : "success",
-      lang: rawStyles?.lang !== undefined ? rawStyles.lang : "primary",
-      currency: rawStyles?.currency !== undefined ? rawStyles.currency : "primary",
-    };
-    const botEmojis = config?.botEmojis;
-    const innerEmojiIds: InnerEmojiIds | undefined = botEmojis
-      ? {
-          back: botEmojis.BACK?.tgEmojiId,
-          card: botEmojis.CARD?.tgEmojiId,
-          tariff: botEmojis.PACKAGE?.tgEmojiId || botEmojis.TARIFFS?.tgEmojiId,
-          trial: botEmojis.TRIAL?.tgEmojiId,
-          profile: botEmojis.PUZZLE?.tgEmojiId || botEmojis.PROFILE?.tgEmojiId,
-          connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
-        }
-      : undefined;
+    const innerStyles = buildInnerStyles(config);
+    const innerEmojiIds = buildInnerEmojiIds(config);
 
     if (data === "menu:main") {
-      const [client, subRes] = await Promise.all([api.getMe(token), api.getSubscription(token).catch(() => ({ subscription: null }))]);
+      const [client, subRes] = await Promise.all([Promise.resolve(currentClient), api.getSubscription(token).catch(() => ({ subscription: null }))]);
       const vpnUrl = getSubscriptionUrl(subRes.subscription);
       const showTrial = Boolean(config?.trialEnabled && !client.trialUsed);
       const name = config?.serviceName?.trim() || "Кабинет";
@@ -1989,6 +2106,8 @@ bot.on("message:text", async (ctx) => {
   const token = getToken(userId);
   if (!token) return;
   const publicConfig = await api.getPublicConfig().catch(() => null);
+  const currentClient = await ensureClientAccess(ctx, token, publicConfig);
+  if (!currentClient) return;
 
   // Если пользователь ожидает ввод промокода
   if (awaitingPromoCode.has(userId)) {
@@ -2030,7 +2149,7 @@ bot.on("message:text", async (ctx) => {
     const ykEnabled = !!config?.yookassaEnabled;
     const ykSbpEnabled = ykEnabled && !!config?.yookassaSbpEnabled;
     const starsEnabled = !!config?.telegramStarsEnabled;
-    const client = await api.getMe(token);
+    const client = currentClient;
     const hasYkForCurrency = ykSbpEnabled && client.preferredCurrency.toUpperCase() === "RUB";
     if (!methods.length && !yooEnabled && !hasYkForCurrency && !starsEnabled) {
       await ctx.reply("Пополнение временно недоступно.");

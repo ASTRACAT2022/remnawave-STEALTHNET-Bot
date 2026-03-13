@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyClientToken } from "./client.service.js";
-import { env } from "../../config/index.js";
 import { prisma } from "../../db.js";
 
 const BEARER = "Bearer ";
@@ -19,8 +18,15 @@ export async function requireClientAuth(req: Request, res: Response, next: NextF
   }
 
   const client = await prisma.client.findUnique({ where: { id: payload.clientId } });
-  if (!client || client.isBlocked) {
+  if (!client) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
+  if (client.isBlocked) {
+    return res.status(403).json({
+      message: "Account is blocked",
+      isBlocked: true,
+      blockReason: client.blockReason ?? null,
+    });
   }
 
   (req as Request & { clientId: string; client: typeof client }).clientId = client.id;

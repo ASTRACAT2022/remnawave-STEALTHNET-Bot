@@ -247,6 +247,13 @@ clientAuthRouter.post("/register", async (req, res) => {
   if (hasTelegram) {
     const existing = await prisma.client.findUnique({ where: { telegramId: data.telegramId! } });
     if (existing) {
+      if (existing.isBlocked) {
+        return res.status(403).json({
+          message: "Account is blocked",
+          isBlocked: true,
+          blockReason: existing.blockReason ?? null,
+        });
+      }
       const token = signClientToken(existing.id);
       return res.json({ token, client: toClientShape(existing) });
     }
@@ -503,6 +510,7 @@ function toClientShape(c: {
   remnawaveUuid: string | null;
   trialUsed?: boolean;
   isBlocked?: boolean;
+  blockReason?: string | null;
   yoomoneyAccessToken?: string | null;
 }) {
   return {
@@ -518,6 +526,7 @@ function toClientShape(c: {
     remnawaveUuid: c.remnawaveUuid,
     trialUsed: c.trialUsed ?? false,
     isBlocked: c.isBlocked ?? false,
+    blockReason: c.blockReason ?? null,
     yoomoneyConnected: Boolean(c.yoomoneyAccessToken),
   };
 }
