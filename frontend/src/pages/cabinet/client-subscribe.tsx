@@ -11,6 +11,7 @@ import {
   Smartphone,
   ArrowLeft,
   Monitor,
+  Info,
   RotateCcw,
 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
