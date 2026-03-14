@@ -16,6 +16,7 @@ import {
   extractRemnaUuid,
 } from "../remna/remna.client.js";
 import { getSystemConfig } from "../client/client.service.js";
+import { activatePaidFptnForClient } from "../fptn/fptn-subscription.service.js";
 
 export type ActivationResult = { ok: true } | { ok: false; error: string; status: number };
 
@@ -90,7 +91,15 @@ export async function activateTariffForClient(
   client: { id: string; remnawaveUuid: string | null; email: string | null; telegramId: string | null },
   tariff: { durationDays: number; trafficLimitBytes: bigint | null; deviceLimit: number | null; internalSquadUuids: string[] },
 ): Promise<ActivationResult> {
-  if (!isRemnaConfigured()) return { ok: false, error: "Сервис временно недоступен", status: 503 };
+  const fptnResult = await activatePaidFptnForClient(
+    { id: client.id, email: client.email, telegramId: client.telegramId },
+    tariff.durationDays,
+  );
+  if (!fptnResult.ok) {
+    return fptnResult;
+  }
+
+  if (!isRemnaConfigured()) return { ok: true };
 
   const config = await getSystemConfig();
   const trafficLimitBytes = tariff.trafficLimitBytes != null ? Number(tariff.trafficLimitBytes) : 0;

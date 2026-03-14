@@ -65,7 +65,7 @@ function formatPaymentStatus(status: string): string {
   return status || "—";
 }
 
-/** Remna API может вернуть { response: { ... } } или { data: { response: { ... } } } или сам объект пользователя */
+/** Backend может вернуть FPTN/Remna как в response/data, так и плоским объектом */
 function getSubscriptionPayload(sub: unknown): Record<string, unknown> | null {
   if (!sub || typeof sub !== "object") return null;
   const raw = sub as Record<string, unknown>;
@@ -96,9 +96,16 @@ function parseSubscription(sub: unknown): {
       ? o.trafficUsed
       : undefined;
   const subscriptionUrlSnake = (o as Record<string, unknown>).subscription_url;
+  const accessKeySnake = (o as Record<string, unknown>).access_key;
   const subUrl = typeof o.subscriptionUrl === "string"
     ? o.subscriptionUrl
-    : (typeof subscriptionUrlSnake === "string" ? subscriptionUrlSnake : undefined);
+    : (typeof subscriptionUrlSnake === "string"
+      ? subscriptionUrlSnake
+      : (typeof o.accessKey === "string"
+        ? o.accessKey
+        : (typeof accessKeySnake === "string"
+          ? accessKeySnake
+          : (typeof o.token === "string" ? o.token : undefined))));
   const productName = typeof o.productName === "string" ? o.productName.trim() : undefined;
   const subscriptionProductName = typeof (o as Record<string, unknown>).subscriptionProductName === "string" ? (o as Record<string, unknown>).subscriptionProductName as string : undefined;
   return {

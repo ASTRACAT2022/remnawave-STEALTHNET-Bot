@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { randomBytes } from "crypto";
 import { prisma } from "../../db.js";
 import { env } from "../../config/index.js";
+import { parseBooleanFlag } from "../fptn/fptn.client.js";
 
 const SALT_ROUNDS = 12;
 
@@ -42,6 +43,8 @@ const SYSTEM_CONFIG_KEYS = [
   "default_referral_percent", "referral_percent_level_2", "referral_percent_level_3",
   "trial_days", "trial_squad_uuid", "trial_device_limit", "trial_traffic_limit",
   "service_name", "logo", "favicon", "remna_client_url",
+  "fptn_enabled", "fptn_api_url", "fptn_auth_header", "fptn_auth_token", "fptn_username_prefix",
+  "fptn_issue_on_paid_tariff", "fptn_issue_on_trial", "fptn_issue_on_promo", "fptn_rotate_on_paid_activation",
   "smtp_host", "smtp_port", "smtp_secure", "smtp_user", "smtp_password",
   "smtp_from_email", "smtp_from_name", "public_app_url",
   "telegram_bot_token", "telegram_bot_username",
@@ -260,6 +263,15 @@ export async function getSystemConfig() {
     logo: map.logo || null,
     favicon: map.favicon || null,
     remnaClientUrl: map.remna_client_url || null,
+    fptnEnabled: parseBooleanFlag(map.fptn_enabled ?? env.FPTN_ENABLED, Boolean((map.fptn_api_url || env.FPTN_API_URL) && (map.fptn_auth_token || env.FPTN_AUTH_TOKEN))),
+    fptnApiUrl: map.fptn_api_url || env.FPTN_API_URL || null,
+    fptnAuthHeader: map.fptn_auth_header || env.FPTN_AUTH_HEADER || "Authorization",
+    fptnAuthToken: map.fptn_auth_token || env.FPTN_AUTH_TOKEN || null,
+    fptnUsernamePrefix: map.fptn_username_prefix || env.FPTN_USERNAME_PREFIX || "fptn_",
+    fptnIssueOnPaidTariff: parseBooleanFlag(map.fptn_issue_on_paid_tariff, true),
+    fptnIssueOnTrial: parseBooleanFlag(map.fptn_issue_on_trial, false),
+    fptnIssueOnPromo: parseBooleanFlag(map.fptn_issue_on_promo, false),
+    fptnRotateOnPaidActivation: parseBooleanFlag(map.fptn_rotate_on_paid_activation, false),
     smtpHost: map.smtp_host || null,
     smtpPort: map.smtp_port != null && map.smtp_port !== "" ? parseInt(map.smtp_port, 10) : 587,
     smtpSecure: map.smtp_secure === "true" || map.smtp_secure === "1",
@@ -428,6 +440,7 @@ export async function getPublicConfig() {
     logo: full.logo,
     favicon: full.favicon,
     remnaClientUrl: full.remnaClientUrl,
+    fptnEnabled: Boolean(full.fptnEnabled && full.fptnApiUrl && full.fptnAuthToken),
     publicAppUrl: full.publicAppUrl,
     telegramBotUsername: full.telegramBotUsername,
     plategaMethods: full.plategaMethods.filter((m) => m.enabled).map((m) => ({ id: m.id, label: m.label })),

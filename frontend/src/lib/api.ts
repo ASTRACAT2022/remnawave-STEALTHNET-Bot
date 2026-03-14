@@ -533,11 +533,11 @@ export const api = {
     return request("/client/auth/me", { token });
   },
 
-  async clientSubscription(token: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string }> {
+  async clientSubscription(token: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string; source?: "fptn" | "remna" }> {
     return request("/client/subscription", { token });
   },
 
-  async clientReissueSubscription(token: string): Promise<{ message: string; subscription: unknown; tariffDisplayName?: string | null }> {
+  async clientReissueSubscription(token: string): Promise<{ message: string; subscription: unknown; tariffDisplayName?: string | null; source?: "fptn" | "remna" }> {
     return request("/client/subscription/reissue", { method: "POST", body: JSON.stringify({}), token });
   },
 
@@ -773,6 +773,15 @@ export type UpdateSettingsPayload = {
   logo?: string | null;
   favicon?: string | null;
   remnaClientUrl?: string | null;
+  fptnEnabled?: boolean;
+  fptnApiUrl?: string | null;
+  fptnAuthHeader?: string | null;
+  fptnAuthToken?: string | null;
+  fptnUsernamePrefix?: string | null;
+  fptnIssueOnPaidTariff?: boolean;
+  fptnIssueOnTrial?: boolean;
+  fptnIssueOnPromo?: boolean;
+  fptnRotateOnPaidActivation?: boolean;
   smtpHost?: string | null;
   smtpPort?: number;
   smtpSecure?: boolean;
@@ -892,6 +901,15 @@ export interface AdminSettings {
   logo?: string | null;
   favicon?: string | null;
   remnaClientUrl?: string | null;
+  fptnEnabled?: boolean;
+  fptnApiUrl?: string | null;
+  fptnAuthHeader?: string | null;
+  fptnAuthToken?: string | null;
+  fptnUsernamePrefix?: string | null;
+  fptnIssueOnPaidTariff?: boolean;
+  fptnIssueOnTrial?: boolean;
+  fptnIssueOnPromo?: boolean;
+  fptnRotateOnPaidActivation?: boolean;
   smtpHost?: string | null;
   smtpPort?: number;
   smtpSecure?: boolean;

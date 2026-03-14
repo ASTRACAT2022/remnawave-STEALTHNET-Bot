@@ -13,6 +13,17 @@ const envSchema = z.object({
     z.string().url().optional()
   ),
   REMNA_ADMIN_TOKEN: z.string().optional(),
+  FPTN_ENABLED: z.preprocess(
+    (s) => (typeof s === "string" && s.trim() === "" ? undefined : s),
+    z.union([z.string(), z.boolean()]).optional(),
+  ),
+  FPTN_API_URL: z.preprocess(
+    (s) => (typeof s === "string" && s.trim() === "" ? undefined : s),
+    z.string().url().optional(),
+  ),
+  FPTN_AUTH_HEADER: z.string().optional(),
+  FPTN_AUTH_TOKEN: z.string().optional(),
+  FPTN_USERNAME_PREFIX: z.string().optional(),
   CORS_ORIGIN: z.string().default("*"),
   BOT_INTERNAL_API_KEY: z.string().optional(),
 });

@@ -500,17 +500,18 @@ function trimBroadcastText(input: string): string {
   return `${cleaned.slice(0, 3497)}...`;
 }
 
-/** Достаём subscriptionUrl из ответа Remna */
+/** Достаём ссылку/токен подключения из ответа backend (FPTN или Remna) */
 function getSubscriptionUrl(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
   const o = sub as Record<string, unknown>;
   const resp = o.response ?? o.data;
   if (resp && typeof resp === "object") {
     const r = resp as Record<string, unknown>;
-    const url = r.subscriptionUrl ?? r.subscription_url;
+    const url = r.subscriptionUrl ?? r.subscription_url ?? r.accessKey ?? r.access_key ?? r.token;
     if (typeof url === "string" && url.trim()) return url.trim();
   }
-  if (typeof o.subscriptionUrl === "string" && o.subscriptionUrl.trim()) return o.subscriptionUrl.trim();
+  const direct = o.subscriptionUrl ?? o.accessKey ?? o.access_key ?? o.token;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
   return null;
 }
 
@@ -520,7 +521,7 @@ function getSubUser(sub: unknown): Record<string, unknown> | null {
   const o = sub as Record<string, unknown>;
   const resp = o.response ?? o.data ?? o;
   const r = typeof resp === "object" && resp !== null ? (resp as Record<string, unknown>) : null;
-  if (r && (r.user != null || r.expireAt != null || r.subscriptionUrl != null)) {
+  if (r && (r.user != null || r.expireAt != null || r.subscriptionUrl != null || r.accessKey != null || r.token != null || r.status != null)) {
     const user = r.user;
     return (typeof user === "object" && user !== null ? user : r) as Record<string, unknown>;
   }

@@ -33,6 +33,12 @@ import { activateTariffByPaymentId, activateTariffForClient } from "../tariff/ta
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { getAuthUrl, exchangeCodeForToken, requestPayment, processPayment } from "../yoomoney/yoomoney.service.js";
 import { toHappCryptoSubscriptionPayload } from "./subscription-link.service.js";
+import {
+  getFptnSubscriptionForClient,
+  issueFptnForClient,
+  reissueFptnSubscriptionForClient,
+  resolveLatestPaidTariffName,
+} from "../fptn/fptn-subscription.service.js";
 
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
 function extractCurrentExpireAt(data: unknown): Date | null {
@@ -643,6 +649,15 @@ clientRouter.post("/trial", async (req, res) => {
     return res.status(503).json({ message: "Сервис временно недоступен" });
   }
 
+  const fptnTrialResult = await issueFptnForClient(
+    { id: client.id, email: client.email, telegramId: client.telegramId },
+    trialDays,
+    "trial",
+  );
+  if (!fptnTrialResult.ok) {
+    return res.status(fptnTrialResult.status).json({ message: fptnTrialResult.error });
+  }
+
   const trafficLimitBytes = config.trialTrafficLimitBytes ?? 0;
   const hwidDeviceLimit = config.trialDeviceLimit ?? null;
 
@@ -752,6 +767,15 @@ clientRouter.post("/promo/activate", async (req, res) => {
   }
 
   if (!isRemnaConfigured()) return res.status(503).json({ message: "Сервис временно недоступен" });
+
+  const fptnPromoResult = await issueFptnForClient(
+    { id: client.id, email: client.email, telegramId: client.telegramId },
+    group.durationDays,
+    "promo",
+  );
+  if (!fptnPromoResult.ok) {
+    return res.status(fptnPromoResult.status).json({ message: fptnPromoResult.error });
+  }
 
   const trafficLimitBytes = Number(group.trafficLimitBytes);
   const hwidDeviceLimit = group.deviceLimit ?? null;
@@ -899,6 +923,15 @@ clientRouter.post("/promo-code/activate", async (req, res) => {
   }
 
   if (!isRemnaConfigured()) return res.status(503).json({ message: "Сервис временно недоступен" });
+
+  const fptnPromoResult = await issueFptnForClient(
+    { id: client.id, email: client.email, telegramId: client.telegramId },
+    promo.durationDays,
+    "promo",
+  );
+  if (!fptnPromoResult.ok) {
+    return res.status(fptnPromoResult.status).json({ message: fptnPromoResult.error });
+  }
 
   const trafficLimitBytes = Number(promo.trafficLimitBytes ?? 0);
   const hwidDeviceLimit = promo.deviceLimit ?? null;
@@ -1051,6 +1084,23 @@ async function resolveTariffDisplayName(remnaUserData: unknown, clientId: string
 
 clientRouter.get("/subscription", async (req, res) => {
   const client = (req as unknown as { client: { id: string; remnawaveUuid: string | null; email: string | null; telegramId: string | null } }).client;
+  let fptnMessage: string | null = null;
+
+  const fptnLookup = await getFptnSubscriptionForClient({
+    id: client.id,
+    email: client.email,
+    telegramId: client.telegramId,
+  });
+  if (!fptnLookup.ok) {
+    fptnMessage = fptnLookup.error;
+  }
+  if (fptnLookup.ok && fptnLookup.subscription) {
+    return res.json({
+      source: "fptn",
+      subscription: await toHappCryptoSubscriptionPayload(fptnLookup.subscription),
+      tariffDisplayName: await resolveLatestPaidTariffName(client.id),
+    });
+  }
 
   let effectiveRemnaUuid = client.remnawaveUuid;
   if (effectiveRemnaUuid) {
@@ -1058,8 +1108,10 @@ clientRouter.get("/subscription", async (req, res) => {
     if (!result.error) {
       const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null, client.id);
       return res.json({
+        source: "remna",
         subscription: await toHappCryptoSubscriptionPayload(result.data ?? null),
         tariffDisplayName,
+        message: fptnMessage,
       });
     }
 
@@ -1073,12 +1125,12 @@ clientRouter.get("/subscription", async (req, res) => {
   const found = await findExistingRemnaUserForClient(client);
   if (!found.uuid) {
     if (!isRemnaConfigured()) {
-      return res.json({ subscription: null, tariffDisplayName: null, message: "Подписка не привязана" });
+      return res.json({ subscription: null, tariffDisplayName: null, message: fptnMessage ?? "Подписка не привязана" });
     }
 
     const recreated = await createInactiveRemnaUserForClient(client);
     if (recreated.error || !recreated.uuid) {
-      return res.json({ subscription: null, tariffDisplayName: null, message: recreated.error ?? "Подписка не привязана" });
+      return res.json({ subscription: null, tariffDisplayName: null, message: fptnMessage ?? recreated.error ?? "Подписка не привязана" });
     }
 
     await prisma.client.update({ where: { id: client.id }, data: { remnawaveUuid: recreated.uuid } });
@@ -1088,8 +1140,10 @@ clientRouter.get("/subscription", async (req, res) => {
     }
     const tariffDisplayName = await resolveTariffDisplayName(recreatedUser.data ?? null, client.id);
     return res.json({
+      source: "remna",
       subscription: await toHappCryptoSubscriptionPayload(recreatedUser.data ?? null),
       tariffDisplayName,
+      message: fptnMessage,
     });
   }
 
@@ -1103,8 +1157,10 @@ clientRouter.get("/subscription", async (req, res) => {
   }
   const tariffDisplayName = await resolveTariffDisplayName(relinked.data ?? null, client.id);
   return res.json({
+    source: "remna",
     subscription: await toHappCryptoSubscriptionPayload(relinked.data ?? null),
     tariffDisplayName,
+    message: fptnMessage,
   });
 });
 
@@ -1112,6 +1168,23 @@ clientRouter.post("/subscription/reissue", async (req, res) => {
   const client = (req as unknown as {
     client: { id: string; remnawaveUuid: string | null; email: string | null; telegramId: string | null };
   }).client;
+
+  const fptnReissue = await reissueFptnSubscriptionForClient({
+    id: client.id,
+    email: client.email,
+    telegramId: client.telegramId,
+  });
+  if (fptnReissue.ok) {
+    return res.json({
+      source: "fptn",
+      message: "Токен FPTN перевыпущен. Старый ключ деактивирован.",
+      subscription: await toHappCryptoSubscriptionPayload(fptnReissue.subscription),
+      tariffDisplayName: await resolveLatestPaidTariffName(client.id),
+    });
+  }
+  if (fptnReissue.status !== 404) {
+    return res.status(fptnReissue.status).json({ message: fptnReissue.error });
+  }
 
   if (!isRemnaConfigured()) {
     return res.status(503).json({ message: "Remna API not configured" });
@@ -1153,6 +1226,7 @@ clientRouter.post("/subscription/reissue", async (req, res) => {
   const subscriptionPayload = refreshedUserRes.error ? (revokeRes.data ?? null) : (refreshedUserRes.data ?? null);
   const tariffDisplayName = await resolveTariffDisplayName(subscriptionPayload, client.id);
   return res.json({
+    source: "remna",
     message: "Подписка перевыпущена. Старые ключи деактивированы.",
     subscription: await toHappCryptoSubscriptionPayload(subscriptionPayload),
     tariffDisplayName,

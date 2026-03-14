@@ -34,6 +34,11 @@ function isHappCryptoLink(url: string): boolean {
   return /^happ:\/\/crypt\d+\//i.test(url.trim());
 }
 
+function looksLikeSubscriptionUrl(url: string): boolean {
+  const value = url.trim();
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
 function readCachedEncryptedLink(url: string): string | null {
   const cached = encryptedLinkCache.get(url);
   if (!cached) return null;
@@ -55,7 +60,7 @@ export async function encryptSubscriptionLinkWithHappCrypto(rawUrl: string): Pro
   let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
     const url = rawUrl.trim();
-    if (!url || isHappCryptoLink(url)) return url;
+    if (!url || isHappCryptoLink(url) || !looksLikeSubscriptionUrl(url)) return url;
 
     const cached = readCachedEncryptedLink(url);
     if (cached) return cached;

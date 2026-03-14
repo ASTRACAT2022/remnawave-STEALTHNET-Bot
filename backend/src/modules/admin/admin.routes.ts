@@ -1084,6 +1084,15 @@ const updateSettingsSchema = z.object({
   logo: z.string().max(2_000_000).nullable().optional(),
   favicon: z.string().max(2_000_000).nullable().optional(),
   remnaClientUrl: z.string().max(2000).nullable().optional(),
+  fptnEnabled: z.boolean().optional(),
+  fptnApiUrl: z.string().max(2000).nullable().optional(),
+  fptnAuthHeader: z.string().max(200).nullable().optional(),
+  fptnAuthToken: z.string().max(1000).nullable().optional(),
+  fptnUsernamePrefix: z.string().max(100).nullable().optional(),
+  fptnIssueOnPaidTariff: z.boolean().optional(),
+  fptnIssueOnTrial: z.boolean().optional(),
+  fptnIssueOnPromo: z.boolean().optional(),
+  fptnRotateOnPaidActivation: z.boolean().optional(),
   smtpHost: z.string().max(255).nullable().optional(),
   smtpPort: z.number().int().min(1).max(65535).optional(),
   smtpSecure: z.boolean().optional(),
@@ -1273,6 +1282,78 @@ adminRouter.patch("/settings", async (req, res) => {
     await prisma.systemSetting.upsert({
       where: { key: "remna_client_url" },
       create: { key: "remna_client_url", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnEnabled !== undefined) {
+    const val = updates.fptnEnabled ? "true" : "false";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_enabled" },
+      create: { key: "fptn_enabled", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnApiUrl !== undefined) {
+    const val = updates.fptnApiUrl ?? "";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_api_url" },
+      create: { key: "fptn_api_url", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnAuthHeader !== undefined) {
+    const val = updates.fptnAuthHeader ?? "";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_auth_header" },
+      create: { key: "fptn_auth_header", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnAuthToken !== undefined) {
+    const val = updates.fptnAuthToken ?? "";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_auth_token" },
+      create: { key: "fptn_auth_token", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnUsernamePrefix !== undefined) {
+    const val = updates.fptnUsernamePrefix ?? "";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_username_prefix" },
+      create: { key: "fptn_username_prefix", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnIssueOnPaidTariff !== undefined) {
+    const val = updates.fptnIssueOnPaidTariff ? "true" : "false";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_issue_on_paid_tariff" },
+      create: { key: "fptn_issue_on_paid_tariff", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnIssueOnTrial !== undefined) {
+    const val = updates.fptnIssueOnTrial ? "true" : "false";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_issue_on_trial" },
+      create: { key: "fptn_issue_on_trial", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnIssueOnPromo !== undefined) {
+    const val = updates.fptnIssueOnPromo ? "true" : "false";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_issue_on_promo" },
+      create: { key: "fptn_issue_on_promo", value: val },
+      update: { value: val },
+    });
+  }
+  if (updates.fptnRotateOnPaidActivation !== undefined) {
+    const val = updates.fptnRotateOnPaidActivation ? "true" : "false";
+    await prisma.systemSetting.upsert({
+      where: { key: "fptn_rotate_on_paid_activation" },
+      create: { key: "fptn_rotate_on_paid_activation", value: val },
       update: { value: val },
     });
   }

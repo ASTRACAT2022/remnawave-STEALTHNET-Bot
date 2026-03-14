@@ -193,8 +193,8 @@ export async function getMe(token: string): Promise<{
   return fetchJson("/api/client/auth/me", { token });
 }
 
-/** Подписка Remna (для ссылки VPN, статус, трафик) + отображаемое имя тарифа с сайта */
-export async function getSubscription(token: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string }> {
+/** Основная подписка клиента (FPTN или Remna) + отображаемое имя тарифа */
+export async function getSubscription(token: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string; source?: "fptn" | "remna" }> {
   return fetchJson("/api/client/subscription", { token });
 }
 
@@ -203,6 +203,7 @@ export async function reissueSubscription(token: string): Promise<{
   message: string;
   subscription: unknown;
   tariffDisplayName?: string | null;
+  source?: "fptn" | "remna";
 }> {
   return fetchJson("/api/client/subscription/reissue", { method: "POST", body: {}, token, retryable: true });
 }

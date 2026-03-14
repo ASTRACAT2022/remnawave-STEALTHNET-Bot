@@ -119,6 +119,15 @@ export function SettingsPage() {
         yookassaSbpEnabled: Boolean((data as AdminSettings).yookassaSbpEnabled),
         yookassaPaymentMode: (data as AdminSettings).yookassaPaymentMode ?? "full_payment",
         yookassaPaymentSubject: (data as AdminSettings).yookassaPaymentSubject ?? "service",
+        fptnEnabled: Boolean((data as AdminSettings).fptnEnabled),
+        fptnApiUrl: (data as AdminSettings).fptnApiUrl ?? null,
+        fptnAuthHeader: (data as AdminSettings).fptnAuthHeader ?? "Authorization",
+        fptnAuthToken: (data as AdminSettings).fptnAuthToken ?? null,
+        fptnUsernamePrefix: (data as AdminSettings).fptnUsernamePrefix ?? "fptn_",
+        fptnIssueOnPaidTariff: (data as AdminSettings).fptnIssueOnPaidTariff !== false,
+        fptnIssueOnTrial: Boolean((data as AdminSettings).fptnIssueOnTrial),
+        fptnIssueOnPromo: Boolean((data as AdminSettings).fptnIssueOnPromo),
+        fptnRotateOnPaidActivation: Boolean((data as AdminSettings).fptnRotateOnPaidActivation),
         groqApiKey: (data as AdminSettings).groqApiKey ?? null,
         groqModel: (data as AdminSettings).groqModel ?? "llama3-8b-8192",
         groqFallback1: (data as AdminSettings).groqFallback1 ?? null,
@@ -273,6 +282,15 @@ export function SettingsPage() {
         logo: settings.logo ?? null,
         favicon: settings.favicon ?? null,
         remnaClientUrl: settings.remnaClientUrl ?? null,
+        fptnEnabled: settings.fptnEnabled ?? false,
+        fptnApiUrl: settings.fptnApiUrl ?? null,
+        fptnAuthHeader: settings.fptnAuthHeader ?? "Authorization",
+        fptnAuthToken: settings.fptnAuthToken && settings.fptnAuthToken !== "********" ? settings.fptnAuthToken : undefined,
+        fptnUsernamePrefix: settings.fptnUsernamePrefix ?? "fptn_",
+        fptnIssueOnPaidTariff: settings.fptnIssueOnPaidTariff !== false,
+        fptnIssueOnTrial: settings.fptnIssueOnTrial ?? false,
+        fptnIssueOnPromo: settings.fptnIssueOnPromo ?? false,
+        fptnRotateOnPaidActivation: settings.fptnRotateOnPaidActivation ?? false,
         smtpHost: settings.smtpHost ?? null,
         smtpPort: settings.smtpPort ?? undefined,
         smtpSecure: settings.smtpSecure ?? undefined,
@@ -337,6 +355,15 @@ export function SettingsPage() {
           nalogoPythonBridgeOnly: u.nalogoPythonBridgeOnly ?? true,
           groqModel: u.groqModel ?? "llama3-8b-8192",
           aiChatEnabled: u.aiChatEnabled !== false,
+          fptnEnabled: Boolean(u.fptnEnabled),
+          fptnApiUrl: u.fptnApiUrl ?? null,
+          fptnAuthHeader: u.fptnAuthHeader ?? "Authorization",
+          fptnAuthToken: u.fptnAuthToken ?? settings.fptnAuthToken ?? null,
+          fptnUsernamePrefix: u.fptnUsernamePrefix ?? "fptn_",
+          fptnIssueOnPaidTariff: u.fptnIssueOnPaidTariff !== false,
+          fptnIssueOnTrial: Boolean(u.fptnIssueOnTrial),
+          fptnIssueOnPromo: Boolean(u.fptnIssueOnPromo),
+          fptnRotateOnPaidActivation: Boolean(u.fptnRotateOnPaidActivation),
           botAdminIds: Array.isArray(u.botAdminIds)
             ? Array.from(new Set(u.botAdminIds.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v))))
             : [],
@@ -520,6 +547,99 @@ export function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     Без слэша в конце. От него генерируются ссылка подтверждения в письме, редиректы после оплаты и callback Platega.
                   </p>
+                </div>
+                <div className="space-y-4 rounded-xl border p-4 bg-muted/20">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <Label className="text-base font-medium">Phantom Control Plane / FPTN</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Основная выдача доступа после оплаты тарифа. FPTN не используется для триалов: токен выдается только после успешной платной активации.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      checked={!!settings.fptnEnabled}
+                      onCheckedChange={(checked) =>
+                        setSettings((s) => (s ? { ...s, fptnEnabled: checked === true } : s))
+                      }
+                    />
+                    <Label>Включить FPTN как основную платную подписку</Label>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center gap-3 rounded-lg border p-3 bg-background">
+                      <Checkbox
+                        checked={settings.fptnIssueOnPaidTariff !== false}
+                        onCheckedChange={(checked) =>
+                          setSettings((s) => (s ? { ...s, fptnIssueOnPaidTariff: checked === true } : s))
+                        }
+                      />
+                      <span className="text-sm">Выдавать при оплате тарифа</span>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border p-3 bg-background">
+                      <Checkbox
+                        checked={!!settings.fptnIssueOnTrial}
+                        onCheckedChange={(checked) =>
+                          setSettings((s) => (s ? { ...s, fptnIssueOnTrial: checked === true } : s))
+                        }
+                      />
+                      <span className="text-sm">Выдавать при триале</span>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border p-3 bg-background">
+                      <Checkbox
+                        checked={!!settings.fptnIssueOnPromo}
+                        onCheckedChange={(checked) =>
+                          setSettings((s) => (s ? { ...s, fptnIssueOnPromo: checked === true } : s))
+                        }
+                      />
+                      <span className="text-sm">Выдавать при промо / бесплатных днях</span>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border p-3 bg-background">
+                      <Checkbox
+                        checked={!!settings.fptnRotateOnPaidActivation}
+                        onCheckedChange={(checked) =>
+                          setSettings((s) => (s ? { ...s, fptnRotateOnPaidActivation: checked === true } : s))
+                        }
+                      />
+                      <span className="text-sm">Перевыпускать ключ при каждой новой оплате</span>
+                    </label>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Base URL API</Label>
+                      <Input
+                        value={settings.fptnApiUrl ?? ""}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, fptnApiUrl: e.target.value || null } : s))}
+                        placeholder="https://phantom.example.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Имя заголовка авторизации</Label>
+                      <Input
+                        value={settings.fptnAuthHeader ?? "Authorization"}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, fptnAuthHeader: e.target.value || "Authorization" } : s))}
+                        placeholder="Authorization"
+                      />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>Токен / значение заголовка</Label>
+                      <Input
+                        value={settings.fptnAuthToken ?? ""}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, fptnAuthToken: e.target.value || null } : s))}
+                        placeholder="Bearer ..."
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Если используете <code>Authorization</code> и вставите только сырой токен, backend сам добавит префикс <code>Bearer</code>.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Префикс username</Label>
+                      <Input
+                        value={settings.fptnUsernamePrefix ?? "fptn_"}
+                        onChange={(e) => setSettings((s) => (s ? { ...s, fptnUsernamePrefix: e.target.value || "fptn_" } : s))}
+                        placeholder="fptn_"
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Языки</Label>
