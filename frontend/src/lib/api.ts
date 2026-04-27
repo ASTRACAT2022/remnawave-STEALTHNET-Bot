@@ -2055,6 +2055,7 @@ export type UpdateSettingsPayload = {
   publicAppUrl?: string | null;
   telegramBotToken?: string | null;
   telegramBotUsername?: string | null;
+  telegramApiProvider?: string;
   botAdminTelegramIds?: string[] | null;
   notificationTelegramGroupId?: string | null;
   notificationTopicNewClients?: string | null;

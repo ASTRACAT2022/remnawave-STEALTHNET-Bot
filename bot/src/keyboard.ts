@@ -50,23 +50,23 @@ const MENU_IDS: Record<string, string> = {
 };
 
 const DEFAULT_BUTTONS: BotButtonConfig[] = [
-  { id: "tariffs", visible: true, label: "📦 Тарифы", order: 0, style: "success" },
-  { id: "proxy", visible: true, label: "🌐 Прокси", order: 0.5, style: "primary" },
-  { id: "my_proxy", visible: true, label: "📋 Мои прокси", order: 0.6, style: "primary" },
-  { id: "singbox", visible: true, label: "🔑 Доступы", order: 0.55, style: "primary" },
-  { id: "my_singbox", visible: true, label: "📋 Мои доступы", order: 0.65, style: "primary" },
+  { id: "tariffs", visible: true, label: "� Тарифы", order: 0, style: "success" },
+  { id: "proxy", visible: true, label: "🚀 Прокси", order: 0.5, style: "primary" },
+  { id: "my_proxy", visible: true, label: "� Мои прокси", order: 0.6, style: "primary" },
+  { id: "singbox", visible: true, label: "� Доступы", order: 0.55, style: "primary" },
+  { id: "my_singbox", visible: true, label: "� Мои доступы", order: 0.65, style: "primary" },
   { id: "profile", visible: true, label: "👤 Профиль", order: 1, style: "" },
-  { id: "devices", visible: true, label: "📱 Устройства", order: 1.5, style: "primary" },
-  { id: "topup", visible: true, label: "💳 Пополнить баланс", order: 2, style: "success" },
-  { id: "referral", visible: true, label: "🔗 Реферальная программа", order: 3, style: "primary" },
+  { id: "devices", visible: true, label: "� Устройства", order: 1.5, style: "primary" },
+  { id: "topup", visible: true, label: "� Пополнить", order: 2, style: "success" },
+  { id: "referral", visible: true, label: "🎯 Рефералы", order: 3, style: "primary" },
   { id: "trial", visible: true, label: "🎁 Бесплатный Тест", order: 4, style: "success" },
-  { id: "vpn", visible: true, label: "🌐 Подключиться к VPN", order: 5, style: "danger", onePerRow: true },
-  { id: "cabinet", visible: true, label: "🌐 Web Кабинет", order: 6, style: "primary" },
-  { id: "tickets", visible: true, label: "🎫 Тикеты", order: 6.5, style: "primary" },
-  { id: "support", visible: true, label: "🆘 Поддержка", order: 7, style: "primary" },
+  { id: "vpn", visible: true, label: "🌐 Подключение VPN", order: 5, style: "danger", onePerRow: true },
+  { id: "cabinet", visible: true, label: "🖥️ Web Кабинет", order: 6, style: "primary" },
+  { id: "tickets", visible: true, label: "📨 Тикеты", order: 6.5, style: "primary" },
+  { id: "support", visible: true, label: "💬 Поддержка", order: 7, style: "primary" },
   { id: "promocode", visible: true, label: "🎟️ Промокод", order: 8, style: "primary" },
   { id: "gift", visible: true, label: "🎁 Подарки", order: 8.5, style: "primary" },
-  { id: "extra_options", visible: true, label: "➕ Доп. опции", order: 9, style: "primary" },
+  { id: "extra_options", visible: true, label: "⚡ Доп. опции", order: 9, style: "primary" },
 ];
 
 function toStyle(s: string | undefined): ButtonStyle | undefined | null {
@@ -188,7 +188,7 @@ export function mainMenu(opts: {
   return { inline_keyboard: rows };
 }
 
-const DEFAULT_BACK_LABEL = "◀️ В меню";
+const DEFAULT_BACK_LABEL = "🔙 В меню";
 
 /** Меню «Поддержка»: 4 кнопки-ссылки (только с заданным URL) + «В меню». */
 export function supportSubMenu(
@@ -232,7 +232,7 @@ export function payUrlMarkup(
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = undefined;
-  const payBtn: UrlButton = { text: "💳 Оплатить", url: paymentUrl };
+  const payBtn: UrlButton = { text: "💳 Оплатить сейчас", url: paymentUrl };
   if (emojiIds?.card) payBtn.icon_custom_emoji_id = emojiIds.card;
   return {
     inline_keyboard: [
@@ -246,7 +246,7 @@ export function openSubscribePageMarkup(appUrl: string, backLabel?: string | nul
   const base = appUrl.replace(/\/$/, "");
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   if (remnaSubscriptionUrl) {
-    const connectBtn: UrlButton = { text: "📲 Открыть страницу подключения", url: remnaSubscriptionUrl };
+    const connectBtn: UrlButton = { text: "� Открыть страницу подключения", url: remnaSubscriptionUrl };
     if (emojiIds?.connect) connectBtn.icon_custom_emoji_id = emojiIds.connect;
     return {
       inline_keyboard: [
@@ -255,7 +255,7 @@ export function openSubscribePageMarkup(appUrl: string, backLabel?: string | nul
       ],
     };
   }
-  const connectBtn: WebAppButton = { text: "📲 Открыть страницу подключения", web_app: { url: `${base}/cabinet/subscribe` } };
+  const connectBtn: WebAppButton = { text: "� Открыть страницу подключения", web_app: { url: `${base}/cabinet/subscribe` } };
   if (emojiIds?.connect) connectBtn.icon_custom_emoji_id = emojiIds.connect;
   return {
     inline_keyboard: [
@@ -323,7 +323,7 @@ export function tariffsOfCategoryButtons(
   const prefix = (category.emoji && category.emoji.trim()) ? `${category.emoji} ` : "";
   const tariffId = emojiIds?.tariff;
   for (const t of category.tariffs) {
-    const label = `${prefix}${t.name} — ${t.price} ${t.currency}`.slice(0, 64);
+    const label = `${prefix}${t.name} от ${t.price} ${t.currency}`.slice(0, 64);
     rows.push([btn(label, `pay_tariff:${t.id}`, tariffPay, tariffId)]);
   }
   rows.push([btn(back, backData, backSty, emojiIds?.back)]);
@@ -373,7 +373,7 @@ export function tariffOptionPickerButtons(
   const tariffId = emojiIds?.tariff;
   const rows: InlineButton[][] = options.map((o, idx) => {
     const star = bestId && o.id === bestId ? "🌟 " : "";
-    const label = `${star}${o.durationDays} дн — ${o.price} ${currency}`.slice(0, 64);
+    const label = `${star}${o.durationDays} дн от ${o.price} ${currency}`.slice(0, 64);
     return [btn(label, `topt:${idx}`, tariffPay, tariffId)];
   });
   rows.push([btn(back, "menu:tariffs", backSty, emojiIds?.back)]);
@@ -403,14 +403,14 @@ export function tariffPaymentMethodButtons(
   }
   // ЮMoney — только для рублёвых тарифов
   if (yoomoneyEnabled && (!tariffCurrency || tariffCurrency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮMoney — оплата картой", `pay_tariff_yoomoney:${tariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 ЮMoney (карта)", `pay_tariff_yoomoney:${tariffId}`, undefined, cardId)]);
   }
   // ЮKassa — только RUB
   if (yookassaEnabled && (!tariffCurrency || tariffCurrency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮKassa — карта / СБП", `pay_tariff_yookassa:${tariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 Карта / СБП", `pay_tariff_yookassa:${tariffId}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) {
-    rows.push([btn("💳 Crypto Bot — криптовалюта", `pay_tariff_cryptopay:${tariffId}`, undefined, cardId)]);
+    rows.push([btn("₿ Криптовалюта", `pay_tariff_cryptopay:${tariffId}`, undefined, cardId)]);
   }
   for (const m of methods) {
     rows.push([btn(m.label, `pay_tariff:${tariffId}:${m.id}`, undefined, cardId)]);
@@ -452,7 +452,7 @@ export function proxyTariffsOfCategoryButtons(
   const backSty = resolveStyle(toStyle(innerStyles?.back), "danger");
   const tariffId = emojiIds?.tariff;
   for (const t of category.tariffs) {
-    rows.push([btn(`${t.name} — ${t.price} ${t.currency}`.slice(0, 64), `pay_proxy:${t.id}`, tariffPay, tariffId)]);
+    rows.push([btn(`${t.name} от ${t.price} ${t.currency}`.slice(0, 64), `pay_proxy:${t.id}`, tariffPay, tariffId)]);
   }
   rows.push([btn(back, backData, backSty, emojiIds?.back)]);
   return { inline_keyboard: rows };
@@ -493,12 +493,12 @@ export function proxyPaymentMethodButtons(
   const rows: InlineButton[][] = [];
   if (balanceLabel) rows.push([btn(balanceLabel, `pay_proxy_balance:${proxyTariffId}`, undefined, cardId)]);
   if (yoomoneyEnabled && (!currency || currency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮMoney — карта", `pay_proxy_yoomoney:${proxyTariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 ЮMoney (карта)", `pay_proxy_yoomoney:${proxyTariffId}`, undefined, cardId)]);
   }
   if (yookassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮKassa — карта / СБП", `pay_proxy_yookassa:${proxyTariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 Карта / СБП", `pay_proxy_yookassa:${proxyTariffId}`, undefined, cardId)]);
   }
-  if (cryptopayEnabled) rows.push([btn("💳 Crypto Bot — криптовалюта", `pay_proxy_cryptopay:${proxyTariffId}`, undefined, cardId)]);
+  if (cryptopayEnabled) rows.push([btn("₿ Криптовалюта", `pay_proxy_cryptopay:${proxyTariffId}`, undefined, cardId)]);
   for (const m of methods) {
     rows.push([btn(m.label, `pay_proxy:${proxyTariffId}:${m.id}`, undefined, cardId)]);
   }
@@ -539,7 +539,7 @@ export function singboxTariffsOfCategoryButtons(
   const backSty = resolveStyle(toStyle(innerStyles?.back), "danger");
   const tariffId = emojiIds?.tariff;
   for (const t of category.tariffs) {
-    rows.push([btn(`${t.name} — ${t.price} ${t.currency}`.slice(0, 64), `pay_singbox:${t.id}`, tariffPay, tariffId)]);
+    rows.push([btn(`${t.name} от ${t.price} ${t.currency}`.slice(0, 64), `pay_singbox:${t.id}`, tariffPay, tariffId)]);
   }
   rows.push([btn(back, backData, backSty, emojiIds?.back)]);
   return { inline_keyboard: rows };
@@ -580,12 +580,12 @@ export function singboxPaymentMethodButtons(
   const rows: InlineButton[][] = [];
   if (balanceLabel) rows.push([btn(balanceLabel, `pay_singbox_balance:${singboxTariffId}`, undefined, cardId)]);
   if (yoomoneyEnabled && (!currency || currency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮMoney — карта", `pay_singbox_yoomoney:${singboxTariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 ЮMoney (карта)", `pay_singbox_yoomoney:${singboxTariffId}`, undefined, cardId)]);
   }
   if (yookassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
-    rows.push([btn("💳 ЮKassa — карта / СБП", `pay_singbox_yookassa:${singboxTariffId}`, undefined, cardId)]);
+    rows.push([btn("💳 Карта / СБП", `pay_singbox_yookassa:${singboxTariffId}`, undefined, cardId)]);
   }
-  if (cryptopayEnabled) rows.push([btn("💳 Crypto Bot — криптовалюта", `pay_singbox_cryptopay:${singboxTariffId}`, undefined, cardId)]);
+  if (cryptopayEnabled) rows.push([btn("₿ Криптовалюта", `pay_singbox_cryptopay:${singboxTariffId}`, undefined, cardId)]);
   for (const m of methods) {
     rows.push([btn(m.label, `pay_singbox:${singboxTariffId}:${m.id}`, undefined, cardId)]);
   }
@@ -609,13 +609,13 @@ export function topupPaymentMethodButtons(
   const cardId = emojiIds?.card;
   const rows: InlineButton[][] = [];
   if (yoomoneyEnabled) {
-    rows.push([btn("💳 ЮMoney — оплата картой", `topup_yoomoney:${amount}`, "primary", cardId)]);
+    rows.push([btn("💳 ЮMoney (карта)", `topup_yoomoney:${amount}`, "primary", cardId)]);
   }
   if (yookassaEnabled) {
-    rows.push([btn("💳 ЮKassa — карта / СБП", `topup_yookassa:${amount}`, "primary", cardId)]);
+    rows.push([btn("💳 Карта / СБП", `topup_yookassa:${amount}`, "primary", cardId)]);
   }
   if (cryptopayEnabled) {
-    rows.push([btn("💳 Crypto Bot — криптовалюта", `topup_cryptopay:${amount}`, "primary", cardId)]);
+    rows.push([btn("₿ Криптовалюта", `topup_cryptopay:${amount}`, "primary", cardId)]);
   }
   for (const m of methods) {
     rows.push([btn(m.label, `topup:${amount}:${m.id}`, "primary", cardId)]);
@@ -641,7 +641,7 @@ export function extraOptionsButtons(
   const cardId = emojiIds?.card;
   const rows: InlineButton[][] = options.map((o) => {
     const extra = o.kind === "servers" && (o.trafficGb ?? 0) > 0 ? ` + ${o.trafficGb} ГБ` : "";
-    const label = `${o.name || o.kind}${extra} — ${o.price} ${o.currency}`.slice(0, 64);
+    const label = `${o.name || o.kind}${extra} от ${o.price} ${o.currency}`.slice(0, 64);
     return [btn(label, `pay_option:${o.kind}:${o.id}`, "success", cardId)];
   });
   rows.push([btn(back, "menu:main", backSty, emojiIds?.back)]);
@@ -665,22 +665,22 @@ export function optionPaymentMethodButtons(
   const cardId = emojiIds?.card;
   const rows: InlineButton[][] = [];
   if (balance >= option.price) {
-    rows.push([btn(`💰 Оплатить балансом (${option.price} ₽)`, `pay_option_balance:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn(`💰 С баланса (${option.price} ₽)`, `pay_option_balance:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   if (yoomoneyEnabled) {
-    rows.push([btn("💳 ЮMoney — карта", `pay_option_yoomoney:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn("💳 ЮMoney (карта)", `pay_option_yoomoney:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   if (yookassaEnabled !== false) {
-    rows.push([btn("💳 ЮKassa — карта / СБП", `pay_option_yookassa:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn("💳 Карта / СБП", `pay_option_yookassa:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) {
-    rows.push([btn("💳 Crypto Bot — криптовалюта", `pay_option_cryptopay:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn("₿ Криптовалюта", `pay_option_cryptopay:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   for (const m of plategaMethods) {
     rows.push([btn(m.label, `pay_option_platega:${option.kind}:${option.id}:${m.id}`, undefined, cardId)]);
   }
   if (rows.length === 0) {
-    rows.push([btn("💳 Оплата (ЮKassa)", `pay_option_yookassa:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn("💳 Оплата (карта)", `pay_option_yookassa:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   rows.push([btn(back, "menu:extra_options", backSty, emojiIds?.back)]);
   return { inline_keyboard: rows };
@@ -857,7 +857,7 @@ export function giftTariffButtons(
   for (const cat of categories) {
     const prefix = (cat.emoji && cat.emoji.trim()) ? `${cat.emoji} ` : "";
     for (const t of cat.tariffs) {
-      const label = `${prefix}${t.name} — ${t.price} ${t.currency}`.slice(0, 64);
+      const label = `${prefix}${t.name} от ${t.price} ${t.currency}`.slice(0, 64);
       rows.push([btn(label, `gift_tariff:${t.id}`, tariffPay, tariffId)]);
     }
   }
