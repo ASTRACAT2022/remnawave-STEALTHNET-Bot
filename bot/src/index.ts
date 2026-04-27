@@ -81,30 +81,44 @@ async function waitForApi(maxRetries = 10, delayMs = 3000): Promise<Awaited<Retu
 }
 
 async function createBotWithProxy(token: string): Promise<Bot> {
+  let TELEGRAM_API_MIRROR = "https://api.telegram.org";
+
   try {
     const cfg = await waitForApi();
+    if (cfg?.telegramApiProvider) {
+      if (cfg.telegramApiProvider === "astracattg") {
+        TELEGRAM_API_MIRROR = "https://astracattg.netlify.app";
+      } else if (cfg.telegramApiProvider === "official") {
+        TELEGRAM_API_MIRROR = "https://api.telegram.org";
+      }
+    }
+    console.log(`[Bot] Использование провайдера Telegram API: ${TELEGRAM_API_MIRROR}`);
+
     if (cfg?.proxyEnabled && cfg?.proxyTelegram && cfg?.proxyUrl?.trim()) {
       const url = cfg.proxyUrl.trim();
       const lower = url.toLowerCase();
       if (lower.startsWith("http://") || lower.startsWith("https://")) {
-        console.log("[Proxy] Telegram Bot API через HTTP прокси");
+        console.log("[Proxy] Telegram Bot API через HTTP прокси + зеркало");
         return new Bot(token, {
+          api: { root: TELEGRAM_API_MIRROR },
           client: { baseFetchConfig: { dispatcher: new UndiciProxyAgent(url) } as any },
         });
       }
       if (lower.startsWith("socks5://") || lower.startsWith("socks4://") || lower.startsWith("socks://")) {
-        console.log("[Proxy] Telegram Bot API через SOCKS прокси");
+        console.log("[Proxy] Telegram Bot API через SOCKS прокси + зеркало");
         const agent = new SocksProxyAgent(url);
         return new Bot(token, {
+          api: { root: TELEGRAM_API_MIRROR },
           client: { baseFetchConfig: { agent } as any },
         });
       }
-      console.warn(`[Proxy] Неизвестный протокол прокси: ${url}, запуск без прокси`);
+      console.warn(`[Proxy] Неизвестный протокол прокси: ${url}, запуск с зеркалом без прокси`);
     }
   } catch {
-    console.warn("[Bot] Не удалось получить конфиг, запуск без прокси");
+    console.warn("[Bot] Не удалось получить конфиг, запуск с зеркалом без прокси");
+    console.log(`[Bot] Использование провайдера Telegram API: ${TELEGRAM_API_MIRROR}`);
   }
-  return new Bot(token);
+  return new Bot(token, { api: { root: TELEGRAM_API_MIRROR } });
 }
 
 const bot = await createBotWithProxy(BOT_TOKEN);
@@ -372,27 +386,27 @@ function progressBar(pct: number, barLen: number): string {
 }
 
 const DEFAULT_MENU_TEXTS: Record<string, string> = {
-  welcomeTitlePrefix: "🛡 ",
-  welcomeGreeting: "👋 Добро пожаловать в ",
-  balancePrefix: "💰 Баланс: ",
-  tariffPrefix: "💎 Ваш тариф : ",
-  subscriptionPrefix: "{{CHART}} Статус подписки — ",
-  statusInactive: "{{STATUS_INACTIVE}} Истекла",
+  welcomeTitlePrefix: "✨ ",
+  welcomeGreeting: "👋 Привет! Добро пожаловать в ",
+  balancePrefix: "💳 Баланс: ",
+  tariffPrefix: "⚡ Ваш тариф: ",
+  subscriptionPrefix: "{{CHART}} Статус подписки: ",
+  statusInactive: "{{STATUS_INACTIVE}} Неактивна",
   statusActive: "{{STATUS_ACTIVE}} Активна",
   statusExpired: "{{STATUS_EXPIRED}} Истекла",
   statusLimited: "{{STATUS_LIMITED}} Ограничена",
   statusDisabled: "{{STATUS_DISABLED}} Отключена",
-  expirePrefix: "📅 до ",
-  daysLeftPrefix: "⏰ осталось ",
-  devicesLabel: "📱 Устройств: ",
-  devicesAvailable: " доступно",
-  trafficPrefix: "📈 Трафик — ",
-  linkLabel: "🔗 Ссылка подключения:",
-  chooseAction: "Выберите действие:",
+  expirePrefix: "⏳ Действует до ",
+  daysLeftPrefix: "🕐 Осталось ",
+  devicesLabel: "📲 Устройств: ",
+  devicesAvailable: " свободно",
+  trafficPrefix: "📊 Трафик: ",
+  linkLabel: "🔗 Ссылка для подключения:",
+  chooseAction: "🎯 Выберите действие:",
 };
 
-const DEFAULT_TARIFFS_TEXT = "Тарифы\n\n{{CATEGORY}}\n{{TARIFFS}}\n\nВыберите тариф для оплаты:";
-const DEFAULT_PAYMENT_TEXT = "Оплата: {{NAME}} — {{PRICE}}\n\n{{ACTION}}";
+const DEFAULT_TARIFFS_TEXT = "💎 Тарифы\n\n{{CATEGORY}}\n{{TARIFFS}}\n\n🎯 Выберите тариф для оплаты:";
+const DEFAULT_PAYMENT_TEXT = "💳 Оплата: {{NAME}} — {{PRICE}}\n\n{{ACTION}}";
 
 type BotTariffLineFields = {
   name?: boolean;

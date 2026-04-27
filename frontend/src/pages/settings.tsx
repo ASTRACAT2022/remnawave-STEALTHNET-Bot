@@ -615,6 +615,7 @@ export function SettingsPage() {
         publicAppUrl: settings.publicAppUrl ?? null,
         telegramBotToken: settings.telegramBotToken ?? null,
         telegramBotUsername: settings.telegramBotUsername ?? null,
+        telegramApiProvider: (settings as { telegramApiProvider?: string }).telegramApiProvider ?? "official",
         botAdminTelegramIds: settings.botAdminTelegramIds ?? null,
         notificationTelegramGroupId: settings.notificationTelegramGroupId ?? null,
         notificationTopicNewClients: settings.notificationTopicNewClients ?? null,
@@ -3203,6 +3204,20 @@ export function SettingsPage() {
                     onChange={(e) => setSettings((s) => (s ? { ...s, telegramBotUsername: e.target.value || null } : s))}
                     placeholder="MyStealthNetBot"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Провайдер Telegram API</Label>
+                  <select
+                    value={(settings as { telegramApiProvider?: string }).telegramApiProvider ?? "official"}
+                    onChange={(e) => setSettings((s) => (s ? { ...s, telegramApiProvider: e.target.value } : s))}
+                    className="w-full p-2 rounded-md border border-input bg-background text-foreground"
+                  >
+                    <option value="official">Официальный (https://api.telegram.org)</option>
+                    <option value="astracattg">ASTRACAT (https://astracattg.netlify.app)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Выберите провайдер для Telegram Bot API. ASTRACAT - зеркальный сервер, Официальный - официальный API Telegram.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>{t("admin.settings.telegram_admins")}</Label>

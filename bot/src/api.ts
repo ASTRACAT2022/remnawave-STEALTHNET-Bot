@@ -167,6 +167,7 @@ export async function getPublicConfig(): Promise<{
   forceSubscribeEnabled?: boolean;
   forceSubscribeChannelId?: string | null;
   forceSubscribeMessage?: string | null;
+  telegramApiProvider?: string;
   sellOptionsEnabled?: boolean;
   sellOptions?: Array<
     | { kind: "traffic"; id: string; name: string; trafficGb: number; price: number; currency: string }

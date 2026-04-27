@@ -36,6 +36,7 @@ const DEFAULTS: Array<[string, string]> = [
   ["gift_expiry_notification_days", "3"],
   ["gift_referral_enabled", "true"],
   ["gift_message_max_length", "200"],
+  ["telegram_api_provider", "official"],
 ];
 
 export async function ensureSystemSettings() {
