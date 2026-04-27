@@ -135,6 +135,8 @@ export function ClientTariffsPage() {
   // Запрос на покупку тарифа: если есть несколько priceOptions — открываем picker.
   // Иначе если есть активная подписка — warn-modal. Иначе сразу PayModal.
   function requestBuy(tariff: TariffForPay) {
+    // Сбрасываем выбранную опцию при смене тарифа
+    setSelectedPriceOptionId(null);
     const opts = tariff.priceOptions ?? [];
     if (opts.length > 1) {
       setOptionPickerModal({ tariff });
