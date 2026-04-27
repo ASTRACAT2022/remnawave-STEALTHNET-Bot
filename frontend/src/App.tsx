@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
-const routerFutureFlags = {
-  v7_startTransition: true,
-  v7_relativeSplatPath: true,
-};
 import { AuthProvider, useAuth } from "@/contexts/auth";
 import { ClientAuthProvider, useClientAuth } from "@/contexts/client-auth";
 import { ThemeProvider } from "@/contexts/theme";
@@ -419,7 +415,7 @@ export default function App() {
   return (
     <ThemeProvider >
       <AuthProvider>
-        <BrowserRouter future={routerFutureFlags}>
+        <BrowserRouter>
           <AnimatedBackground />
           <TitleAndThemeSync  />
           <AppRoutes />

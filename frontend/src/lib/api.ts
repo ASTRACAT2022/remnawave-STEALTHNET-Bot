@@ -6,6 +6,61 @@ export function setTokenRefreshFn(fn: (() => Promise<string | null>) | null) {
   tokenRefreshFn = fn;
 }
 
+/** Режим технических работ */
+let maintenanceMode = false;
+let maintenanceMessage = "Технические работы. Система временно недоступна.";
+
+/** Проверяет режим технических работ */
+export async function checkMaintenance(): Promise<{ maintenance: boolean; message: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/health/maintenance`);
+    if (res.ok) {
+      const data = await res.json() as { maintenance: boolean; message?: string };
+      maintenanceMode = data.maintenance;
+      if (data.message) maintenanceMessage = data.message;
+      return { maintenance: data.maintenance, message: data.message || maintenanceMessage };
+    }
+  } catch (e) {
+    // Если не удалось проверить, считаем что всё ок
+  }
+  return { maintenance: false, message: "" };
+}
+
+/** Получить статус технических работ (для админки) */
+export async function getMaintenanceStatus(token: string): Promise<{ 
+  maintenanceEnabled: boolean; 
+  maintenanceMessage: string; 
+  remnaApiAvailable: boolean; 
+  lastCheckAt: string;
+}> {
+  return request("/health/status", { token });
+}
+
+/** Включить/выключить режим технических работ */
+export async function setMaintenanceMode(token: string, enabled: boolean, message?: string): Promise<{ 
+  success: boolean; 
+  maintenanceEnabled: boolean;
+  maintenanceMessage: string;
+}> {
+  return request("/health/maintenance", { 
+    method: "POST", 
+    token,
+    body: JSON.stringify({ enabled, message }),
+  });
+}
+
+/** Проверка перед каждым запросом */
+async function checkMaintenanceBeforeRequest(): Promise<void> {
+  if (maintenanceMode) {
+    throw new Error(maintenanceMessage);
+  }
+  // Проверяем актуальный статус
+  await checkMaintenance();
+  if (maintenanceMode) {
+    throw new Error(maintenanceMessage);
+  }
+}
+
 export interface Admin {
   id: string;
   email: string;
@@ -223,6 +278,11 @@ async function request<T>(
   path: string,
   options: RequestInit & { token?: string; _retry?: boolean } = {}
 ): Promise<T> {
+  // Пропускаем проверку для health эндпоинтов
+  if (!path.startsWith("/health")) {
+    await checkMaintenanceBeforeRequest();
+  }
+  
   const { token, _retry, ...init } = options;
   const headers = new Headers(init.headers);
   // Для FormData Content-Type НЕ выставляем: браузер сам добавит boundary.
@@ -1018,18 +1078,18 @@ export const api = {
   },
 
   /** Список сохранённых на сервере бэкапов */
-  async getBackupList(token: string): Promise<{ items: { path: string; filename: string; date: string; size: number }[] }> {
+  async getBackupList(token: string): Promise<{ items: { path: string; filename: string; date: string; size: number; type: "sql" | "json" }[] }> {
     return request("/admin/backup/list", { token });
   },
 
-  /** Скачать бэкап с сервера по пути (path из списка) */
-  async downloadBackup(token: string, path: string): Promise<{ blob: Blob; filename: string }> {
+  /** Скачать бэкап с сервера по имени файла (filename из списка) */
+  async downloadBackup(token: string, filename: string): Promise<{ blob: Blob; filename: string }> {
     const headers = new Headers();
     headers.set("Authorization", `Bearer ${token}`);
-    const res = await fetch(`${API_BASE}/admin/backup/download?path=${encodeURIComponent(path)}`, { headers });
+    const res = await fetch(`${API_BASE}/admin/backup/download?filename=${encodeURIComponent(filename)}`, { headers });
     if (res.status === 401 && token && tokenRefreshFn) {
       const newToken = await tokenRefreshFn();
-      if (newToken) return api.downloadBackup(newToken, path);
+      if (newToken) return api.downloadBackup(newToken, filename);
     }
     if (!res.ok) {
       const text = await res.text();
@@ -1045,19 +1105,19 @@ export const api = {
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
     const match = /filename="?([^";]+)"?/.exec(disposition);
-    const filename = match ? match[1].trim() : path.split("/").pop() || "backup.sql";
-    return { blob, filename };
+    const downloadedFilename = match ? match[1].trim() : filename;
+    return { blob, filename: downloadedFilename };
   },
 
-  /** Восстановить БД из бэкапа на сервере (path из списка) */
+  /** Восстановить БД из бэкапа на сервере (filename из списка) */
   async sendBackupToTelegram(token: string): Promise<{ ok: boolean; message: string }> {
     return request("/admin/backup/send-to-telegram", { method: "POST", token });
   },
 
-  async restoreBackupFromServer(token: string, path: string): Promise<{ message: string }> {
+  async restoreBackupFromServer(token: string, filename: string): Promise<{ message: string }> {
     return request("/admin/backup/restore", {
       method: "POST",
-      body: JSON.stringify({ confirm: "RESTORE", path }),
+      body: JSON.stringify({ confirm: "RESTORE", filename }),
       token,
     });
   },

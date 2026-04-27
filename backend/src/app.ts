@@ -27,6 +27,9 @@ import { externalApiRouter } from "./modules/api-keys/external-api.routes.js";
 import { geoMapRouter } from "./modules/geo-map/geo-map.routes.js";
 import { giftRouter, giftPublicRouter } from "./modules/gift/gift.routes.js";
 import { paymentRedirectRouter } from "./modules/payment-redirect/payment-redirect.routes.js";
+import { startHealthCheck } from "./modules/health/health.service.js";
+import healthRouter from "./modules/health/health.routes.js";
+import { checkMaintenance } from "./modules/health/maintenance.middleware.js";
 
 const app = express();
 
@@ -39,7 +42,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use(cors({
-  origin: env.CORS_ORIGIN === "*" ? true : env.CORS_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean),
+  origin: env.CORS_ORIGIN === "*" ? true : (env.CORS_ORIGIN ? env.CORS_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean) : false),
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Api-Key"],
@@ -130,6 +133,15 @@ app.use("/api/gift/public", giftPublicLimiter);
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", version: "3.2.7" });
 });
+
+// Health Check и управление техническими работами
+app.use("/api/health", healthRouter);
+
+// Запуск Health Checker для Remna API
+startHealthCheck();
+
+// Middleware для проверки режима технических работ
+app.use(checkMaintenance);
 
 // Статика для загруженных файлов (маскоты, видео)
 app.use("/api/uploads", express.static(path.join("/app/uploads"), {

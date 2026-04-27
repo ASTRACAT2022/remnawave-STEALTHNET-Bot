@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/auth";
-import { api, type AdminSettings, type AutoRenewStats, type SyncResult, type SyncToRemnaResult, type SyncCreateRemnaForMissingResult, type SubscriptionPageConfig, type SshConfig } from "@/lib/api";
+import { api, type AdminSettings, type AutoRenewStats, type SyncResult, type SyncToRemnaResult, type SyncCreateRemnaForMissingResult, type SubscriptionPageConfig, type SshConfig, getMaintenanceStatus, setMaintenanceMode } from "@/lib/api";
 import { SubscriptionPageEditor } from "@/components/subscription-page-editor";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -197,6 +197,12 @@ export function SettingsPage() {
   const [plategaCallbackCopied, setPlategaCallbackCopied] = useState(false);
   const [yoomoneyWebhookCopied, setYoomoneyWebhookCopied] = useState(false);
   const [yookassaWebhookCopied, setYookassaWebhookCopied] = useState(false);
+  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("Технические работы. Система временно недоступна.");
+  const [remnaApiAvailable, setRemnaApiAvailable] = useState(true);
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [maintenanceRefreshing, setMaintenanceRefreshing] = useState(false);
+  const [maintenanceSaveMessage, setMaintenanceSaveMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [cryptopayWebhookCopied, setCryptopayWebhookCopied] = useState(false);
   const [heleketWebhookCopied, setHeleketWebhookCopied] = useState(false);
   const [lavaWebhookCopied, setLavaWebhookCopied] = useState(false);
@@ -236,6 +242,17 @@ export function SettingsPage() {
       const codes = Array.from(new Set<string>(["ru", ...res.languages.map((l) => l.code)]));
       setInstalledLangCodes(codes);
     }).catch(() => { /* keep fallback */ });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMaintenanceStatus(token).then((data) => {
+      if (cancelled) return;
+      setMaintenanceEnabled(data.maintenanceEnabled);
+      setMaintenanceMessage(data.maintenanceMessage || "Технические работы. Система временно недоступна.");
+      setRemnaApiAvailable(data.remnaApiAvailable);
+    }).catch(() => { /* keep defaults */ });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -474,6 +491,11 @@ export function SettingsPage() {
     setTwoFaCode("");
     setTwoFaError(null);
   }
+  function closeTwoFaDisable() {
+    setTwoFaDisableOpen(false);
+    setTwoFaCode("");
+    setTwoFaError(null);
+  }
   async function confirmTwoFaDisable() {
     if (!twoFaCode.trim() || twoFaCode.length !== 6) {
       setTwoFaError(t("admin.settings.2fa_enter_code_error"));
@@ -485,12 +507,40 @@ export function SettingsPage() {
       await api.admin2FADisable(token, twoFaCode.trim());
       const admin = await api.getMe(token);
       updateAdmin(admin);
-      setTwoFaDisableOpen(false);
-      setTwoFaCode("");
+      closeTwoFaDisable();
     } catch (e) {
       setTwoFaError(e instanceof Error ? e.message : t("admin.settings.2fa_invalid_code"));
     } finally {
       setTwoFaLoading(false);
+    }
+  }
+
+  async function handleSaveMaintenance() {
+    setMaintenanceSaving(true);
+    setMaintenanceSaveMessage(null);
+    try {
+      await setMaintenanceMode(token, maintenanceEnabled, maintenanceMessage);
+      setMaintenanceSaveMessage({ type: 'success', text: 'Настройки технических работ сохранены' });
+    } catch (e) {
+      setMaintenanceSaveMessage({ type: 'error', text: e instanceof Error ? e.message : 'Ошибка сохранения' });
+    } finally {
+      setMaintenanceSaving(false);
+    }
+  }
+
+  async function handleRefreshMaintenance() {
+    setMaintenanceRefreshing(true);
+    setMaintenanceSaveMessage(null);
+    try {
+      const data = await getMaintenanceStatus(token);
+      setMaintenanceEnabled(data.maintenanceEnabled);
+      setMaintenanceMessage(data.maintenanceMessage || "Технические работы. Система временно недоступна.");
+      setRemnaApiAvailable(data.remnaApiAvailable);
+      setMaintenanceSaveMessage({ type: 'success', text: 'Статус обновлен' });
+    } catch (e) {
+      setMaintenanceSaveMessage({ type: 'error', text: e instanceof Error ? e.message : 'Ошибка обновления статуса' });
+    } finally {
+      setMaintenanceRefreshing(false);
     }
   }
 
@@ -872,6 +922,10 @@ export function SettingsPage() {
           <TabsTrigger value="sync" className="gap-2 py-3 px-4 rounded-xl">
             <ArrowLeftRight className="h-4 w-4 shrink-0" />
             {t("admin.settings.tab_sync")}
+          </TabsTrigger>
+          <TabsTrigger value="maintenance" className="gap-2 py-3 px-4 rounded-xl">
+            <Shield className="h-4 w-4 shrink-0" />
+            Технические работы
           </TabsTrigger>
         </TabsList>
 
@@ -4813,6 +4867,92 @@ export function SettingsPage() {
               </Button>
               {syncMessage && (
                 <span className="text-sm text-muted-foreground">{syncMessage}</span>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="maintenance">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Управление техническими работами
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Включите режим технических работ, чтобы временно заблокировать доступ к системе для пользователей.
+                Также включается автоматически при недоступности Remna API.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      id="maintenance-mode"
+                      checked={maintenanceEnabled}
+                      onCheckedChange={(checked: boolean) => setMaintenanceEnabled(checked)}
+                    />
+                    <div>
+                      <Label htmlFor="maintenance-mode" className="text-base font-medium cursor-pointer">
+                        Режим технических работ
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {maintenanceEnabled ? "Включен" : "Выключен"}
+                      </p>
+                    </div>
+                  </div>
+                  {remnaApiAvailable ? (
+                    <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                      <span className="h-2 w-2 rounded-full bg-green-600 dark:bg-green-400" />
+                      Remna API доступен
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                      <span className="h-2 w-2 rounded-full bg-red-600 dark:bg-red-400" />
+                      Remna API недоступен
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maintenance-message">Сообщение для пользователей</Label>
+                <Textarea
+                  id="maintenance-message"
+                  placeholder="Технические работы. Система временно недоступна."
+                  value={maintenanceMessage}
+                  onChange={(e) => setMaintenanceMessage(e.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Это сообщение будет показано пользователям в боте и на веб-панели при включенном режиме технических работ.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleSaveMaintenance}
+                  disabled={maintenanceSaving}
+                >
+                  {maintenanceSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Сохранить настройки
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleRefreshMaintenance}
+                  disabled={maintenanceRefreshing}
+                >
+                  {maintenanceRefreshing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Обновить статус
+                </Button>
+              </div>
+
+              {maintenanceSaveMessage && (
+                <div className={`text-sm ${maintenanceSaveMessage.type === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {maintenanceSaveMessage.text}
+                </div>
               )}
             </CardContent>
           </Card>

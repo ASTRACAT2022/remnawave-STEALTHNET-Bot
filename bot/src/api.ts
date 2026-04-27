@@ -7,6 +7,36 @@ if (!API_URL) {
   console.warn("API_URL not set in .env — bot API calls will fail");
 }
 
+let maintenanceMode = false;
+let maintenanceMessage = "Технические работы. Система временно недоступна.";
+
+/** Проверяет режим технических работ */
+async function checkMaintenance(): Promise<void> {
+  try {
+    const res = await fetch(`${API_URL}/api/health/maintenance`);
+    if (res.ok) {
+      const data = await res.json() as { maintenance: boolean; message?: string };
+      maintenanceMode = data.maintenance;
+      if (data.message) maintenanceMessage = data.message;
+    }
+  } catch (e) {
+    // Если не удалось проверить, считаем что всё ок
+    maintenanceMode = false;
+  }
+}
+
+/** Проверка перед каждым запросом */
+async function checkMaintenanceBeforeRequest(): Promise<void> {
+  if (maintenanceMode) {
+    throw new Error(maintenanceMessage);
+  }
+  // Проверяем актуальный статус
+  await checkMaintenance();
+  if (maintenanceMode) {
+    throw new Error(maintenanceMessage);
+  }
+}
+
 function getHeaders(token?: string): HeadersInit {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h["Authorization"] = `Bearer ${token}`;
@@ -14,6 +44,8 @@ function getHeaders(token?: string): HeadersInit {
 }
 
 async function fetchJson<T>(path: string, opts?: { method?: string; body?: unknown; token?: string }): Promise<T> {
+  await checkMaintenanceBeforeRequest();
+  
   const res = await fetch(`${API_URL}${path}`, {
     method: opts?.method ?? "GET",
     headers: getHeaders(opts?.token),
@@ -29,6 +61,8 @@ async function fetchJson<T>(path: string, opts?: { method?: string; body?: unkno
 
 /** Привязка Telegram к аккаунту по коду (вызывается ботом при /link КОД) */
 export async function linkTelegramFromBot(code: string, telegramId: number, telegramUsername?: string): Promise<{ message: string }> {
+  await checkMaintenanceBeforeRequest();
+  
   const botToken = process.env.BOT_TOKEN || "";
   const res = await fetch(`${API_URL}/api/public/link-telegram-from-bot`, {
     method: "POST",
