@@ -498,7 +498,7 @@ export async function getSystemConfig() {
     publicAppUrl: map.public_app_url || null,
     telegramBotToken: map.telegram_bot_token || null,
     telegramBotUsername: map.telegram_bot_username || null,
-    telegramApiProvider: map.telegram_api_provider || "official",
+    telegramApiProvider: map.telegram_api_provider || process.env.TELEGRAM_API_PROVIDER || "official",
     botAdminTelegramIds: parseBotAdminTelegramIds(map.bot_admin_telegram_ids),
     notificationTelegramGroupId: (map.notification_telegram_group_id ?? "").trim() || null,
     notificationTopicNewClients: (map.notification_topic_new_clients ?? "").trim() || null,

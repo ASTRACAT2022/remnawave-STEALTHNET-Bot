@@ -47,6 +47,7 @@ services:
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
       BOT_TOKEN: "${BOT_TOKEN:-}"
+      TELEGRAM_API_PROVIDER: "${TELEGRAM_API_PROVIDER:-official}"
     volumes:
       - /etc/ssh:/host-etc/ssh
       - /proc:/host-proc:ro
