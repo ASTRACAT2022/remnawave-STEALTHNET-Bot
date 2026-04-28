@@ -33,20 +33,7 @@ export async function checkRemnaApiHealth(): Promise<boolean> {
       error: result.error,
     };
     
-    // Если Remna API недоступно, автоматически включаем режим технических работ
-    if (!isAvailable) {
-      await prisma.systemSetting.upsert({
-        where: { key: "maintenance_mode" },
-        update: { value: "true" },
-        create: { key: "maintenance_mode", value: "true" },
-      });
-      
-      await prisma.systemSetting.upsert({
-        where: { key: "maintenance_message" },
-        update: { value: "Remna API недоступен. Технические работы. Система временно недоступна." },
-        create: { key: "maintenance_message", value: "Remna API недоступен. Технические работы. Система временно недоступна." },
-      });
-    }
+    // Автоматическое включение maintenance mode отключено
     
     return isAvailable;
   } catch (e) {
@@ -57,22 +44,7 @@ export async function checkRemnaApiHealth(): Promise<boolean> {
       error,
     };
     
-    // Автоматически включаем режим технических работ при ошибке
-    try {
-      await prisma.systemSetting.upsert({
-        where: { key: "maintenance_mode" },
-        update: { value: "true" },
-        create: { key: "maintenance_mode", value: "true" },
-      });
-      
-      await prisma.systemSetting.upsert({
-        where: { key: "maintenance_message" },
-        update: { value: "Ошибка соединения с Remna API. Технические работы. Система временно недоступна." },
-        create: { key: "maintenance_message", value: "Ошибка соединения с Remna API. Технические работы. Система временно недоступна." },
-      });
-    } catch (dbError) {
-      console.error("Failed to enable maintenance mode:", dbError);
-    }
+    // Автоматическое включение maintenance mode отключено
     
     return false;
   }
