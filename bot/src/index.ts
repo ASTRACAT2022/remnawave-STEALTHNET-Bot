@@ -100,17 +100,17 @@ async function createBotWithProxy(token: string): Promise<Bot> {
       if (lower.startsWith("http://") || lower.startsWith("https://")) {
         console.log("[Proxy] Telegram Bot API через HTTP прокси + зеркало");
         return new Bot(token, {
-          api: { root: TELEGRAM_API_MIRROR } as any,
+          api: { root: TELEGRAM_API_MIRROR },
           client: { baseFetchConfig: { dispatcher: new UndiciProxyAgent(url) } as any },
-        });
+        } as any);
       }
       if (lower.startsWith("socks5://") || lower.startsWith("socks4://") || lower.startsWith("socks://")) {
         console.log("[Proxy] Telegram Bot API через SOCKS прокси + зеркало");
         const agent = new SocksProxyAgent(url);
         return new Bot(token, {
-          api: { root: TELEGRAM_API_MIRROR } as any,
+          api: { root: TELEGRAM_API_MIRROR },
           client: { baseFetchConfig: { agent } as any },
-        });
+        } as any);
       }
       console.warn(`[Proxy] Неизвестный протокол прокси: ${url}, запуск с зеркалом без прокси`);
     }
