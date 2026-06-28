@@ -3569,7 +3569,22 @@ clientRouter.post("/payments/platega", async (req, res) => {
   });
 
   if ("error" in result) {
-    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    const meta = payment.metadata ? JSON.parse(payment.metadata) as Record<string, unknown> : {};
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        metadata: JSON.stringify({
+          ...meta,
+          businessRetry: {
+            firstSeenAt: new Date().toISOString(),
+            lastCheckedAt: new Date().toISOString(),
+            attempts: 1,
+            lastError: result.error,
+            finalReason: "platega_create_api_error_pending_final_check",
+          },
+        }),
+      },
+    });
     return res.status(502).json({ message: result.error });
   }
 
@@ -5076,9 +5091,29 @@ clientRouter.post("/yookassa/create-payment", async (req, res) => {
     });
 
     if (!result.ok) {
-      await prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
+      const meta = payment.metadata ? JSON.parse(payment.metadata) as Record<string, unknown> : {};
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          metadata: JSON.stringify({
+            ...meta,
+            businessRetry: {
+              firstSeenAt: new Date().toISOString(),
+              lastCheckedAt: new Date().toISOString(),
+              attempts: 1,
+              lastError: result.error,
+              finalReason: "yookassa_create_api_error_pending_final_check",
+            },
+          }),
+        },
+      }).catch(() => {});
       return res.status(500).json({ message: result.error });
     }
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { externalId: result.paymentId },
+    }).catch(() => {});
 
     const confirmationUrl = await saveRedirectAndBuildUrl(payment.id, orderId, result.confirmationUrl, config.publicAppUrl);
 
@@ -7276,5 +7311,3 @@ publicConfigRouter.get("/singbox-tariffs", async (req, res) => {
     return res.status(500).json({ message: "Ошибка загрузки тарифов Sing-box" });
   }
 });
-
-

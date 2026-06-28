@@ -829,6 +829,9 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
   const customBuild = parseCustomBuildMetadata(payment.metadata);
   if (customBuild) {
     const result = await createAdditionalSubscription(client.id, customBuild, { purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
+    if (result.ok) {
+      await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+    }
     return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
   }
 
