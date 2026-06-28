@@ -1460,6 +1460,33 @@ clientRouter.patch("/auto-renew", async (req, res) => {
     data: updates,
     select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, remnawaveUuid: true, trialUsed: true, isBlocked: true, autoRenewEnabled: true, autoRenewTariffId: true, autoRenewPromoCode: true, createdAt: true, onboardingCompleted: true, passwordHash: true },
   });
+
+  const subUpdates: {
+    autoRenewEnabled?: boolean;
+    autoRenewTariffId?: string | null;
+    autoRenewPriceOptionId?: string | null;
+    autoRenewExtraDevices?: number;
+    autoRenewPromoCode?: string | null;
+  } = {};
+  if (updates.autoRenewEnabled !== undefined) subUpdates.autoRenewEnabled = updates.autoRenewEnabled;
+  if (updates.autoRenewTariffId !== undefined) subUpdates.autoRenewTariffId = updates.autoRenewTariffId;
+  if (updates.autoRenewPriceOptionId !== undefined) subUpdates.autoRenewPriceOptionId = updates.autoRenewPriceOptionId;
+  if (updates.autoRenewExtraDevices !== undefined) subUpdates.autoRenewExtraDevices = updates.autoRenewExtraDevices;
+  if (updates.autoRenewPromoCode !== undefined) subUpdates.autoRenewPromoCode = updates.autoRenewPromoCode;
+  if (Object.keys(subUpdates).length > 0) {
+    const primary = await prisma.subscription.findUnique({
+      where: { ownerId_subscriptionIndex: { ownerId: client.id, subscriptionIndex: 0 } },
+      select: { id: true, tariffId: true },
+    });
+    if (primary) {
+      if (subUpdates.autoRenewEnabled === true && subUpdates.autoRenewTariffId === undefined && primary.tariffId) {
+        subUpdates.autoRenewTariffId = primary.tariffId;
+      }
+      await prisma.subscription.update({ where: { id: primary.id }, data: subUpdates }).catch((e) => {
+        console.warn("[client/auto-renew] failed to sync primary subscription:", e instanceof Error ? e.message : e);
+      });
+    }
+  }
   return res.json(toClientShape(updated));
 });
 
@@ -2938,7 +2965,7 @@ clientRouter.post("/subscription/:type/:id/auto-renew", async (req, res) => {
   };
   if (enabled) {
     const lastPaid = await prisma.payment.findFirst({
-      where: { clientId, status: "PAID", tariffId: { not: null } },
+      where: { clientId, subscriptionId: sub.id, status: "PAID", tariffId: { not: null } },
       orderBy: { paidAt: "desc" },
       select: { tariffId: true, tariffPriceOptionId: true, deviceCount: true },
     });
@@ -7249,6 +7276,5 @@ publicConfigRouter.get("/singbox-tariffs", async (req, res) => {
     return res.status(500).json({ message: "Ошибка загрузки тарифов Sing-box" });
   }
 });
-
 
 

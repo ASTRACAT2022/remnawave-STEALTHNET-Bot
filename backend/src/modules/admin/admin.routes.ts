@@ -314,41 +314,41 @@ adminRouter.get("/auto-renew/stats", async (_req, res) => {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   const [
-    totalAutoRenewEnabled,
-    totalAutoRenewDisabled,
-    retriesInProgress,
+    enabledSubscriptions,
+    disabledSubscriptions,
+    enabledClients,
+    disabledClients,
+    subscriptionRetries,
+    clientRetries,
     renewalsLast30Days,
     renewalsLast7Days,
     renewalAmountLast30Days,
   ] = await Promise.all([
-    // Clients with auto-renewal enabled
+    prisma.subscription.count({ where: { autoRenewEnabled: true, tariffId: { not: null } } }),
+    prisma.subscription.count({ where: { autoRenewEnabled: false, autoRenewTariffId: { not: null } } }),
     prisma.client.count({ where: { autoRenewEnabled: true, autoRenewTariffId: { not: null } } }),
-    // Clients who had it but now disabled
     prisma.client.count({ where: { autoRenewEnabled: false, autoRenewTariffId: { not: null } } }),
-    // Clients currently in retry state
+    prisma.subscription.count({ where: { autoRenewEnabled: true, autoRenewRetryCount: { gt: 0 } } }),
     prisma.client.count({ where: { autoRenewEnabled: true, autoRenewRetryCount: { gt: 0 } } }),
-    // Successful auto-renewals (balance payments with tariff) in 30 days
     prisma.payment.count({
       where: {
-        provider: "balance",
+        metadata: { contains: "autoRenew" },
         status: "PAID",
         tariffId: { not: null },
         paidAt: { gte: thirtyDaysAgo },
       },
     }),
-    // Successful auto-renewals in 7 days
     prisma.payment.count({
       where: {
-        provider: "balance",
+        metadata: { contains: "autoRenew" },
         status: "PAID",
         tariffId: { not: null },
         paidAt: { gte: sevenDaysAgo },
       },
     }),
-    // Total amount of balance-tariff payments in 30 days
     prisma.payment.aggregate({
       where: {
-        provider: "balance",
+        metadata: { contains: "autoRenew" },
         status: "PAID",
         tariffId: { not: null },
         paidAt: { gte: thirtyDaysAgo },
@@ -358,9 +358,9 @@ adminRouter.get("/auto-renew/stats", async (_req, res) => {
   ]);
 
   return res.json({
-    enabled: totalAutoRenewEnabled,
-    disabled: totalAutoRenewDisabled,
-    retriesInProgress,
+    enabled: enabledSubscriptions || enabledClients,
+    disabled: disabledSubscriptions || disabledClients,
+    retriesInProgress: subscriptionRetries + clientRetries,
     renewalsLast7Days,
     renewalsLast30Days,
     amountLast30Days: renewalAmountLast30Days._sum.amount ?? 0,
