@@ -119,6 +119,43 @@ function calculateExpireAt(currentExpireAt: Date | null, durationDays: number): 
   return new Date(base.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+type CabinetPaymentKind = "tariff" | "proxy" | "singbox" | "wdtt" | "custom_build" | "option" | "topup";
+
+function detectCabinetPaymentKind(input: {
+  tariffId?: string | null;
+  proxyTariffId?: string | null;
+  singboxTariffId?: string | null;
+  wdttTariffId?: string | null;
+  customBuild?: unknown;
+  extraOption?: unknown;
+  metadata?: string | null;
+}): CabinetPaymentKind {
+  if (input.tariffId) return "tariff";
+  if (input.proxyTariffId) return "proxy";
+  if (input.singboxTariffId) return "singbox";
+  if (input.wdttTariffId) return "wdtt";
+  if (input.customBuild) return "custom_build";
+  if (input.extraOption) return "option";
+  if (input.metadata) {
+    try {
+      const meta = JSON.parse(input.metadata) as Record<string, unknown>;
+      if (meta.customBuild) return "custom_build";
+      if (meta.extraOption) return "option";
+    } catch {
+      /* ignore malformed legacy metadata */
+    }
+  }
+  return "topup";
+}
+
+function buildCabinetPaymentResultUrl(appUrl: string, kind: CabinetPaymentKind, status: "success" | "failed", orderId?: string): string {
+  if (!appUrl) return "";
+  const path = status === "success" && kind !== "topup" ? "/cabinet/subscribe" : "/cabinet/dashboard";
+  const params = new URLSearchParams({ payment: status, payment_kind: kind });
+  if (orderId) params.set("oid", orderId);
+  return `${appUrl}${path}?${params.toString()}`;
+}
+
 /**
  * Определяет, какому Bot-клону принадлежит запрос на регистрацию/логин.
  *
@@ -3503,14 +3540,17 @@ clientRouter.post("/payments/platega", async (req, res) => {
 
   const serviceName = config.serviceName?.trim() || "STEALTHNET";
   const orderId = randomUUID();
-  const paymentKind = tariffIdToStore ? "tariff" : proxyTariffIdToStore ? "proxy" : singboxTariffIdToStore ? "singbox" : wdttTariffIdToStore ? "wdtt" : metadataExtra ? "option" : "topup";
+  const paymentKind = detectCabinetPaymentKind({
+    tariffId: tariffIdToStore,
+    proxyTariffId: proxyTariffIdToStore,
+    singboxTariffId: singboxTariffIdToStore,
+    wdttTariffId: wdttTariffIdToStore,
+    customBuild: customBuildBody,
+    extraOption,
+  });
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const returnUrl = appUrl
-    ? `${appUrl}/cabinet/dashboard?payment=success&payment_kind=${paymentKind}&oid=${orderId}`
-    : "";
-  const failedUrl = appUrl
-    ? `${appUrl}/cabinet/dashboard?payment=failed&payment_kind=${paymentKind}&oid=${orderId}`
-    : "";
+  const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
+  const failedUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId);
   // добавляем tg:<id> в description для удобного поиска
   // в кабинете Plategá (зеркалит логику YooKassa/CryptoPay).
   const plategaClient = await prisma.client.findUnique({
@@ -4676,7 +4716,15 @@ clientRouter.post("/yoomoney/create-form-payment", async (req, res) => {
 
   const serviceName = config.serviceName?.trim() || "STEALTHNET";
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const successURL = appUrl ? `${appUrl}/cabinet?yoomoney_form=success` : "";
+  const paymentKind = detectCabinetPaymentKind({
+    tariffId: tariffIdToStore,
+    proxyTariffId: proxyTariffIdToStore,
+    singboxTariffId: singboxTariffIdToStore,
+    wdttTariffId: wdttTariffIdToStore,
+    customBuild: customBuildBody,
+    extraOption,
+  });
+  const successURL = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
   const targets = tariffIdToStore
     ? `Тариф ${serviceName} #${orderId}`
     : proxyTariffIdToStore
@@ -4723,7 +4771,16 @@ clientRouter.get("/yoomoney/form-payment/:paymentId", async (req, res) => {
 
   const payment = await prisma.payment.findFirst({
     where: { id: paymentId, clientId, status: "PENDING", provider: "yoomoney_form" },
-    select: { id: true, amount: true, metadata: true },
+    select: {
+      id: true,
+      amount: true,
+      metadata: true,
+      orderId: true,
+      tariffId: true,
+      proxyTariffId: true,
+      singboxTariffId: true,
+      wdttTariffId: true,
+    },
   });
   if (!payment) return res.status(404).json({ message: "Платёж не найден или уже оплачен" });
 
@@ -4738,7 +4795,8 @@ clientRouter.get("/yoomoney/form-payment/:paymentId", async (req, res) => {
   } catch { /* ignore */ }
 
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const successURL = appUrl ? `${appUrl}/cabinet?yoomoney_form=success` : "";
+  const paymentKind = detectCabinetPaymentKind(payment);
+  const successURL = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", payment.orderId);
 
   return res.json({
     receiver,
@@ -5057,7 +5115,15 @@ clientRouter.post("/yookassa/create-payment", async (req, res) => {
 
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const returnUrl = appUrl ? `${appUrl}/cabinet?yookassa=success` : "";
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
     // добавляем tg:<id> в description, чтобы админ мог
     // быстро искать платежи по telegram_id в кабинете YooKassa (раньше там был
     // только orderId UUID, который никак не связать с клиентом без БД).
@@ -5686,7 +5752,15 @@ clientRouter.post("/heleket/create-payment", async (req, res) => {
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
     const urlCallback = appUrl ? `${appUrl}/api/webhooks/heleket` : undefined;
-    const urlSuccess = appUrl ? `${appUrl}/cabinet?heleket=success` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const urlSuccess = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
     const urlReturn = appUrl ? `${appUrl}/cabinet?heleket=return` : undefined;
 
     const result = await createHeleketInvoice({
@@ -5969,8 +6043,16 @@ clientRouter.post("/lava/create-payment", async (req, res) => {
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
     const hookUrl = appUrl ? `${appUrl}/api/webhooks/lava` : undefined;
-    const successUrl = appUrl ? `${appUrl}/cabinet?lava=success` : undefined;
-    const failUrl = appUrl ? `${appUrl}/cabinet?lava=fail` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const successUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
+    const failUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId) || undefined;
 
     const result = await createLavaInvoice({
       config: lavaConfig,
@@ -6276,8 +6358,15 @@ clientRouter.post("/lavatop/create-payment", async (req, res) => {
     });
 
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const redirectUrl = appUrl ? `${appUrl}/cabinet?lavatop=success` : undefined;
-    const failUrl = appUrl ? `${appUrl}/cabinet?lavatop=fail` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const redirectUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
+    const failUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId) || undefined;
 
     // Для покупки тарифа используем подписку MONTHLY — Lava.top будет авто-списывать
     // ежемесячно, и при каждом списании webhook продлит тариф у клиента (см. lavatop
@@ -6546,7 +6635,15 @@ clientRouter.post("/overpay/create-payment", async (req, res) => {
 
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const returnUrl = appUrl ? `${appUrl}/cabinet?overpay=return` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
 
     const clientRow = await prisma.client.findUnique({
       where: { id: clientId },

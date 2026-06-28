@@ -277,7 +277,7 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
                 inline_keyboard: [
                   [{ text: "📤 Поделиться в Telegram", url: shareUrl }],
                   [{ text: "🎁 Мои подарки", callback_data: "gift:subscriptions" }],
-                  [{ text: "🏠 Главное меню", callback_data: "menu:main" }],
+                  [{ text: "🏠 Перейти к главному окну", callback_data: "menu:main" }],
                 ],
               },
             }),
@@ -321,11 +321,12 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
     const headline = isAdminGrant
       ? `✅ Администратор выдал Вам подписку Тариф «<b>${escapeHtml(tariffName)}</b>»`
       : `✅ <b>Тариф «${escapeHtml(tariffName)}»</b> оплачен и активирован`;
+    const successBlock = isAdminGrant ? "" : `\n\nПлатёж прошёл успешно. Подписка уже готова к использованию.`;
     // если админ оставил комментарий — показываем клиенту.
     const noteBlock = (isAdminGrant && adminNote)
       ? `\n\n💬 <i>${escapeHtml(adminNote)}</i>`
       : "";
-    const textClient = `${headline}.${noteBlock}${linkBlock}`;
+    const textClient = `${headline}.${successBlock}${noteBlock}${linkBlock}`;
     const hasLocations = !!(payment?.tariff?.locations?.trim());
     type Row = ({ text: string; callback_data: string } | { text: string; url: string })[];
     const rows: Row[] = [];
@@ -334,7 +335,7 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
       rows.push([{ text: "🌐 Локации", callback_data: `menu:locations:${payment.tariffId}` }]);
     }
     rows.push([{ text: "📋 Мои подписки", callback_data: "menu:my_subs" }]);
-    rows.push([{ text: cfg.botBackLabel ?? "🏠 Главное меню", callback_data: "menu:main" }]);
+    rows.push([{ text: "🏠 Перейти к главному окну", callback_data: "menu:main" }]);
     await sendTelegramToUser(client.telegramId, textClient, null, { inline_keyboard: rows }, {
       clientIdForBotToken: clientId,
     });
