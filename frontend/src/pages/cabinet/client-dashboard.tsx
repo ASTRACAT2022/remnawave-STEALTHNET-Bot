@@ -37,6 +37,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+
+type SubscriptionMeta = {
+  id: string | null;
+  displayName: string | null;
+  description: string | null;
+};
+
+type DashboardSubscriptionItem = {
+  type: string;
+  id: string;
+  subscriptionIndex: number | null;
+  subscription: unknown;
+  tariffDisplayName: string;
+  remnawaveUuid: string | null;
+  displayName?: string | null;
+  description?: string | null;
+};
 
 const StealthDashboard = lazy(() => import("@/pages/cabinet/stealth/stealth-dashboard").then((m) => ({ default: m.StealthDashboard })));
 
@@ -111,6 +129,109 @@ function parseSubscription(sub: unknown): {
   };
 }
 
+function SubscriptionMetadataEditor({
+  token,
+  subscriptionId,
+  displayName,
+  description,
+  accent = "primary",
+  onSaved,
+}: {
+  token: string | null | undefined;
+  subscriptionId: string | null | undefined;
+  displayName?: string | null;
+  description?: string | null;
+  accent?: "primary" | "indigo";
+  onSaved: (subscriptionId: string, meta: { displayName: string | null; description: string | null }) => void;
+}) {
+  const [nameValue, setNameValue] = useState(displayName ?? "");
+  const [descriptionValue, setDescriptionValue] = useState(description ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNameValue(displayName ?? "");
+    setDescriptionValue(description ?? "");
+  }, [displayName, description]);
+
+  if (!token || !subscriptionId) return null;
+
+  const changed = nameValue.trim() !== (displayName ?? "").trim() || descriptionValue.trim() !== (description ?? "").trim();
+  const color = accent === "indigo" ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20" : "text-primary bg-primary/10 border-primary/20";
+
+  async function save() {
+    if (!token || !subscriptionId || !changed) return;
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const result = await api.clientUpdateSubscriptionMetadata(token, subscriptionId, {
+        displayName: nameValue.trim() || null,
+        description: descriptionValue.trim() || null,
+      });
+      onSaved(subscriptionId, { displayName: result.displayName, description: result.description });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось сохранить");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/50 bg-background/40 p-4 shadow-sm space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Имя и описание</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Показывается в боте и биллинге</p>
+        </div>
+        {saved && (
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${color}`}>
+            <Check className="h-3.5 w-3.5" />
+            Сохранено
+          </span>
+        )}
+      </div>
+      <Input
+        value={nameValue}
+        onChange={(e) => setNameValue(e.target.value.slice(0, 120))}
+        placeholder="Например: iPhone, Дом, Рабочий ноутбук"
+        maxLength={120}
+        className="bg-background/60"
+      />
+      <Textarea
+        value={descriptionValue}
+        onChange={(e) => setDescriptionValue(e.target.value.slice(0, 1000))}
+        placeholder="Описание или заметка по подписке"
+        maxLength={1000}
+        className="min-h-[76px] resize-none bg-background/60"
+      />
+      {error && <p className="text-xs font-medium text-destructive">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={save} disabled={!changed || saving} className="gap-2">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          Сохранить
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={saving || (!nameValue && !descriptionValue)}
+          onClick={() => {
+            setNameValue("");
+            setDescriptionValue("");
+          }}
+          className="gap-2 text-muted-foreground"
+        >
+          <X className="h-4 w-4" />
+          Очистить
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Wrapper: switcher между Classic-версией главной и новым Stealth-дизайном.
  * Делается тонким wrapper'ом, чтобы не нарушать правила хуков (хуки реальной
@@ -134,7 +255,8 @@ function ClassicDashboardPage() {
   const config = useCabinetConfig();
   const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<unknown>(null);
-  const [secondarySubscriptions, setSecondarySubscriptions] = useState<Array<{ type: string; id: string; subscriptionIndex: number | null; subscription: unknown; tariffDisplayName: string; remnawaveUuid: string | null }>>([]);
+  const [primarySubscriptionMeta, setPrimarySubscriptionMeta] = useState<SubscriptionMeta>({ id: null, displayName: null, description: null });
+  const [secondarySubscriptions, setSecondarySubscriptions] = useState<DashboardSubscriptionItem[]>([]);
   const [tariffDisplayName, setTariffDisplayName] = useState<string | null>(null);
   const [autoRenewNext, setAutoRenewNext] = useState<{ amount: number | null; at: string | null; currency: string | null }>({ amount: null, at: null, currency: null });
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -193,6 +315,11 @@ function ClassicDashboardPage() {
       .then(([subRes, payRes, devRes, allSubRes]) => {
         if (cancelled) return;
         setSubscription(subRes.subscription ?? null);
+        setPrimarySubscriptionMeta({
+          id: subRes.subscriptionId ?? null,
+          displayName: subRes.displayName ?? null,
+          description: subRes.description ?? null,
+        });
         setTariffDisplayName(subRes.tariffDisplayName ?? null);
         setAutoRenewNext({
           amount: subRes.autoRenewNextChargeAmount ?? null,
@@ -325,6 +452,15 @@ function ClassicDashboardPage() {
     ? Math.min(100, Math.round((subParsed.trafficUsed / subParsed.trafficLimitBytes) * 100))
     : null;
 
+  const handleSubscriptionMetaSaved = (subscriptionId: string, meta: { displayName: string | null; description: string | null }) => {
+    if (primarySubscriptionMeta.id === subscriptionId) {
+      setPrimarySubscriptionMeta({ id: subscriptionId, ...meta });
+    }
+    setSecondarySubscriptions((items) =>
+      items.map((item) => item.id === subscriptionId ? { ...item, ...meta } : item)
+    );
+  };
+
   const expireDate = subParsed.expireAt ? (() => { try { const d = new Date(subParsed.expireAt); return Number.isNaN(d.getTime()) ? null : d; } catch { return null; } })() : null;
   const daysLeft = expireDate && expireDate > new Date()
     ? Math.max(0, Math.ceil((expireDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
@@ -412,6 +548,14 @@ function ClassicDashboardPage() {
                 )}
               </div>
 
+              <SubscriptionMetadataEditor
+                token={token}
+                subscriptionId={primarySubscriptionMeta.id}
+                displayName={primarySubscriptionMeta.displayName}
+                description={primarySubscriptionMeta.description}
+                onSaved={handleSubscriptionMetaSaved}
+              />
+
               <div className="space-y-3 border-t border-border/50 pt-4 mt-2">
                 {((tariffDisplayName ?? subParsed.productName) || client?.trialUsed) && (
                   <div className="flex items-center gap-4 bg-background/40 p-3.5 rounded-2xl border border-border/50 transition-colors hover:bg-background/60 shadow-sm">
@@ -480,7 +624,7 @@ function ClassicDashboardPage() {
                 <div className="p-1.5 bg-indigo-500/20 rounded-lg">
                   <Package className="h-4 w-4 shrink-0 text-indigo-400" />
                 </div>
-                Дополнительная подписка #{sec.subscriptionIndex ?? ""}
+                {sec.displayName?.trim() || `Дополнительная подписка #${sec.subscriptionIndex ?? ""}`}
               </h2>
               
               <div className="space-y-4 min-w-0">
@@ -509,6 +653,15 @@ function ClassicDashboardPage() {
                 </div>
 
                 <div className="space-y-3 border-t border-border/50 pt-4 mt-2">
+                  <SubscriptionMetadataEditor
+                    token={token}
+                    subscriptionId={sec.id}
+                    displayName={sec.displayName ?? null}
+                    description={sec.description ?? null}
+                    accent="indigo"
+                    onSaved={handleSubscriptionMetaSaved}
+                  />
+
                   {sec.tariffDisplayName && (
                     <div className="flex items-center gap-4 bg-background/40 p-3.5 rounded-2xl border border-border/50 transition-colors hover:bg-background/60 shadow-sm">
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-400">
@@ -840,6 +993,13 @@ function ClassicDashboardPage() {
                     </span>
                   )}
                 </div>
+                <SubscriptionMetadataEditor
+                  token={token}
+                  subscriptionId={primarySubscriptionMeta.id}
+                  displayName={primarySubscriptionMeta.displayName}
+                  description={primarySubscriptionMeta.description}
+                  onSaved={handleSubscriptionMetaSaved}
+                />
                 {((tariffDisplayName ?? subParsed.productName) || client?.trialUsed) && (
                   <div className="flex items-center gap-4 bg-background/40 p-4 rounded-2xl border border-border/50 transition-colors hover:bg-background/60 shadow-sm">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -1083,7 +1243,7 @@ function ClassicDashboardPage() {
                         <div className="p-2.5 bg-indigo-500/20 rounded-xl">
                           <Package className="h-5 w-5 text-indigo-400" />
                         </div>
-                        Подписка #{sec.subscriptionIndex ?? ""}
+                        {sec.displayName?.trim() || `Подписка #${sec.subscriptionIndex ?? ""}`}
                       </div>
                       {secHasActive ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
@@ -1112,6 +1272,15 @@ function ClassicDashboardPage() {
                           </span>
                         )}
                       </div>
+
+                      <SubscriptionMetadataEditor
+                        token={token}
+                        subscriptionId={sec.id}
+                        displayName={sec.displayName ?? null}
+                        description={sec.description ?? null}
+                        accent="indigo"
+                        onSaved={handleSubscriptionMetaSaved}
+                      />
                       
                       {sec.tariffDisplayName && (
                         <div className="flex items-center gap-4 bg-background/40 p-4 rounded-2xl border border-border/50 transition-colors hover:bg-background/60 shadow-sm">

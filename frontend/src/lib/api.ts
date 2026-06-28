@@ -1832,14 +1832,25 @@ export const api = {
     /** ISO-дата следующего списания (за N дней до истечения, N из config.autoRenewDaysBeforeExpiry). */
     autoRenewNextChargeAt?: string | null;
     autoRenewCurrency?: string | null;
+    subscriptionId?: string | null;
+    displayName?: string | null;
+    description?: string | null;
     message?: string;
   }> {
     return request("/client/subscription", { token });
   },
 
   /** Подписка по Remnawave UUID (для secondary подписок на /cabinet/subscribe?uuid=xxx) */
-  async clientSubscriptionByUuid(token: string, uuid: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string }> {
+  async clientSubscriptionByUuid(token: string, uuid: string): Promise<{ subscription: unknown; subscriptionId?: string | null; displayName?: string | null; description?: string | null; tariffDisplayName?: string | null; message?: string }> {
     return request(`/client/subscription/by-uuid/${encodeURIComponent(uuid)}`, { token });
+  },
+
+  async clientUpdateSubscriptionMetadata(token: string, subscriptionId: string, data: { displayName?: string | null; description?: string | null }): Promise<{ id: string; displayName: string | null; description: string | null }> {
+    return request(`/client/subscription/${encodeURIComponent(subscriptionId)}/metadata`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(data),
+    });
   },
 
   /** Все подписки клиента (root + secondary) с Remnawave-данными */
@@ -1853,6 +1864,8 @@ export const api = {
       remnawaveUuid: string | null;
       tariffId?: string | null;
       trialId?: string | null;
+      displayName?: string | null;
+      description?: string | null;
       autoRenewEnabled?: boolean;
       tariffMenuEmoji?: string | null;
       extraDevices?: number;
@@ -3273,6 +3286,8 @@ export interface AdminClientSubscriptionItem {
   subscriptionIndex: number;
   isPrimary: boolean;
   remnawaveUuid: string | null;
+  displayName: string | null;
+  description: string | null;
   tariffId: string | null;
   tariffName: string | null;
   giftStatus: string | null;

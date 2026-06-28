@@ -156,6 +156,16 @@ function buildCabinetPaymentResultUrl(appUrl: string, kind: CabinetPaymentKind, 
   return `${appUrl}${path}?${params.toString()}`;
 }
 
+function normalizeSubscriptionDisplayName(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim().replace(/\s+/g, " ");
+  return trimmed ? trimmed.slice(0, 120) : null;
+}
+
+function normalizeSubscriptionDescription(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed ? trimmed.slice(0, 1000) : null;
+}
+
 /**
  * Определяет, какому Bot-клону принадлежит запрос на регистрацию/логин.
  *
@@ -2569,7 +2579,7 @@ clientRouter.get("/subscription", async (req, res) => {
   // EXPIRED Remna-юзера, тогда как subscriptions хранит актуального). Бот берёт из subscriptions — кабинет теперь тоже.
   const rootSub = await prisma.subscription.findFirst({
     where: { ownerId: client.id, subscriptionIndex: 0, remnawaveUuid: { not: null } },
-    select: { remnawaveUuid: true },
+    select: { id: true, remnawaveUuid: true, displayName: true, description: true },
   });
   const effectiveUuid = rootSub?.remnawaveUuid ?? client.remnawaveUuid;
   if (!effectiveUuid) {
@@ -2682,6 +2692,9 @@ clientRouter.get("/subscription", async (req, res) => {
 
   return res.json({
     subscription: result.data ?? null,
+    subscriptionId: rootSub?.id ?? null,
+    displayName: rootSub?.displayName ?? null,
+    description: rootSub?.description ?? null,
     tariffDisplayName,
     currentPricePerDay: dbClient?.currentPricePerDay ?? null,
     autoRenewNextChargeAmount,
@@ -2704,13 +2717,21 @@ clientRouter.get("/subscription/by-uuid/:uuid", async (req, res) => {
 
   // Проверяем принадлежность: root или secondary подписка
   const isRoot = client.remnawaveUuid === uuid;
+  let matchedSub: { id: string; displayName: string | null; description: string | null } | null = null;
   if (!isRoot) {
     const secondarySub = await prisma.subscription.findFirst({
       where: { ownerId: clientId, remnawaveUuid: uuid },
+      select: { id: true, displayName: true, description: true },
     });
     if (!secondarySub) {
       return res.status(404).json({ subscription: null, tariffDisplayName: null, message: "Подписка не найдена" });
     }
+    matchedSub = secondarySub;
+  } else {
+    matchedSub = await prisma.subscription.findFirst({
+      where: { ownerId: clientId, remnawaveUuid: uuid },
+      select: { id: true, displayName: true, description: true },
+    });
   }
 
   const result = await remnaGetUser(uuid);
@@ -2722,7 +2743,13 @@ clientRouter.get("/subscription/by-uuid/:uuid", async (req, res) => {
     await encryptSubscriptionUrlInPlace(result.data);
   }
   const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null);
-  return res.json({ subscription: result.data ?? null, tariffDisplayName });
+  return res.json({
+    subscription: result.data ?? null,
+    subscriptionId: matchedSub?.id ?? null,
+    displayName: matchedSub?.displayName ?? null,
+    description: matchedSub?.description ?? null,
+    tariffDisplayName,
+  });
 });
 
 /**
@@ -2749,6 +2776,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
     remnawaveUuid: string | null;
     tariffId: string | null;
     trialId: string | null;
+    displayName: string | null;
+    description: string | null;
     autoRenewEnabled: boolean;
     tariffMenuEmoji: string | null;
     /** кол-во докупленных доп. устройств. */
@@ -2768,6 +2797,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
       id: true,
       remnawaveUuid: true,
       subscriptionIndex: true,
+      displayName: true,
+      description: true,
       trialId: true,
       giftStatus: true,
       autoRenewEnabled: true,
@@ -2807,6 +2838,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
       remnawaveUuid: sub.remnawaveUuid,
       tariffId: sub.tariff?.id ?? null,
       trialId: sub.trialId ?? null,
+      displayName: sub.displayName ?? null,
+      description: sub.description ?? null,
       autoRenewEnabled: sub.autoRenewEnabled === true,
       tariffMenuEmoji: sub.tariff?.menuEmoji?.trim() || null,
       extraDevices: sub.extraDevices ?? 0,
@@ -2816,6 +2849,53 @@ clientRouter.get("/subscription/all", async (req, res) => {
 
   console.log(`[subscription/all] client=${clientId} total=${visible.length}`);
   return res.json({ items });
+});
+
+const subscriptionMetadataSchema = z.object({
+  displayName: z.string().max(120).nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+clientRouter.patch("/subscription/:id/metadata", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const subscriptionId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+  if (!subscriptionId) return res.status(400).json({ message: "subscriptionId required" });
+
+  const parsed = subscriptionMetadataSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Неверные параметры", errors: parsed.error.flatten() });
+  }
+
+  const sub = await prisma.subscription.findFirst({
+    where: {
+      id: subscriptionId,
+      OR: [
+        { ownerId: clientId },
+        { giftedToClientId: clientId, giftStatus: "GIFTED" },
+      ],
+    },
+    select: { id: true },
+  });
+  if (!sub) return res.status(404).json({ message: "Подписка не найдена" });
+
+  const data: { displayName?: string | null; description?: string | null } = {};
+  if ("displayName" in parsed.data) {
+    data.displayName = normalizeSubscriptionDisplayName(parsed.data.displayName);
+  }
+  if ("description" in parsed.data) {
+    data.description = normalizeSubscriptionDescription(parsed.data.description);
+  }
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ message: "Нет данных для сохранения" });
+  }
+
+  const updated = await prisma.subscription.update({
+    where: { id: subscriptionId },
+    data,
+    select: { id: true, displayName: true, description: true },
+  });
+
+  return res.json(updated);
 });
 
 /**

@@ -6178,6 +6178,8 @@ adminRouter.get("/clients/:id/subscriptions", asyncRoute(async (req, res) => {
       subscriptionIndex: s.subscriptionIndex,
       isPrimary: s.subscriptionIndex === 0,
       remnawaveUuid: s.remnawaveUuid,
+      displayName: s.displayName,
+      description: s.description,
       tariffId: s.tariffId,
       tariffName: s.tariff?.name ?? null,
       giftStatus: s.giftStatus,

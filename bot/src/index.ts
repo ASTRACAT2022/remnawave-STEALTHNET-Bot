@@ -386,6 +386,12 @@ const extendingSecondaryPending = new Map<number, { tariffId: string; secondaryI
  */
 const pendingDropExtras = new Map<number, string>();
 
+const awaitingSubscriptionMetadata = new Map<number, {
+  field: "displayName" | "description";
+  subType: "root" | "secondary";
+  subId: string;
+}>();
+
 /**
  * целевая подписка для покупаемой extra-option.
  * userId → "primary" (= client.remnawaveUuid) или secondaryId.
@@ -1053,9 +1059,21 @@ function formatSubLine(item: {
   /** T16 (12.05.2026) — название тарифа и кастомный эмодзи для главного меню. */
   tariffDisplayName?: string | null;
   tariffMenuEmoji?: string | null;
+  displayName?: string | null;
 }): string {
   const { idx, typeEmoji, statusEmojiBig, daysStr, dateStr, trafficSuffix } = parseSubInfo(item);
-  return `${statusEmojiBig} ${typeEmoji} Подписка #${idx} — **${daysStr}** до ${dateStr}${trafficSuffix}`;
+  const title = subscriptionDisplayTitle(item);
+  return `${statusEmojiBig} ${typeEmoji} ${title} — **${daysStr}** до ${dateStr}${trafficSuffix}`;
+}
+
+function subscriptionDisplayTitle(item: { subscriptionIndex: number | null; displayName?: string | null }): string {
+  const custom = item.displayName?.trim();
+  return custom || `Подписка #${item.subscriptionIndex ?? 0}`;
+}
+
+function subscriptionShortTitle(item: { subscriptionIndex: number | null; displayName?: string | null }, max = 28): string {
+  const title = subscriptionDisplayTitle(item);
+  return title.length > max ? `${title.slice(0, max - 1)}…` : title;
 }
 
 function buildMainMenuText(opts: {
@@ -1083,6 +1101,7 @@ function buildMainMenuText(opts: {
       subscriptionIndex: number | null;
       subscription: unknown;
       tariffDisplayName: string;
+      displayName?: string | null;
       /** T16 (12.05.2026) — эмодзи-префикс тарифа для главного меню бота. */
       tariffMenuEmoji?: string | null;
     }>;
@@ -1836,18 +1855,19 @@ composer.command("subscriptions", async (ctx) => {
     const buttonItems = sorted.map((it) => {
       const info = parseSubInfo(it);
       const trialBodyMark = it.trialId ? " 🎁" : "";
+      const title = subscriptionDisplayTitle(it);
       // без названия тарифа в текстовой строке —
       // для истёкших «❌ истекла», для активных «N дн. до DD.MM.YYYY [+трафик]».
       if (info.isExpired) {
-        bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — ❌ истекла`);
+        bodyLines.push(`${info.typeEmoji} ${title}${trialBodyMark} — ❌ истекла`);
       } else {
-        bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
+        bodyLines.push(`${info.typeEmoji} ${title}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
       }
       // В кнопке: «✅/❌ #N <tariff> (N дн./истекла)». tariffDisplayName уже с эмодзи.
       const tariff = (it.tariffDisplayName || "—").slice(0, 38);
       const trialBtnMark = it.trialId ? " 🎁" : "";
       const lifetimeStr = info.isExpired ? "истекла" : info.daysStr;
-      const label = `${info.statusEmojiSmall} #${info.idx} ${tariff} (${lifetimeStr})${trialBtnMark}`;
+      const label = `${info.statusEmojiSmall} ${subscriptionShortTitle(it, 18)} ${tariff} (${lifetimeStr})${trialBtnMark}`;
       return { type: it.type, id: it.id, label };
     });
     const { text, entities } = applyMarkdownAndEmoji(bodyLines.join("\n"), cfg?.botEmojis ?? null);
@@ -4999,14 +5019,14 @@ composer.on("callback_query:data", async (ctx) => {
           const info = parseSubInfo(s);
           const idx = s.subscriptionIndex ?? 0;
           // primary slot = «Главная», остальные = «#N»
-          const typeText = idx === 0 ? "🌟 Главная" : `Подписка #${idx}`;
+          const typeText = s.displayName?.trim() || (idx === 0 ? "🌟 Главная" : `Подписка #${idx}`);
           const isBlocked = blockedSet.has(s.id);
           const blockedPrefix = isBlocked ? "🚫 " : "";
           bodyLines.push(`${blockedPrefix}${info.statusEmojiSmall} ${typeText} — ${info.daysStr} до ${info.dateStr}${info.trafficSuffix}`);
           // ВСЕ подписки идут через pay_tariff_ext:<id> — единый flow продления.
           // Заблокированные тоже ведут в pay_tariff_ext — там pre-check покажет сообщение.
           const callback = `pay_tariff_ext:${s.id}`;
-          const btnLabel = `${blockedPrefix}${idx === 0 ? "🌟 Главная" : "#" + idx} ${info.daysStr}`;
+          const btnLabel = `${blockedPrefix}${subscriptionShortTitle(s, 26)} ${info.daysStr}`;
           rows.push([{ text: btnLabel.slice(0, 60), callback_data: callback.slice(0, 64) }]);
         }
         { const bk = backButton(config?.botEmojis ?? null); rows.push([{ text: bk.text, callback_data: `pay_tariff:${tariffId}` }]); }
@@ -6132,12 +6152,13 @@ composer.on("callback_query:data", async (ctx) => {
           // T15.4: маркер 🎁 для триал-подписок в текстовой строке (под лимит callback_data
           // в кнопках уже не влезает, поэтому только в body).
           const trialBodyMark = it.trialId ? " 🎁" : "";
+          const title = subscriptionDisplayTitle(it);
           // без названия тарифа в текстовой строке —
           // для истёкших «❌ истекла», для активных «N дн. до DD.MM.YYYY [+трафик]».
           if (info.isExpired) {
-            bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — ❌ истекла`);
+            bodyLines.push(`${info.typeEmoji} ${title}${trialBodyMark} — ❌ истекла`);
           } else {
-            bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
+            bodyLines.push(`${info.typeEmoji} ${title}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
           }
           // tariffDisplayName уже содержит эмодзи категории (🌐/🔒) в начале — не дублируем
           // typeEmoji в лейбле кнопки. Slice 38 → запас под Telegram-лимит 64 байта.
@@ -6145,7 +6166,7 @@ composer.on("callback_query:data", async (ctx) => {
           // T15.4: для trial — компактный маркер 🎁 в конце лейбла кнопки.
           const trialBtnMark = it.trialId ? " 🎁" : "";
           const lifetimeStr = info.isExpired ? "истекла" : info.daysStr;
-          const label = `${info.statusEmojiSmall} #${info.idx} ${tariff} (${lifetimeStr})${trialBtnMark}`;
+          const label = `${info.statusEmojiSmall} ${subscriptionShortTitle(it, 18)} ${tariff} (${lifetimeStr})${trialBtnMark}`;
           return { type: it.type, id: it.id, label };
         });
         const { text, entities } = applyMarkdownAndEmoji(bodyLines.join("\n"), config?.botEmojis ?? null);
@@ -6171,6 +6192,7 @@ composer.on("callback_query:data", async (ctx) => {
       const subId = rest.slice(sep + 1);
       // очистка маркера если юзер вернулся в детали подписки
       pendingDropExtras.delete(userId);
+      awaitingSubscriptionMetadata.delete(userId);
       try {
         const result = await api.getAllSubscriptions(token);
         const item = result.items.find((it) => it.type === subType && it.id === subId);
@@ -6245,10 +6267,17 @@ composer.on("callback_query:data", async (ctx) => {
         // все подписки равные. Триал-метка остаётся (это отдельная семантика, не root/secondary).
         const isTrialSub = !!item.trialId;
         const trialMark = isTrialSub ? "🎁 Пробная" : "";
+        const displayTitle = subscriptionDisplayTitle(item);
+        const description = item.description?.trim();
         const lines = [
-          `📲 Подписка #${idx}`,
+          `📲 ${displayTitle}`,
           "",
         ];
+        if (item.displayName?.trim()) lines.push(`🔖 Номер: #${idx}`);
+        if (description) {
+          lines.push(`📝 ${description}`);
+          lines.push("");
+        }
         if (trialMark) lines.push(trialMark);
         lines.push(`💎 Тариф: ${tariff}`);
         lines.push(`📊 Статус подписки — ${statusLabel}`);
@@ -6293,6 +6322,27 @@ composer.on("callback_query:data", async (ctx) => {
         const msg = e instanceof Error ? e.message : "Ошибка";
         await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
       }
+      return;
+    }
+
+    if (data.startsWith("sub:edit_name:") || data.startsWith("sub:edit_desc:")) {
+      const isName = data.startsWith("sub:edit_name:");
+      const prefix = isName ? "sub:edit_name:" : "sub:edit_desc:";
+      const rest = data.slice(prefix.length);
+      const sep = rest.indexOf(":");
+      if (sep === -1) return;
+      const subType = rest.slice(0, sep) as "root" | "secondary";
+      const subId = rest.slice(sep + 1);
+      awaitingSubscriptionMetadata.set(userId, { field: isName ? "displayName" : "description", subType, subId });
+      await editMessageContent(
+        ctx,
+        isName
+          ? "✏️ Введите новое имя подписки.\n\nНапример: Дом, iPhone, Рабочий ноутбук.\n\nЧтобы очистить имя, отправьте: -"
+          : "📝 Введите описание подписки.\n\nНапример: Для семьи, основной телефон, серверы EU.\n\nЧтобы очистить описание, отправьте: -",
+        {
+          inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${subType}:${subId}` }]],
+        },
+      );
       return;
     }
 
@@ -7317,6 +7367,34 @@ composer.on("message:text", async (ctx) => {
   if (!token) return;
   const publicConfig = await api.getPublicConfig().catch(() => null);
   if (await enforceSubscription(ctx, publicConfig)) return;
+
+  if (awaitingSubscriptionMetadata.has(userId)) {
+    const pending = awaitingSubscriptionMetadata.get(userId)!;
+    awaitingSubscriptionMetadata.delete(userId);
+    const raw = ctx.message.text.trim();
+    const shouldClear = raw === "-" || raw.toLowerCase() === "очистить";
+    const limit = pending.field === "displayName" ? 120 : 1000;
+    const value = shouldClear ? null : raw.slice(0, limit);
+    if (!shouldClear && !value.trim()) {
+      await ctx.reply("Введите непустой текст или отправьте - чтобы очистить.", {
+        reply_markup: { inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${pending.subType}:${pending.subId}` }]] },
+      });
+      return;
+    }
+    try {
+      await api.updateSubscriptionMetadata(token, pending.subId, { [pending.field]: value });
+      const label = pending.field === "displayName" ? "Имя подписки" : "Описание подписки";
+      await ctx.reply(shouldClear ? `✅ ${label} очищено.` : `✅ ${label} сохранено.`, {
+        reply_markup: { inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${pending.subType}:${pending.subId}` }]] },
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка сохранения";
+      await ctx.reply(`❌ ${msg}`, {
+        reply_markup: { inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${pending.subType}:${pending.subId}` }]] },
+      });
+    }
+    return;
+  }
 
   // Если пользователь ожидает ввод подарочного кода
   if (awaitingGiftCode.has(userId)) {

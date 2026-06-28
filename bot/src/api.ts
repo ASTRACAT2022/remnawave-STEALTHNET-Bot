@@ -1074,6 +1074,10 @@ export type SubscriptionListItem = {
   /** T15.4 (11.05.2026): id триала, если подписка была создана через активацию пробного.
    *  Бот рисует пометку «🎁 Пробная» и кнопку «🔄 Конвертировать в платную». null = обычная sub. */
   trialId: string | null;
+  /** Пользовательское имя подписки, задаётся в боте или биллинге. */
+  displayName?: string | null;
+  /** Пользовательское описание/заметка по подписке. */
+  description?: string | null;
   /** включено ли индивидуальное автосписание для этой подписки. */
   autoRenewEnabled?: boolean;
   /** эмодзи-префикс из админки (Tariff.menuEmoji) для главного меню бота.
@@ -1100,6 +1104,18 @@ export async function getAllSubscriptions(
   token: string
 ): Promise<{ items: SubscriptionListItem[] }> {
   return fetchJson("/api/client/subscription/all", { token });
+}
+
+export async function updateSubscriptionMetadata(
+  token: string,
+  subscriptionId: string,
+  data: { displayName?: string | null; description?: string | null },
+): Promise<{ id: string; displayName: string | null; description: string | null }> {
+  return fetchJson(`/api/client/subscription/${encodeURIComponent(subscriptionId)}/metadata`, {
+    method: "PATCH",
+    token,
+    body: data,
+  });
 }
 
 /**

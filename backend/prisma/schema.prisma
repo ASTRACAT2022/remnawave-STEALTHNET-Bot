@@ -1064,6 +1064,8 @@ model Subscription {
   /// Первая созданная любого типа всегда получает 0. После «обнуления» главной
   /// (tariffId=null) запись остаётся, новая покупка продлевает её.
   subscriptionIndex        Int       @map("subscription_index")
+  displayName              String?   @map("display_name") @db.VarChar(120)
+  description              String?   @db.Text
   tariffId                 String?   @map("tariff_id")
   giftStatus               String?   @map("gift_status") // null = owned | GIFT_RESERVED | GIFT_CODE_ACTIVE | GIFTED
   giftedToClientId         String?   @map("gifted_to_client_id") // если подарено — кому
