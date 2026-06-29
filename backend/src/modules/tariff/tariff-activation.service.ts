@@ -746,23 +746,14 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
     return { ok: false, error: "Клиент не найден", status: 404 };
   }
 
-  // УНИФИЦИРОВАННАЯ логика покупки тарифа.
-  //
-  // Раньше было 3 разные ветки:
-  //   1. extendsSecondaryId → extendSecondarySubscription (продление конкретной подписки)
-  //   2. isAdditional → createAdditionalSubscription (новая доп.)
-  //   3. legacy primary → activateTariffForClient (продление Subscription[0]!) ← БАГ
-  //
-  // Теперь:
-  //   1. extendsSecondaryId → продление этой подписки (явный intent клиента)
-  //   2. ИНАЧЕ → ВСЕГДА createAdditionalSubscription (новая подписка).
-  //      Для свежего клиента она получит subscriptionIndex=0 (= primary).
-  //      Для клиента с подписками — subscriptionIndex=max+1.
-  //
-  // Эффект: «обычная покупка» больше никогда не продлевает чужую подписку. Хочешь
-  // продлить — явный extendsSecondarySubId в metadata. Хочешь новую — просто покупай.
+  // Обычная покупка тарифа продлевает текущую primary-ссылку клиента.
+  // Новая Remnawave-ссылка создаётся только при явном intent:
+  //   1. extendsSecondaryId → продление выбранной подписки.
+  //   2. isAdditionalSubscription / purchasedAsGift → новая доп./подарочная подписка.
+  //   3. иначе → activateTariffForClient обновляет текущий UUID и применяет опции тарифа.
   const extendsSecondaryId = getExtendsSecondarySubId(payment.metadata);
   const isGiftPurchase = isGiftPurchasePayment(payment.metadata);
+  const isAdditionalPurchase = isAdditionalSubscriptionPayment(payment.metadata);
 
   if (payment.tariffId) {
     const tariff = await prisma.tariff.findUnique({ where: { id: payment.tariffId } });
@@ -807,23 +798,49 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
       return result;
     }
 
-    // ── Ветка 2: новая подписка (любая покупка тарифа без extendsSecondaryId) ──
-    const result = await createAdditionalSubscription(client.id, {
+    // ── Ветка 2: явная новая подписка / подарок ──────────────────────────────
+    if (isAdditionalPurchase || isGiftPurchase) {
+      const result = await createAdditionalSubscription(client.id, {
+        id: tariff.id,
+        name: tariff.name,
+        price: selectedOption?.price ?? tariff.price,
+        durationDays: selectedOption?.durationDays ?? tariff.durationDays,
+        trafficLimitBytes: tariff.trafficLimitBytes,
+        deviceLimit: tariff.deviceLimit,
+        includedDevices: tariff.includedDevices,
+        internalSquadUuids: tariff.internalSquadUuids,
+        trafficResetMode: tariff.trafficResetMode ?? undefined,
+      }, { extraDevices: payment.deviceCount ?? 0, purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
+      if (result.ok) {
+        await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+        await resetOneTimeDiscount();
+      }
+      return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
+    }
+
+    // ── Ветка 3: обычная покупка тарифа = продление текущей primary-ссылки ────
+    const result = await activateTariffForClient(client, {
       id: tariff.id,
-      name: tariff.name,
-      price: selectedOption?.price ?? tariff.price,
       durationDays: selectedOption?.durationDays ?? tariff.durationDays,
       trafficLimitBytes: tariff.trafficLimitBytes,
       deviceLimit: tariff.deviceLimit,
       includedDevices: tariff.includedDevices,
+      pricePerExtraDevice: tariff.pricePerExtraDevice,
+      maxExtraDevices: tariff.maxExtraDevices,
+      deviceDiscountTiers: tariff.deviceDiscountTiers,
       internalSquadUuids: tariff.internalSquadUuids,
       trafficResetMode: tariff.trafficResetMode ?? undefined,
-    }, { extraDevices: payment.deviceCount ?? 0, purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
+      price: selectedOption?.price ?? tariff.price,
+    }, selectedOption, payment.deviceCount ?? undefined);
     if (result.ok) {
-      await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+      const primary = await prisma.subscription.findUnique({
+        where: { ownerId_subscriptionIndex: { ownerId: client.id, subscriptionIndex: 0 } },
+        select: { id: true },
+      }).catch(() => null);
+      await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: primary?.id ?? null } }).catch(() => {});
       await resetOneTimeDiscount();
     }
-    return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
+    return result;
   }
 
   const customBuild = parseCustomBuildMetadata(payment.metadata);
@@ -862,6 +879,17 @@ function isGiftPurchasePayment(metadata: string | null): boolean {
   try {
     const o = JSON.parse(metadata) as Record<string, unknown>;
     return o?.purchasedAsGift === true;
+  } catch {
+    return false;
+  }
+}
+
+/** metadata.isAdditionalSubscription=true → клиент явно покупает новую параллельную ссылку. */
+function isAdditionalSubscriptionPayment(metadata: string | null): boolean {
+  if (!metadata?.trim()) return false;
+  try {
+    const o = JSON.parse(metadata) as Record<string, unknown>;
+    return o?.isAdditionalSubscription === true;
   } catch {
     return false;
   }

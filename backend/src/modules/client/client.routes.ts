@@ -3752,7 +3752,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   const parsed = payByBalanceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
 
-  const { tariffId, tariffPriceOptionId, deviceCount, proxyTariffId, singboxTariffId, wdttTariffId, promoCode: promoCodeStr, extendsSecondarySubId, removeExtrasOnActivate, asAdditional } = parsed.data;
+  const { tariffId, tariffPriceOptionId, deviceCount, proxyTariffId, singboxTariffId, wdttTariffId, promoCode: promoCodeStr, extendsSecondarySubId, removeExtrasOnActivate, asAdditional, asGift } = parsed.data;
 
   if (proxyTariffId) {
     const tariff = await prisma.proxyTariff.findUnique({ where: { id: proxyTariffId } });
@@ -4038,15 +4038,13 @@ clientRouter.post("/payments/balance", async (req, res) => {
     return res.status(400).json({ message: `Недостаточно средств. Баланс: ${clientDb.balance.toFixed(2)}, нужно: ${tariffPaySnap.amount.toFixed(2)}` });
   }
 
-  // УНИФИЦИРОВАННАЯ покупка балансом.
-  //
-  // 1. extendsSecondarySubId → явное продление конкретной подписки.
-  // 2. ИНАЧЕ → ВСЕГДА новая подписка через createAdditionalSubscription.
-  //    Старая ветка `activateTariffForClient` (которая продлевала Subscription[0]) удалена,
-  //    потому что: «обычная покупка тарифа» должна создавать НОВУЮ подписку, а не складывать
-  //    дни в primary. Хочешь продлить — нажми «Продлить подписку» (передаст extendsSecondarySubId).
+  // Покупка балансом:
+  // 1. extendsSecondarySubId → явное продление выбранной подписки.
+  // 2. asAdditional/asGift → новая доп./подарочная ссылка.
+  // 3. обычная покупка тарифа → продление текущей primary-ссылки клиента.
   let activateResult: { ok: true; subscriptionId?: string } | { ok: false; error: string; status: number };
   let isExtendingSecondary = false;
+  let isExtendingPrimary = false;
   let createdSubscriptionId: string | null = null;
 
   if (extendsSecondarySubId) {
@@ -4067,11 +4065,8 @@ clientRouter.post("/payments/balance", async (req, res) => {
     );
     isExtendingSecondary = true;
     createdSubscriptionId = extendsSecondarySubId;
-  } else {
-    // Любая «новая покупка тарифа» — через единый createAdditionalSubscription.
-    // Для свежего клиента она получит subscriptionIndex=0 (= главная). Для уже имеющего
-    // подписки — следующий свободный индекс. Без затирания/смешивания.
-    void asAdditional;
+  } else if (asAdditional || asGift) {
+    // Явная покупка новой ссылки: отдельная подписка или подарок.
     const { createAdditionalSubscription } = await import("../gift/gift.service.js");
     const addResult = await createAdditionalSubscription(clientRaw.id, {
       id: tariff.id,
@@ -4083,11 +4078,39 @@ clientRouter.post("/payments/balance", async (req, res) => {
       includedDevices: tariff.includedDevices,
       internalSquadUuids: tariff.internalSquadUuids,
       trafficResetMode: tariff.trafficResetMode ?? undefined,
-    }, { extraDevices: requestedExtras, skipConfigCheck: true });
+    }, { extraDevices: requestedExtras, purchasedAsGift: asGift === true, skipConfigCheck: true });
     activateResult = addResult.ok
       ? { ok: true, subscriptionId: addResult.data.subscriptionId }
       : { ok: false, error: addResult.error, status: addResult.status };
     if (addResult.ok) createdSubscriptionId = addResult.data.subscriptionId;
+  } else {
+    const { activateTariffForClient } = await import("../tariff/tariff-activation.service.js");
+    activateResult = await activateTariffForClient(
+      clientRaw,
+      {
+        id: tariff.id,
+        durationDays: selectedOption?.durationDays ?? tariff.durationDays,
+        trafficLimitBytes: tariff.trafficLimitBytes,
+        deviceLimit: tariff.deviceLimit,
+        includedDevices: tariff.includedDevices,
+        pricePerExtraDevice: tariff.pricePerExtraDevice,
+        maxExtraDevices: tariff.maxExtraDevices,
+        deviceDiscountTiers: tariff.deviceDiscountTiers,
+        internalSquadUuids: tariff.internalSquadUuids,
+        trafficResetMode: tariff.trafficResetMode ?? undefined,
+        price: selectedOption?.price ?? tariff.price,
+      },
+      selectedOption ? { id: selectedOption.id, durationDays: selectedOption.durationDays, price: selectedOption.price } : undefined,
+      requestedExtras,
+    );
+    isExtendingPrimary = true;
+    if (activateResult.ok) {
+      const primary = await prisma.subscription.findUnique({
+        where: { ownerId_subscriptionIndex: { ownerId: clientRaw.id, subscriptionIndex: 0 } },
+        select: { id: true },
+      }).catch(() => null);
+      createdSubscriptionId = primary?.id ?? null;
+    }
   }
   if (!activateResult.ok) {
     // Remna послала — возвращаем бабки.
@@ -4121,6 +4144,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   if (removeExtrasOnActivate === true && extendsSecondarySubId) tariffMeta.removeExtrasOnActivate = true;
   // T-fix (11.05.2026): маркер покупки доп. подписки балансом (без gift).
   if (asAdditional && !extendsSecondarySubId) tariffMeta.isAdditionalSubscription = true;
+  if (asGift === true && !extendsSecondarySubId) tariffMeta.purchasedAsGift = true;
   const payment = await createPayment({
     data: asPaymentUncheckedCreate({
       clientId: clientRaw.id,
@@ -4169,7 +4193,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   }
 
   // T7b: сообщение клиенту — продлено или активировано (как fallback в кабинете/мини-аппе).
-  const okMessage = isExtendingSecondary
+  const okMessage = isExtendingSecondary || isExtendingPrimary
     ? `🔄 Подписка продлена на ${effectiveDays} дн.! Списано ${tariffPaySnap.amount.toFixed(2)} ${tariff.currency.toUpperCase()} с баланса.`
     : `Тариф «${tariff.name}» активирован! Списано ${tariffPaySnap.amount.toFixed(2)} ${tariff.currency.toUpperCase()} с баланса.`;
   return res.json({
