@@ -5,15 +5,15 @@ import { cn } from "@/lib/utils";
 export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
 
 const FIELD_OPTICS: Partial<GlassOptics> = {
-  strength: 0.07,
-  depth: 0.34,
-  curvature: 0.14,
-  dispersion: 0.08,
+  strength: 0.15,
+  depth: 0.44,
+  curvature: 0.38,
+  dispersion: 0.2,
   bend: 0.22,
-  frost: 1.8,
-  brightness: 0.78,
-  sheen: 0.18,
-  glow: 0.08,
+  frost: 1.2,
+  brightness: 0.45,
+  sheen: 0.08,
+  glow: 0.02,
 };
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
@@ -23,7 +23,6 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         className={cn("liquid-glass-field flex min-h-[88px] w-full rounded-2xl", className)}
         radius={16}
         optics={FIELD_OPTICS}
-        behind="transparent"
       >
         <textarea
           className="relative z-10 flex min-h-[88px] w-full rounded-2xl border-0 bg-transparent px-4 py-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"

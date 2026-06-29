@@ -21,37 +21,37 @@ const strengthToMaterial: Record<LegacyStrength, GlassMaterial> = {
 
 const GLASS_OPTICS: Record<Exclude<GlassMaterial, "none">, Partial<GlassOptics>> = {
   clear: {
-    strength: 0.07,
-    depth: 0.34,
-    curvature: 0.14,
-    dispersion: 0.08,
+    strength: 0.15,
+    depth: 0.44,
+    curvature: 0.38,
+    dispersion: 0.2,
     bend: 0.22,
-    frost: 1.8,
-    brightness: 0.76,
-    sheen: 0.18,
-    glow: 0.08,
+    frost: 0.8,
+    brightness: 0.4,
+    sheen: 0.06,
+    glow: 0.01,
   },
   regular: {
-    strength: 0.09,
-    depth: 0.42,
-    curvature: 0.18,
-    dispersion: 0.1,
+    strength: 0.2,
+    depth: 0.5,
+    curvature: 0.48,
+    dispersion: 0.26,
     bend: 0.28,
-    frost: 2.4,
-    brightness: 0.78,
-    sheen: 0.24,
-    glow: 0.1,
+    frost: 1.2,
+    brightness: 0.45,
+    sheen: 0.08,
+    glow: 0.02,
   },
   prominent: {
-    strength: 0.12,
-    depth: 0.5,
-    curvature: 0.24,
-    dispersion: 0.14,
+    strength: 0.28,
+    depth: 0.6,
+    curvature: 0.6,
+    dispersion: 0.34,
     bend: 0.34,
-    frost: 3,
-    brightness: 0.8,
-    sheen: 0.3,
-    glow: 0.14,
+    frost: 1.6,
+    brightness: 0.5,
+    sheen: 0.1,
+    glow: 0.03,
   },
 };
 
@@ -93,13 +93,10 @@ export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanel
             className="liquid-glass-view__optic"
             radius={radius}
             optics={GLASS_OPTICS[resolvedMaterial]}
-            behind="transparent"
           >
             <span className="block h-full w-full" />
           </Glass>
         ) : null}
-        <div className="liquid-glass-view__highlight" aria-hidden />
-        <div className="liquid-glass-view__rim" aria-hidden />
         <div className="relative z-10">{children}</div>
       </div>
     );
