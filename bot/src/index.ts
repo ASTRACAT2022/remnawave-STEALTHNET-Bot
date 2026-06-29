@@ -7374,12 +7374,15 @@ composer.on("message:text", async (ctx) => {
     const raw = ctx.message.text.trim();
     const shouldClear = raw === "-" || raw.toLowerCase() === "очистить";
     const limit = pending.field === "displayName" ? 120 : 1000;
-    const value = shouldClear ? null : raw.slice(0, limit);
-    if (!shouldClear && !value.trim()) {
-      await ctx.reply("Введите непустой текст или отправьте - чтобы очистить.", {
-        reply_markup: { inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${pending.subType}:${pending.subId}` }]] },
-      });
-      return;
+    let value: string | null = null;
+    if (!shouldClear) {
+      value = raw.slice(0, limit).trim();
+      if (!value) {
+        await ctx.reply("Введите непустой текст или отправьте - чтобы очистить.", {
+          reply_markup: { inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${pending.subType}:${pending.subId}` }]] },
+        });
+        return;
+      }
     }
     try {
       await api.updateSubscriptionMetadata(token, pending.subId, { [pending.field]: value });
