@@ -969,7 +969,7 @@ function ClassicDashboardPage() {
       </section>
 
       <section className="liquid-stat-grid">
-        <LiquidGlassPanel strength="strong" radius={32} interactive className="p-5">
+        <LiquidGlassPanel strength="strong" radius={32} effect="auto" interactive className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">Баланс</p>
@@ -981,7 +981,7 @@ function ClassicDashboardPage() {
             </div>
           </div>
         </LiquidGlassPanel>
-        <LiquidGlassPanel strength="default" radius={32} interactive className="p-5">
+        <LiquidGlassPanel strength="default" radius={32} effect="auto" interactive className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">Активные услуги</p>
@@ -993,7 +993,7 @@ function ClassicDashboardPage() {
             </div>
           </div>
         </LiquidGlassPanel>
-        <LiquidGlassPanel strength="default" radius={32} interactive className="p-5">
+        <LiquidGlassPanel strength="default" radius={32} effect="auto" interactive className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">Ближайший платеж</p>
@@ -1015,7 +1015,7 @@ function ClassicDashboardPage() {
             </div>
           </div>
         </LiquidGlassPanel>
-        <LiquidGlassPanel strength="default" radius={32} interactive className="p-5">
+        <LiquidGlassPanel strength="default" radius={32} effect="auto" interactive className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">Расходы за месяц</p>
@@ -1332,7 +1332,7 @@ function ClassicDashboardPage() {
           </CardContent>
         </Card>
 
-        <LiquidGlassPanel strength="strong" radius={34} interactive className="p-6">
+        <LiquidGlassPanel strength="strong" radius={34} effect="auto" interactive className="p-6">
           <div className="flex h-full flex-col justify-between gap-6">
             <div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/16 bg-white/10">
