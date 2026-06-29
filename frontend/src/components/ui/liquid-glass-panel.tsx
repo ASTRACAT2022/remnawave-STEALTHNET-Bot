@@ -55,37 +55,6 @@ const GLASS_OPTICS: Record<Exclude<GlassMaterial, "none">, Partial<GlassOptics>>
   },
 };
 
-const shouldPreferStaticGlass = () => {
-  if (typeof window === "undefined") return true;
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const narrowScreen = window.matchMedia("(max-width: 768px)").matches;
-  const lowCoreCount = typeof navigator.hardwareConcurrency === "number" && navigator.hardwareConcurrency <= 4;
-  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-  const lowMemory = typeof deviceMemory === "number" && deviceMemory <= 4;
-
-  return reducedMotion || narrowScreen || lowCoreCount || lowMemory;
-};
-
-const useOpticalGlass = (material: GlassMaterial, effect: LiquidGlassPanelProps["effect"]) => {
-  const [enabled, setEnabled] = React.useState(false);
-
-  React.useEffect(() => {
-    if (material === "none" || effect === "css") {
-      setEnabled(false);
-      return;
-    }
-
-    if (effect === "liquid") {
-      setEnabled(!shouldPreferStaticGlass());
-      return;
-    }
-
-    setEnabled(material === "prominent" && !shouldPreferStaticGlass());
-  }, [effect, material]);
-
-  return enabled;
-};
-
 export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanelProps>(
   (
     {
@@ -101,7 +70,6 @@ export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanel
     ref
   ) => {
     const resolvedMaterial = material ?? strengthToMaterial[strength];
-    const opticalGlass = useOpticalGlass(resolvedMaterial, _effect);
 
     return (
       <div
@@ -119,7 +87,7 @@ export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanel
         )}
         style={{ "--glass-radius": `${radius}px`, ...props.style } as React.CSSProperties}
       >
-        {opticalGlass && resolvedMaterial !== "none" ? (
+        {resolvedMaterial !== "none" ? (
           <Glass
             aria-hidden
             className="liquid-glass-view__optic"

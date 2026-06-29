@@ -1,9 +1,22 @@
 import * as React from "react";
+import { Glass, type GlassOptics } from "@samasante/liquid-glass";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
+const BUTTON_OPTICS: Partial<GlassOptics> = {
+  strength: 0.13,
+  depth: 0.5,
+  curvature: 0.26,
+  dispersion: 0.16,
+  bend: 0.36,
+  frost: 3,
+  brightness: 1.06,
+  sheen: 0.32,
+  glow: 0.18,
+};
+
 const buttonVariants = cva(
-  "liquid-glass-button inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-semibold leading-none align-middle transition-[background,border-color,box-shadow,transform,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.985] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:self-center [&_svg]:align-middle",
+  "liquid-glass-button relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-semibold leading-none align-middle transition-[background,border-color,box-shadow,transform,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.985] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:self-center [&_svg]:align-middle",
   {
     variants: {
       variant: {
@@ -37,12 +50,23 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild, children, ...props }, ref) => {
     const compClassName = cn(buttonVariants({ variant, size, className }));
+    const glassLayer = (
+      <Glass aria-hidden className="liquid-glass-button__optic" radius={999} optics={BUTTON_OPTICS} behind="transparent">
+        <span className="block h-full w-full" />
+      </Glass>
+    );
     if (asChild && React.Children.count(children) === 1 && React.isValidElement(children)) {
-      const child = children as React.ReactElement<{ className?: string; ref?: React.Ref<unknown> }>;
+      const child = children as React.ReactElement<{ className?: string; ref?: React.Ref<unknown>; children?: React.ReactNode }>;
       return React.cloneElement(child, {
         ...props,
         className: cn(compClassName, child.props?.className),
         ref,
+        children: (
+          <>
+            {glassLayer}
+            <span className="liquid-glass-button__content">{child.props.children}</span>
+          </>
+        ),
       });
     }
     return (
@@ -51,7 +75,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         {...props}
       >
-        {children}
+        {glassLayer}
+        <span className="liquid-glass-button__content">{children}</span>
       </button>
     );
   }
