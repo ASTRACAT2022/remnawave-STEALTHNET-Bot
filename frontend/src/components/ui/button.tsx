@@ -6,10 +6,10 @@ import { cn } from "@/lib/utils";
 const BUTTON_OPTICS: Partial<GlassOptics> = {
   strength: 0.12,
   depth: 0.52,
-  curvature: 0.5,
-  dispersion: 0.32,
+  curvature: 0.6,
+  dispersion: 0.38,
   bend: 0.32,
-  frost: 0.7,
+  frost: 0.5,
   brightness: 0.5,
   sheen: 0.08,
   glow: 0.02,
