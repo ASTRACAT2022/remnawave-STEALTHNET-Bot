@@ -518,10 +518,10 @@ function MobileCabinetShell() {
   const logo = config?.logo && !logoError ? config.logo : null;
 
   return (
-    <div className="min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
+    <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
       <IdleFloatingChat />
-      <header className="sticky top-0 z-50 border-b border-border shrink-0 transition-all duration-300" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="absolute inset-0 bg-card/40 backdrop-blur-xl -z-10 pointer-events-none" />
+      <header className="cabinet-liquid-topbar sticky top-2 z-50 mx-3 rounded-[28px] border shrink-0 transition-all duration-300" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <div className="absolute inset-0 rounded-[inherit] bg-white/[0.035] -z-10 pointer-events-none" />
         <div className="relative flex h-14 items-center justify-between gap-3 px-4 min-w-0 w-full max-w-7xl mx-auto">
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-base tracking-tight shrink-0 min-w-0">
             {logo ? (
@@ -529,7 +529,7 @@ function MobileCabinetShell() {
                 <img src={logo} alt="" className="h-6 max-w-[100px] object-contain" onError={() => setLogoError(true)} />
               </span>
             ) : (
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/20 text-primary shadow-sm">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-white/14 bg-white/12 text-primary shadow-sm">
                 <Shield className="h-4 w-4" />
               </span>
             )}
@@ -555,7 +555,7 @@ function MobileCabinetShell() {
         </Suspense>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/60 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] transition-all duration-300">
+      <nav className="cabinet-liquid-bottom-nav fixed bottom-3 left-3 right-3 z-50 rounded-[30px] border pb-[env(safe-area-inset-bottom)] transition-all duration-300">
         <div className="flex items-center justify-around w-full h-[4.5rem] px-2 gap-0">
           {visibleItems.map(({ to, label, icon: Icon }) => {
             const active = location.pathname === to;
@@ -566,7 +566,7 @@ function MobileCabinetShell() {
                 data-tour={ROUTE_TOUR_MAP[to]}
                 className={cn(
                   "flex cursor-pointer flex-col items-center justify-center gap-0.5 py-1 px-1 h-14 flex-1 min-w-0 max-w-[5rem] rounded-xl transition-all duration-300",
-                  active ? "bg-primary/20 text-primary shadow-sm scale-105" : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground hover:scale-105"
+                  active ? "border-white/22 bg-white/14 text-foreground shadow-sm scale-105" : "text-muted-foreground hover:text-foreground hover:scale-105"
                 )}
               >
                 <Icon className={cn("h-5 w-5 shrink-0 transition-transform duration-300", active && "scale-110 drop-shadow-md")} />
@@ -676,24 +676,23 @@ function CabinetShell() {
   }
 
   return (
-    <div className="min-h-svh flex flex-col bg-transparent">
+    <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent">
       <IdleFloatingChat />
-      <header className="sticky top-0 z-50 border-b border-border shadow-sm transition-all duration-300">
-        <div className="absolute inset-0 bg-card/40 backdrop-blur-xl -z-10 pointer-events-none" />
-        <div className="relative w-full max-w-7xl mx-auto flex h-16 items-center justify-between gap-4 px-4">
+      <header className="sticky top-3 z-50 px-4 transition-all duration-300">
+        <div className="cabinet-liquid-topbar relative mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 rounded-[32px] border px-4">
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-lg tracking-tight shrink-0 hover:opacity-80 transition-opacity">
             {logo ? (
               <span className="flex items-center justify-center h-9 px-2 rounded-lg shrink-0">
                 <img src={logo} alt="" className="h-6 max-w-[110px] object-contain" onError={() => setLogoError(true)} />
               </span>
             ) : (
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shadow-sm">
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/14 bg-white/12 text-primary shadow-sm">
                 <Shield className="h-5 w-5" />
               </span>
             )}
             {serviceName ? <span className="hidden sm:inline truncate">{serviceName}</span> : null}
           </Link>
-          <nav className="flex items-center gap-1 flex-wrap justify-center flex-1">
+          <nav className="cabinet-liquid-nav flex items-center gap-1 flex-wrap justify-center flex-1 rounded-full border border-white/10 bg-white/[0.035] p-1">
             {visibleNav.map(({ to, label, icon: Icon }) => {
               const active = location.pathname === to;
               const dataTourMap = ROUTE_TOUR_MAP;
@@ -706,7 +705,7 @@ function CabinetShell() {
                     size="sm"
                     className={cn(
                       "inline-flex cursor-pointer items-center gap-2 whitespace-nowrap transition-all duration-300",
-                      active ? "bg-primary/20 hover:bg-primary/30 text-primary shadow-sm scale-105" : "hover:scale-105 hover:bg-background/40"
+                      active ? "border-white/22 bg-white/16 text-foreground shadow-sm scale-105" : "hover:scale-105"
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
@@ -730,7 +729,7 @@ function CabinetShell() {
                   <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", moreOpen && "rotate-180")} />
                 </Button>
                 {moreOpen && (
-                  <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-xl border border-border bg-card py-1.5 shadow-lg">
+                  <div className="absolute left-0 top-full z-50 mt-2 min-w-[190px] rounded-[24px] border border-white/16 bg-slate-950/75 py-2 shadow-2xl shadow-black/35 backdrop-blur-2xl">
                     {moreNav.map(({ to, label, icon: Icon }) => {
                       const active = location.pathname === to;
                       return (
@@ -741,7 +740,7 @@ function CabinetShell() {
                           onClick={() => setMoreOpen(false)}
                           className={cn(
                             "flex cursor-pointer items-center gap-2 px-4 py-2.5 text-sm transition-colors",
-                            active ? "bg-primary/20 text-primary" : "hover:bg-muted/60"
+                            active ? "bg-white/14 text-foreground" : "hover:bg-white/10"
                           )}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
@@ -757,7 +756,7 @@ function CabinetShell() {
           <div className="flex items-center gap-2 shrink-0">
             <ThemePopover />
             <SettingsPopover />
-            <div className="hidden lg:flex h-9 items-center gap-3 rounded-full border border-border/60 bg-background/35 px-4 shadow-sm backdrop-blur-xl transition-all hover:bg-background/50">
+            <div className="hidden lg:flex h-9 items-center gap-3 rounded-full border border-white/14 bg-white/[0.07] px-4 shadow-sm backdrop-blur-xl transition-all hover:bg-white/[0.11]">
               <span className="max-w-[120px] xl:max-w-[160px] truncate text-sm font-medium text-muted-foreground" title={state.client?.email?.trim() || (state.client?.telegramUsername ? `@${state.client.telegramUsername}` : "")}>
                 {state.client?.email?.trim() ? state.client.email : state.client?.telegramUsername ? `@${state.client.telegramUsername}` : "—"}
               </span>
@@ -786,7 +785,7 @@ function CabinetShell() {
           </div>
         </div>
       </header>
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6 transition-all duration-300">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-8 transition-all duration-300">
         <Suspense fallback={<CabinetPageLoader />}>
           <Outlet />
         </Suspense>

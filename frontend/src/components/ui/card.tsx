@@ -1,16 +1,20 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { LiquidGlassPanel } from "@/components/ui/liquid-glass-panel";
 
 const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div
+  <LiquidGlassPanel
     ref={ref}
     className={cn(
-      "rounded-xl border glass-card text-card-foreground shadow",
+      "glass-card text-card-foreground",
       className
     )}
+    radius={30}
+    strength="soft"
+    interactive
     {...props}
   />
 ));

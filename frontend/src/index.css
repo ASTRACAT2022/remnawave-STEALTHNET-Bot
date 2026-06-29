@@ -61,11 +61,50 @@
   }
 
   body {
-    background-color: transparent;
-    /* Обязательно прозрачный, чтобы было видно анимированный фон */
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 10% -10%, rgba(125, 161, 255, 0.24), transparent 34rem),
+      radial-gradient(circle at 85% 6%, rgba(70, 214, 180, 0.16), transparent 30rem),
+      radial-gradient(circle at 68% 92%, rgba(255, 255, 255, 0.08), transparent 32rem),
+      linear-gradient(145deg, #05070d 0%, #0b1020 42%, #080a12 100%);
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
+    overflow-x: hidden;
+  }
+
+  body::before,
+  body::after {
+    content: "";
+    position: fixed;
+    inset: auto;
+    z-index: -2;
+    pointer-events: none;
+    border-radius: 999px;
+    filter: blur(96px);
+    opacity: 0.72;
+    transform: translateZ(0);
+  }
+
+  body::before {
+    width: min(44rem, 70vw);
+    height: min(44rem, 70vw);
+    left: -14rem;
+    top: 4rem;
+    background: rgba(85, 121, 255, 0.22);
+  }
+
+  body::after {
+    width: min(38rem, 68vw);
+    height: min(38rem, 68vw);
+    right: -10rem;
+    bottom: -10rem;
+    background: rgba(34, 197, 164, 0.16);
+  }
+
+  #root {
+    min-height: 100vh;
   }
 }
 
@@ -151,9 +190,132 @@
 
 /* ── Glass Card — вне @layer чтобы гарантированно побить Tailwind utilities ── */
 .glass-card {
-  background-color: color-mix(in srgb, hsl(var(--card)) 15%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 10%, transparent);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035) 42%, rgba(255, 255, 255, 0.08));
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 22px 70px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.liquid-glass-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255,255,255,0.22), transparent 26%),
+    radial-gradient(circle at 100% 12%, rgba(255,255,255,0.13), transparent 24%);
+  opacity: 0.75;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.liquid-glass-fill {
+  transform: translate(-50%, -50%);
+}
+
+.liquid-glass-fill > .glass {
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  display: flex !important;
+  border-radius: inherit !important;
+}
+
+.liquid-glass-fill .glass > div {
+  width: 100%;
+  height: 100%;
+}
+
+.liquid-glass-button {
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.liquid-glass-button::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.32), rgba(255,255,255,0.06) 44%, rgba(255,255,255,0.17));
+  opacity: 0.62;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.liquid-glass-button:hover::before {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.liquid-glass-button > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cabinet-liquid-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.cabinet-liquid-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 22% 12%, rgba(99, 132, 255, 0.2), transparent 30rem),
+    radial-gradient(circle at 78% 22%, rgba(120, 230, 205, 0.12), transparent 26rem),
+    radial-gradient(circle at 50% 110%, rgba(255, 255, 255, 0.06), transparent 34rem);
+}
+
+.cabinet-liquid-topbar,
+.cabinet-liquid-nav,
+.cabinet-liquid-bottom-nav {
+  background: rgba(12, 17, 29, 0.56) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  backdrop-filter: blur(32px) saturate(165%);
+  -webkit-backdrop-filter: blur(32px) saturate(165%);
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.cabinet-liquid-nav a,
+.cabinet-liquid-bottom-nav a,
+.cabinet-liquid-bottom-nav button {
+  border: 1px solid transparent;
+}
+
+.cabinet-liquid-nav a:hover,
+.cabinet-liquid-bottom-nav a:hover,
+.cabinet-liquid-bottom-nav button:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.liquid-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 1024px) {
+  .liquid-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .liquid-stat-grid {
+    grid-template-columns: 1fr;
+  }
 }
