@@ -4,15 +4,15 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const BUTTON_OPTICS: Partial<GlassOptics> = {
-  strength: 0.13,
-  depth: 0.5,
-  curvature: 0.26,
-  dispersion: 0.16,
-  bend: 0.36,
-  frost: 3,
-  brightness: 1.06,
-  sheen: 0.32,
-  glow: 0.18,
+  strength: 0.09,
+  depth: 0.4,
+  curvature: 0.18,
+  dispersion: 0.1,
+  bend: 0.28,
+  frost: 2.2,
+  brightness: 0.8,
+  sheen: 0.24,
+  glow: 0.1,
 };
 
 const buttonVariants = cva(
@@ -20,11 +20,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "border border-white/16 bg-white/12 text-foreground shadow-[0_10px_26px_rgba(0,0,0,0.18)] hover:border-white/28 hover:bg-white/18 hover:shadow-[0_14px_34px_rgba(0,0,0,0.22)]",
+        default: "border border-white/14 bg-slate-950/32 text-foreground shadow-[0_10px_26px_rgba(0,0,0,0.22)] hover:border-white/24 hover:bg-slate-900/42 hover:shadow-[0_14px_34px_rgba(0,0,0,0.28)]",
         destructive: "border border-red-300/22 bg-red-500/20 text-white shadow-[0_10px_28px_rgba(185,28,28,0.18)] hover:bg-red-500/28",
-        outline: "border border-white/14 bg-white/[0.045] text-foreground shadow-[0_8px_22px_rgba(0,0,0,0.13)] hover:border-white/24 hover:bg-white/10",
-        secondary: "border border-white/12 bg-white/[0.06] text-foreground/85 shadow-[0_8px_24px_rgba(0,0,0,0.12)] hover:bg-white/[0.115] hover:text-foreground",
-        ghost: "border border-transparent bg-transparent text-foreground/75 hover:border-white/12 hover:bg-white/[0.055] hover:text-foreground",
+        outline: "border border-white/12 bg-slate-950/22 text-foreground shadow-[0_8px_22px_rgba(0,0,0,0.16)] hover:border-white/22 hover:bg-slate-900/34",
+        secondary: "border border-white/12 bg-slate-950/26 text-foreground/85 shadow-[0_8px_24px_rgba(0,0,0,0.16)] hover:bg-slate-900/38 hover:text-foreground",
+        ghost: "border border-transparent bg-transparent text-foreground/75 hover:border-white/12 hover:bg-slate-900/28 hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
