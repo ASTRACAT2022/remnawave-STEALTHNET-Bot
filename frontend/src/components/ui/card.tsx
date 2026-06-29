@@ -15,7 +15,6 @@ const Card = React.forwardRef<
     radius={30}
     material="regular"
     interactive
-    showRipples
     showBubbles
     {...props}
   />

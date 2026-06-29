@@ -10,7 +10,6 @@ type LiquidGlassPanelProps = React.HTMLAttributes<HTMLDivElement> & {
   strength?: LegacyStrength;
   material?: GlassMaterial;
   interactive?: boolean;
-  showRipples?: boolean;
   showBubbles?: boolean;
   effect?: "css" | "liquid" | "auto";
 };
@@ -114,7 +113,6 @@ export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanel
       strength = "default",
       material,
       interactive = false,
-      showRipples = true,
       showBubbles = true,
       effect: _effect,
       ...props
@@ -149,8 +147,6 @@ export const LiquidGlassView = React.forwardRef<HTMLDivElement, LiquidGlassPanel
             <span className="block h-full w-full" />
           </Glass>
         ) : null}
-        <div className="liquid-shimmer-layer" />
-        {showRipples && <div className="liquid-ripple-layer" />}
         {showBubbles && <Bubbles />}
         <div className="relative z-10">{children}</div>
       </div>
