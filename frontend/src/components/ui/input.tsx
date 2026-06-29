@@ -5,19 +5,20 @@ import { cn } from "@/lib/utils";
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
 
 const FIELD_OPTICS: Partial<GlassOptics> = {
-  strength: 0.15,
-  depth: 0.75,
-  curvature: 0.55,
-  dispersion: 0.28,
-  bend: 0.38,
-  bendWidth: 0.14,
-  frost: 1.2,
-  brightness: 0.45,
-  sheen: 0.1,
-  sheenWidth: 8,
-  glow: 0.03,
-  splay: 0.06,
-  specular: 0.7,
+  strength: 0.2,
+  depth: 0.9,
+  curvature: 0.7,
+  dispersion: 0.35,
+  bend: 0.5,
+  bendWidth: 0.12,
+  frost: 0.8,
+  brightness: 0.05,
+  sheen: 0.15,
+  sheenWidth: 10,
+  glow: 0.04,
+  glowSpread: 0.5,
+  splay: 0.08,
+  specular: 0.8,
 };
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(

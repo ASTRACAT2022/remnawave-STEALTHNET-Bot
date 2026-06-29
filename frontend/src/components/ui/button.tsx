@@ -4,20 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const BUTTON_OPTICS: Partial<GlassOptics> = {
-  strength: 0.18,
-  depth: 0.88,
-  curvature: 0.7,
-  dispersion: 0.38,
-  bend: 0.5,
-  bendWidth: 0.15,
-  frost: 0.65,
-  brightness: 0.5,
-  sheen: 0.14,
-  sheenWidth: 10,
-  glow: 0.04,
+  strength: 0.25,
+  depth: 1,
+  curvature: 0.85,
+  dispersion: 0.42,
+  bend: 0.65,
+  bendWidth: 0.14,
+  frost: 0.35,
+  brightness: 0.05,
+  sheen: 0.22,
+  sheenWidth: 12,
+  glow: 0.05,
   glowSpread: 0.6,
-  splay: 0.08,
-  specular: 0.8,
+  splay: 0.1,
+  specular: 0.9,
 };
 
 const buttonVariants = cva(
@@ -25,11 +25,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "border border-white/8 bg-slate-950/15 text-foreground shadow-[0_10px_26px_rgba(0,0,0,0.22)] hover:border-white/16 hover:bg-slate-900/25",
-        destructive: "border border-red-300/16 bg-red-500/10 text-white shadow-[0_10px_28px_rgba(185,28,28,0.18)] hover:bg-red-500/20",
-        outline: "border border-white/8 bg-slate-950/10 text-foreground shadow-[0_8px_22px_rgba(0,0,0,0.16)] hover:border-white/16 hover:bg-slate-900/20",
-        secondary: "border border-white/8 bg-slate-950/12 text-foreground/85 shadow-[0_8px_24px_rgba(0,0,0,0.16)] hover:bg-slate-900/24 hover:text-foreground",
-        ghost: "border border-transparent bg-transparent text-foreground/75 hover:border-white/8 hover:bg-slate-900/15 hover:text-foreground",
+        default: "border border-white/6 bg-white/1 text-foreground shadow-[0_10px_26px_rgba(0,0,0,0.15)] hover:border-white/12 hover:bg-white/2",
+        destructive: "border border-red-300/10 bg-red-500/4 text-red-300 shadow-[0_10px_28px_rgba(185,28,28,0.12)] hover:bg-red-500/8",
+        outline: "border border-white/6 bg-white/0.5 text-foreground shadow-[0_8px_22px_rgba(0,0,0,0.1)] hover:border-white/12 hover:bg-white/1.5",
+        secondary: "border border-white/6 bg-white/0.8 text-foreground/85 shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:bg-white/2 hover:text-foreground",
+        ghost: "border border-transparent bg-transparent text-foreground/75 hover:border-white/6 hover:bg-white/1 hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
