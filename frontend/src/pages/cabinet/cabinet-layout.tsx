@@ -14,6 +14,7 @@ import { useTheme, ACCENT_PALETTES, type ThemeMode, type ThemeAccent } from "@/c
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCabinetDesign } from "@/lib/use-cabinet-design";
+import { LiquidGlassPanel } from "@/components/ui/liquid-glass-panel";
 
 const StealthLayout = lazy(() => import("@/pages/cabinet/stealth/stealth-layout").then((m) => ({ default: m.StealthLayout })));
 const FloatingChat = lazy(() => import("@/components/floating-chat").then((m) => ({ default: m.FloatingChat })));
@@ -520,8 +521,12 @@ function MobileCabinetShell() {
   return (
     <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
       <IdleFloatingChat />
-      <header className="cabinet-liquid-topbar sticky top-2 z-50 mx-3 rounded-[28px] border shrink-0 transition-all duration-300" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="absolute inset-0 rounded-[inherit] bg-white/[0.035] -z-10 pointer-events-none" />
+      <LiquidGlassPanel
+        strength="soft"
+        radius={28}
+        className="cabinet-liquid-topbar sticky top-2 z-50 mx-3 border shrink-0 transition-all duration-300"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         <div className="relative flex h-14 items-center justify-between gap-3 px-4 min-w-0 w-full max-w-7xl mx-auto">
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-base tracking-tight shrink-0 min-w-0">
             {logo ? (
@@ -547,7 +552,7 @@ function MobileCabinetShell() {
             )}
           </div>
         </div>
-      </header>
+      </LiquidGlassPanel>
 
       <main className="flex-1 w-full min-w-0 px-4 py-6 max-w-7xl mx-auto transition-all duration-300">
         <Suspense fallback={<CabinetPageLoader />}>
@@ -555,7 +560,11 @@ function MobileCabinetShell() {
         </Suspense>
       </main>
 
-      <nav className="cabinet-liquid-bottom-nav fixed bottom-3 left-3 right-3 z-50 rounded-[30px] border pb-[env(safe-area-inset-bottom)] transition-all duration-300">
+      <LiquidGlassPanel
+        strength="default"
+        radius={30}
+        className="cabinet-liquid-bottom-nav fixed bottom-3 left-3 right-3 z-50 border pb-[env(safe-area-inset-bottom)] transition-all duration-300"
+      >
         <div className="flex items-center justify-around w-full h-[4.5rem] px-2 gap-0">
           {visibleItems.map(({ to, label, icon: Icon }) => {
             const active = location.pathname === to;
@@ -589,7 +598,7 @@ function MobileCabinetShell() {
             </button>
           )}
         </div>
-      </nav>
+      </LiquidGlassPanel>
 
       <Dialog open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
         <DialogContent className="max-w-sm mx-auto rounded-2xl" showCloseButton={true}>
@@ -679,7 +688,11 @@ function CabinetShell() {
     <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent">
       <IdleFloatingChat />
       <header className="sticky top-3 z-50 px-4 transition-all duration-300">
-        <div className="cabinet-liquid-topbar relative mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 rounded-[32px] border px-4">
+        <LiquidGlassPanel
+          strength="soft"
+          radius={32}
+          className="cabinet-liquid-topbar relative mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 border px-4"
+        >
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-lg tracking-tight shrink-0 hover:opacity-80 transition-opacity">
             {logo ? (
               <span className="flex items-center justify-center h-9 px-2 rounded-lg shrink-0">
@@ -692,7 +705,11 @@ function CabinetShell() {
             )}
             {serviceName ? <span className="hidden sm:inline truncate">{serviceName}</span> : null}
           </Link>
-          <nav className="cabinet-liquid-nav flex items-center gap-1 flex-wrap justify-center flex-1 rounded-full border border-white/10 bg-white/[0.035] p-1">
+          <LiquidGlassPanel
+            strength="soft"
+            radius={999}
+            className="cabinet-liquid-nav flex items-center gap-1 flex-wrap justify-center flex-1 border p-1"
+          >
             {visibleNav.map(({ to, label, icon: Icon }) => {
               const active = location.pathname === to;
               const dataTourMap = ROUTE_TOUR_MAP;
@@ -752,7 +769,7 @@ function CabinetShell() {
                 )}
               </div>
             )}
-          </nav>
+          </LiquidGlassPanel>
           <div className="flex items-center gap-2 shrink-0">
             <ThemePopover />
             <SettingsPopover />
@@ -783,7 +800,7 @@ function CabinetShell() {
               </Link>
             </Button>
           </div>
-        </div>
+        </LiquidGlassPanel>
       </header>
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-8 transition-all duration-300">
         <Suspense fallback={<CabinetPageLoader />}>
