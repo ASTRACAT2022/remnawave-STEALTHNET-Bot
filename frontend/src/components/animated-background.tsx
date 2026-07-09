@@ -109,10 +109,6 @@ export function AnimatedBackground({ variant = "fixed", intensity = "normal" }: 
     });
 
     const draw = (ts: number) => {
-      if (document.hidden) {
-        frameRef.current = requestAnimationFrame(draw);
-        return;
-      }
       if (ts - lastDrawRef.current < minFrameMs) {
         frameRef.current = requestAnimationFrame(draw);
         return;
@@ -155,9 +151,28 @@ export function AnimatedBackground({ variant = "fixed", intensity = "normal" }: 
       frameRef.current = requestAnimationFrame(draw);
     };
 
-    frameRef.current = requestAnimationFrame(draw);
+    const startDrawing = () => {
+      if (!frameRef.current) {
+        lastDrawRef.current = 0;
+        frameRef.current = requestAnimationFrame(draw);
+      }
+    };
+    const stopDrawing = () => {
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopDrawing();
+      else startDrawing();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!document.hidden) startDrawing();
     return () => {
-      cancelAnimationFrame(frameRef.current);
+      stopDrawing();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("resize", resize);
     };
   }, [config.accent, disabled, resolvedMode, lowPower, variant]);

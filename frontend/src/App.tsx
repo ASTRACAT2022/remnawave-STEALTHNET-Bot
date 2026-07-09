@@ -517,10 +517,11 @@ function TitleAndThemeSync() {
   const location = useLocation();
   const [config, setConfig] = useState<{ serviceName: string; favicon: string | null } | null>(null);
 
-  // Подтягиваем конфиг при смене маршрута (в т.ч. после сохранения настроек), чтобы favicon обновился
+  // Берём конфиг из общего кэша. После сохранения настроек API сбрасывает кэш,
+  // поэтому при выходе из настроек бренд обновится без запроса на каждый переход.
   useEffect(() => {
     api
-      .getPublicConfig(true)
+      .getPublicConfig()
       .then((cfg) => {
         setConfig({
           serviceName: cfg.serviceName ?? "",

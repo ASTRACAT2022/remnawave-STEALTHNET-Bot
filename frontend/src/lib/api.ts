@@ -1283,6 +1283,9 @@ export const api = {
   async updateSettings(token: string, data: UpdateSettingsPayload): Promise<AdminSettings> {
     clearAdminSettingsCache();
     const settings = await request<AdminSettings>("/admin/settings", { method: "PATCH", body: JSON.stringify(data), token });
+    // Публичная часть настроек (бренд, тема, языки, лендинг) могла измениться.
+    // Следующее чтение должно получить свежую версию, а не прежний SPA-кэш.
+    publicConfigCache = null;
     adminSettingsCache = {
       token,
       value: settings,
