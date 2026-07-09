@@ -86,9 +86,9 @@
   }
 
   .bg-background\/95 {
-    background-color: color-mix(in srgb, hsl(var(--background)) 50%, transparent) !important;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background-color: color-mix(in srgb, hsl(var(--background)) 25%, transparent) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-color: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
   }
 
@@ -101,7 +101,7 @@
 
   /* Инпуты */
   .bg-transparent.border {
-    background-color: color-mix(in srgb, hsl(var(--background)) 30%, transparent) !important;
+    background-color: color-mix(in srgb, hsl(var(--background)) 15%, transparent) !important;
     backdrop-filter: blur(8px);
   }
 
@@ -116,9 +116,9 @@
   select {
     appearance: none;
     -webkit-appearance: none;
-    background-color: color-mix(in srgb, hsl(var(--card)) 40%, transparent) !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background-color: color-mix(in srgb, hsl(var(--card)) 20%, transparent) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 12%, transparent) !important;
     border-radius: 0.5rem;
     color: hsl(var(--foreground));
@@ -151,9 +151,9 @@
 
 /* ── Glass Card — вне @layer чтобы гарантированно побить Tailwind utilities ── */
 .glass-card {
-  background-color: color-mix(in srgb, hsl(var(--card)) 15%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background-color: color-mix(in srgb, hsl(var(--card)) 8%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 10%, transparent);
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
 }
