@@ -70,16 +70,16 @@ export function LoginPage() {
 
   return (
     <div className="min-h-svh flex items-center justify-center p-4">
-      <div className="w-full max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-3 duration-300">
-        <Card className="border-border/50 shadow-2xl">
+      <div className="w-full max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <Card className="border-border shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <div className="flex justify-center mb-2">
               {brand.logo ? (
-                <div className="rounded-lg bg-card p-2">
+                <div className="rounded-lg border border-border bg-card p-2">
                   <img src={brand.logo} alt="" className="h-12 w-auto object-contain" />
                 </div>
               ) : (
-                <div className="rounded-lg bg-primary/10 p-3">
+                <div className="rounded-lg border border-primary/20 bg-primary/10 p-3">
                   {pending2FA ? <KeyRound className="h-10 w-10 text-primary" /> : <Shield className="h-10 w-10 text-primary" />}
                 </div>
               )}
@@ -109,7 +109,7 @@ export function LoginPage() {
                     className="bg-transparent text-center text-lg tracking-[0.3em] font-mono"
                   />
                 </div>
-                <Button type="submit" className="w-full shadow-lg" disabled={loading || code.length !== 6}>
+                <Button type="submit" className="w-full shadow-sm" disabled={loading || code.length !== 6}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "Войти"}
                 </Button>
                 <Button type="button" variant="ghost" className="w-full" onClick={clearPending2FA}>
@@ -148,7 +148,7 @@ export function LoginPage() {
                     className="bg-transparent"
                   />
                 </div>
-                <Button type="submit" className="w-full shadow-lg" disabled={loading}>
+                <Button type="submit" className="w-full shadow-sm" disabled={loading}>
                   {loading ? "Вход…" : "Войти"}
                 </Button>
               </form>

@@ -169,3 +169,40 @@
   box-shadow: none !important;
   filter: none !important;
 }
+
+.admin-fast-ui [class*="backdrop-blur"],
+.admin-fast-ui [class*="blur-"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.admin-fast-ui [class*="shadow-2xl"],
+.admin-fast-ui [class*="shadow-xl"],
+.admin-fast-ui [class*="shadow-["] {
+  box-shadow: 0 1px 2px hsl(222 47% 11% / 0.08) !important;
+}
+
+.admin-fast-ui [class*="rounded-[2rem]"],
+.admin-fast-ui [class*="rounded-[1.5rem]"],
+.admin-fast-ui [class*="rounded-[1.35rem]"],
+.admin-fast-ui .rounded-3xl {
+  border-radius: 1rem !important;
+}
+
+.admin-fast-ui [class*="bg-background/"],
+.admin-fast-ui [class*="bg-card/"],
+.admin-fast-ui [class*="bg-white/10"],
+.admin-fast-ui [class*="dark:bg-white/5"] {
+  background-color: hsl(var(--card)) !important;
+}
+
+.admin-fast-ui [class*="border-white/"] {
+  border-color: hsl(var(--border)) !important;
+}
+
+.admin-fast-ui [class*="hover:scale"],
+.admin-fast-ui [class*="scale-"],
+.admin-fast-ui [class*="-translate-y"] {
+  transform: none !important;
+}
