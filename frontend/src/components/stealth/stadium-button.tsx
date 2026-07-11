@@ -27,23 +27,15 @@ interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_STYLES: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-b from-rose-500 to-rose-600 text-white font-semibold " +
-    "shadow-[0_0_24px_rgba(255,35,87,0.45),0_8px_24px_-8px_rgba(255,35,87,0.6)] " +
-    "hover:from-rose-500 hover:to-rose-500 active:scale-[0.98]",
+    "bg-rose-600 text-white font-semibold shadow-sm hover:bg-rose-500 active:bg-rose-700",
   white:
-    "bg-white text-black font-semibold " +
-    "shadow-[0_8px_28px_-6px_rgba(255,255,255,0.25)] " +
-    "hover:bg-zinc-100 active:scale-[0.98]",
+    "bg-white text-zinc-950 font-semibold shadow-sm hover:bg-zinc-100 active:bg-zinc-200",
   outline:
-    "bg-transparent text-white font-medium border border-white/15 " +
-    "hover:bg-white/[0.04] active:scale-[0.98]",
+    "bg-transparent text-white font-medium border border-slate-600 hover:bg-slate-800 active:bg-slate-900",
   ghost:
-    "bg-white/[0.04] text-white font-medium " +
-    "hover:bg-white/[0.08] active:scale-[0.98]",
+    "bg-slate-800 text-white font-medium border border-slate-700 hover:bg-slate-700 active:bg-slate-900",
   highlight:
-    "bg-zinc-900/80 text-white font-semibold border border-rose-500/40 " +
-    "shadow-[0_0_28px_-4px_rgba(255,35,87,0.3),inset_0_0_20px_rgba(255,35,87,0.06)] " +
-    "hover:border-rose-500/60 hover:shadow-[0_0_36px_-4px_rgba(255,35,87,0.45)] active:scale-[0.98]",
+    "bg-slate-800 text-white font-semibold border border-rose-500 shadow-sm hover:bg-slate-700 active:bg-slate-900",
 };
 
 const SIZE_STYLES: Record<Size, string> = {
@@ -60,7 +52,7 @@ export const StadiumButton = forwardRef<HTMLButtonElement, Props>(function Stadi
     <button
       ref={ref}
       className={cn(
-        "relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200",
+        "relative inline-flex items-center justify-center gap-2 rounded-xl transition-colors duration-150",
         "disabled:opacity-50 disabled:pointer-events-none",
         "focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:ring-offset-2 focus:ring-offset-[#020202]",
         VARIANT_STYLES[variant],

@@ -94,38 +94,30 @@ export function StealthDashboard() {
 
   return (
     <div className="px-4 pt-2 space-y-5">
-      {/* Hero — большой светящийся шар-логотип (placeholder под favicon бренда) */}
-      <div className="relative h-44 md:h-56 flex items-center justify-center">
-        <div
-          className="absolute inset-0"
-          style={{
-            background: "radial-gradient(closest-side, rgba(255,35,87,0.18), transparent 65%)",
-            filter: "blur(12px)",
-          }}
-        />
-        <div className="relative h-32 w-32 md:h-40 md:w-40 rounded-full bg-gradient-to-br from-zinc-900 to-black border border-rose-500/20 flex items-center justify-center shadow-[0_0_60px_-10px_rgba(255,35,87,0.5),inset_0_0_30px_rgba(255,35,87,0.1)]">
-          <Shield className="h-14 w-14 md:h-16 md:w-16 text-rose-500" strokeWidth={1.5} />
+      <div className="relative h-36 md:h-44 flex items-center justify-center">
+        <div className="relative h-28 w-28 md:h-32 md:w-32 rounded-2xl bg-slate-900 border border-slate-700 flex items-center justify-center shadow-sm">
+          <Shield className="h-12 w-12 md:h-14 md:w-14 text-rose-500" strokeWidth={1.8} />
         </div>
       </div>
 
       {/* Subscription card */}
-      <div className="rounded-3xl bg-zinc-900/70 border border-white/[0.06] p-5 backdrop-blur-md space-y-4">
+      <div className="rounded-2xl bg-slate-900 border border-slate-700 p-5 shadow-sm space-y-4">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-bold tracking-tight">Подписка</h2>
           {info?.hasActive ? (
             <div className="flex flex-col items-end gap-1.5">
               <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-zinc-500">ДО</span>
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] px-2.5 py-1 text-xs font-medium tabular-nums">
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs font-medium tabular-nums">
                 <Calendar className="h-3 w-3 text-rose-400" strokeWidth={2.2} />
                 {formatDate(info.expiresAt)}
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] px-2.5 py-1 text-xs">
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs">
                 <Clock className="h-3 w-3 text-zinc-400" strokeWidth={2.2} />
                 Осталось {info.daysLeft} дн.
               </span>
             </div>
           ) : !loading ? (
-            <span className="rounded-full bg-white/[0.04] border border-white/[0.06] px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            <span className="rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Нет подписки
             </span>
           ) : null}
@@ -133,7 +125,7 @@ export function StealthDashboard() {
 
         {/* Devices pill */}
         {info && (
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] px-3 py-1.5 text-xs">
+          <div className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs">
             <Smartphone className="h-3.5 w-3.5 text-zinc-400" />
             <span className="text-zinc-200">
               Устройства{" "}
@@ -159,7 +151,7 @@ export function StealthDashboard() {
             variant="highlight"
             size="md"
             iconLeft={
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/15 border border-rose-500/30">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-950/60 border border-rose-700">
                 <Settings2 className="h-3.5 w-3.5 text-rose-400" />
               </span>
             }

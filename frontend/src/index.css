@@ -15,42 +15,42 @@
   --color-accent: hsl(var(--accent));
   --color-accent-foreground: hsl(var(--accent-foreground));
   --color-destructive: hsl(var(--destructive));
-  --color-card: hsl(var(--card) / 0.15);
+  --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 }
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --primary: 222.2 47.4% 11.2%;
     --primary-foreground: 210 40% 98%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
+    --muted: 214 32% 93%;
+    --muted-foreground: 215 16% 39%;
+    --accent: 214 32% 92%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+    --border: 214 24% 86%;
+    --input: 214 24% 86%;
     --ring: 222.2 84% 4.9%;
   }
 
   .dark {
-    --background: 240 11% 5.3%;
+    --background: 222 28% 8%;
     --foreground: 210 40% 98%;
-    --card: 240 11% 5.3%;
+    --card: 224 24% 12%;
     --card-foreground: 210 40% 98%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
-    --muted: 240 11% 12%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 240 11% 12%;
+    --muted: 224 18% 16%;
+    --muted-foreground: 215 16% 70%;
+    --accent: 224 18% 17%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
-    --border: 240 11% 15%;
-    --input: 240 11% 15%;
+    --border: 224 16% 22%;
+    --input: 224 16% 22%;
     --ring: 212.7 26.8% 83.9%;
   }
 }
@@ -61,15 +61,14 @@
   }
 
   body {
-    background-color: transparent;
-    /* Обязательно прозрачный, чтобы было видно анимированный фон */
+    background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 }
 
-/* ── Glassmorphism Overrides ── */
+/* ── Simple Fast UI Overrides ── */
 @layer components {
 
   /* Модальные окна — всегда непрозрачный фон (читаемо на любом фоне) */
@@ -81,45 +80,41 @@
 
 
   /* Панель навигации (хедер, сайдбар) */
-  .bg-background {
-    background-color: transparent !important;
-  }
-
   .bg-background\/95 {
-    background-color: color-mix(in srgb, hsl(var(--background)) 50%, transparent) !important;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-color: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
+    background-color: hsl(var(--background)) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: hsl(var(--border));
   }
 
   .border-b,
   .border-r,
   .border-t,
   .border {
-    border-color: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent) !important;
+    border-color: hsl(var(--border)) !important;
   }
 
   /* Инпуты */
   .bg-transparent.border {
-    background-color: color-mix(in srgb, hsl(var(--background)) 30%, transparent) !important;
-    backdrop-filter: blur(8px);
+    background-color: hsl(var(--background)) !important;
+    backdrop-filter: none;
   }
 
   /* Muted зоны (таблицы, плашки) */
   .bg-muted,
   .bg-muted\/50,
   .bg-muted\/30 {
-    background-color: color-mix(in srgb, hsl(var(--foreground)) 5%, transparent) !important;
+    background-color: hsl(var(--muted)) !important;
   }
 
   /* ── Styled <select> elements ── */
   select {
     appearance: none;
     -webkit-appearance: none;
-    background-color: color-mix(in srgb, hsl(var(--card)) 40%, transparent) !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 12%, transparent) !important;
+    background-color: hsl(var(--card)) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid hsl(var(--border)) !important;
     border-radius: 0.5rem;
     color: hsl(var(--foreground));
     padding-right: 2rem;
@@ -127,19 +122,19 @@
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     background-size: 1rem;
-    transition: all 0.2s ease;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
     cursor: pointer;
   }
 
   select:hover {
-    background-color: color-mix(in srgb, hsl(var(--card)) 55%, transparent) !important;
-    border-color: color-mix(in srgb, hsl(var(--foreground)) 20%, transparent) !important;
+    background-color: hsl(var(--muted)) !important;
+    border-color: hsl(var(--ring)) !important;
   }
 
   select:focus {
     outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, hsl(var(--primary)) 30%, transparent);
-    border-color: color-mix(in srgb, hsl(var(--primary)) 50%, transparent) !important;
+    box-shadow: 0 0 0 2px hsl(var(--ring) / 0.18);
+    border-color: hsl(var(--ring)) !important;
   }
 
   select option {
@@ -149,11 +144,28 @@
   }
 }
 
-/* ── Glass Card — вне @layer чтобы гарантированно побить Tailwind utilities ── */
+/* ── Fast Card Surface — вне @layer чтобы гарантированно побить Tailwind utilities ── */
 .glass-card {
-  background-color: color-mix(in srgb, hsl(var(--card)) 15%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 10%, transparent);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  background-color: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 1px 2px hsl(222 47% 11% / 0.06);
+}
+
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.backdrop-blur-3xl,
+.backdrop-blur-\[32px\],
+.backdrop-blur-\[100px\],
+.backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+[class*="shadow-[0_0"],
+[class*="shadow-[inset"],
+[class*="blur-"] {
+  box-shadow: none !important;
+  filter: none !important;
 }

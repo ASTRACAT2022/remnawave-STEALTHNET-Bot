@@ -520,8 +520,7 @@ function MobileCabinetShell() {
   return (
     <div className="min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
       <IdleFloatingChat />
-      <header className="sticky top-0 z-50 border-b border-border shrink-0 transition-all duration-300" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="absolute inset-0 bg-card/40 backdrop-blur-xl -z-10 pointer-events-none" />
+      <header className="sticky top-0 z-50 border-b border-border bg-card shrink-0 transition-colors duration-150" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="relative flex h-14 items-center justify-between gap-3 px-4 min-w-0 w-full max-w-7xl mx-auto">
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-base tracking-tight shrink-0 min-w-0">
             {logo ? (
@@ -555,7 +554,7 @@ function MobileCabinetShell() {
         </Suspense>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/60 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] transition-all duration-300">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] transition-colors duration-150">
         <div className="flex items-center justify-around w-full h-[4.5rem] px-2 gap-0">
           {visibleItems.map(({ to, label, icon: Icon }) => {
             const active = location.pathname === to;
@@ -565,11 +564,11 @@ function MobileCabinetShell() {
                 to={to}
                 data-tour={ROUTE_TOUR_MAP[to]}
                 className={cn(
-                  "flex cursor-pointer flex-col items-center justify-center gap-0.5 py-1 px-1 h-14 flex-1 min-w-0 max-w-[5rem] rounded-xl transition-all duration-300",
-                  active ? "bg-primary/20 text-primary shadow-sm scale-105" : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground hover:scale-105"
+                  "flex cursor-pointer flex-col items-center justify-center gap-0.5 py-1 px-1 h-14 flex-1 min-w-0 max-w-[5rem] rounded-xl transition-colors duration-150",
+                  active ? "bg-primary/15 text-primary shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
-                <Icon className={cn("h-5 w-5 shrink-0 transition-transform duration-300", active && "scale-110 drop-shadow-md")} />
+                <Icon className="h-5 w-5 shrink-0" />
                 <span className="text-[10px] font-medium leading-none tracking-tight truncate w-full text-center">{label}</span>
               </Link>
             );
@@ -579,8 +578,8 @@ function MobileCabinetShell() {
               type="button"
               onClick={() => setMoreMenuOpen(true)}
               className={cn(
-                "flex cursor-pointer flex-col items-center justify-center gap-0.5 py-1 px-1 h-14 flex-1 min-w-0 max-w-[5rem] rounded-xl transition-all duration-300",
-                "text-muted-foreground hover:bg-foreground/5 hover:text-foreground hover:scale-105"
+                "flex cursor-pointer flex-col items-center justify-center gap-0.5 py-1 px-1 h-14 flex-1 min-w-0 max-w-[5rem] rounded-xl transition-colors duration-150",
+                "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
               aria-label={t("cabinet.nav.more")}
             >
@@ -678,8 +677,7 @@ function CabinetShell() {
   return (
     <div className="min-h-svh flex flex-col bg-transparent">
       <IdleFloatingChat />
-      <header className="sticky top-0 z-50 border-b border-border shadow-sm transition-all duration-300">
-        <div className="absolute inset-0 bg-card/40 backdrop-blur-xl -z-10 pointer-events-none" />
+      <header className="sticky top-0 z-50 border-b border-border bg-card shadow-sm transition-colors duration-150">
         <div className="relative w-full max-w-7xl mx-auto flex h-16 items-center justify-between gap-4 px-4">
           <Link to="/cabinet/dashboard" className="flex cursor-pointer items-center gap-2.5 font-semibold text-lg tracking-tight shrink-0 hover:opacity-80 transition-opacity">
             {logo ? (
@@ -705,8 +703,8 @@ function CabinetShell() {
                     variant={active ? "secondary" : "ghost"}
                     size="sm"
                     className={cn(
-                      "inline-flex cursor-pointer items-center gap-2 whitespace-nowrap transition-all duration-300",
-                      active ? "bg-primary/20 hover:bg-primary/30 text-primary shadow-sm scale-105" : "hover:scale-105 hover:bg-background/40"
+                      "inline-flex cursor-pointer items-center gap-2 whitespace-nowrap transition-colors duration-150",
+                      active ? "bg-primary/15 hover:bg-primary/20 text-primary shadow-sm" : "hover:bg-muted"
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
@@ -721,8 +719,8 @@ function CabinetShell() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "inline-flex cursor-pointer items-center gap-2 whitespace-nowrap transition-all duration-300 hover:scale-105 hover:bg-background/40",
-                    moreNav.some((i) => location.pathname === i.to) ? "bg-primary/20 text-primary" : ""
+                    "inline-flex cursor-pointer items-center gap-2 whitespace-nowrap transition-colors duration-150 hover:bg-muted",
+                    moreNav.some((i) => location.pathname === i.to) ? "bg-primary/15 text-primary" : ""
                   )}
                   onClick={() => setMoreOpen(!moreOpen)}
                 >
@@ -757,7 +755,7 @@ function CabinetShell() {
           <div className="flex items-center gap-2 shrink-0">
             <ThemePopover />
             <SettingsPopover />
-            <div className="hidden lg:flex h-9 items-center gap-3 rounded-full border border-border/60 bg-background/35 px-4 shadow-sm backdrop-blur-xl transition-all hover:bg-background/50">
+            <div className="hidden lg:flex h-9 items-center gap-3 rounded-full border border-border bg-background px-4 shadow-sm transition-colors hover:bg-muted">
               <span className="max-w-[120px] xl:max-w-[160px] truncate text-sm font-medium text-muted-foreground" title={state.client?.email?.trim() || (state.client?.telegramUsername ? `@${state.client.telegramUsername}` : "")}>
                 {state.client?.email?.trim() ? state.client.email : state.client?.telegramUsername ? `@${state.client.telegramUsername}` : "—"}
               </span>
@@ -769,7 +767,7 @@ function CabinetShell() {
             </div>
             <Button
               variant="outline"
-              className="group h-9 rounded-full border-border/60 bg-background/35 p-0 shadow-sm backdrop-blur-xl transition-all duration-300 hover:bg-destructive/10 hover:border-destructive/30 hover:text-destructive"
+              className="group h-9 rounded-full border-border bg-background p-0 shadow-sm transition-colors duration-150 hover:bg-destructive/10 hover:border-destructive/30 hover:text-destructive"
               asChild
             >
               <Link to="/cabinet/login" onClick={() => logout()} className="flex h-full cursor-pointer items-center">

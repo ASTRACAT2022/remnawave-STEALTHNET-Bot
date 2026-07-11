@@ -237,18 +237,18 @@ export function StealthSubscribe() {
                       type="button"
                       onClick={() => setSelectedAppIdx(idx)}
                       className={cn(
-                        "relative rounded-2xl border-2 bg-zinc-900/60 p-3.5 text-left transition-all duration-200",
+                        "relative rounded-2xl border-2 bg-slate-900 p-3.5 text-left transition-colors duration-150",
                         // Активный (не featured) → ярко-розовый акцент
-                        active && !isFeatured && "border-rose-500 bg-rose-500/[0.08] shadow-[0_0_28px_-4px_rgba(255,35,87,0.45)] scale-[1.02]",
+                        active && !isFeatured && "border-rose-500 bg-rose-950/40",
                         // Активный + featured → фиолетовый акцент
-                        active && isFeatured && "border-violet-500 bg-violet-500/[0.1] shadow-[0_0_28px_-4px_rgba(167,139,250,0.5)] scale-[1.02]",
+                        active && isFeatured && "border-violet-500 bg-violet-950/40",
                         // Не активный
-                        !active && "border-white/[0.06] hover:border-white/20 hover:bg-zinc-900/80",
+                        !active && "border-slate-700 hover:border-slate-500 hover:bg-slate-800",
                       )}
                     >
                       {/* Featured chip — над карточкой */}
                       {isFeatured && (
-                        <span className="absolute -top-2.5 left-3 rounded-full bg-violet-500 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white shadow-[0_4px_12px_-4px_rgba(167,139,250,0.6)]">
+                        <span className="absolute -top-2.5 left-3 rounded-full bg-violet-600 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white">
                           Рекомендуется
                         </span>
                       )}
@@ -256,7 +256,7 @@ export function StealthSubscribe() {
                       {/* Чекмарк в правом верхнем углу выбранной карточки */}
                       {active && (
                         <span className={cn(
-                          "absolute top-2 right-2 h-5 w-5 rounded-full flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.4)]",
+                          "absolute top-2 right-2 h-5 w-5 rounded-full flex items-center justify-center",
                           isFeatured ? "bg-violet-500" : "bg-rose-500",
                         )}>
                           <Check className="h-3 w-3 text-white" strokeWidth={3} />
@@ -318,7 +318,7 @@ export function StealthSubscribe() {
             </StadiumButton>
 
             {showOtherDevices && (
-              <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/40 p-3 space-y-2.5">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-3 space-y-2.5">
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">Выберите устройство</p>
                 <div className="grid grid-cols-2 gap-2">
                   {(Object.keys(PLATFORM_LABELS) as Platform[]).map((p) => {
@@ -328,8 +328,8 @@ export function StealthSubscribe() {
                         key={p}
                         onClick={() => { setPlatform(p); setSelectedAppIdx(0); setShowOtherDevices(false); }}
                         className={cn(
-                          "rounded-xl border bg-zinc-900/40 px-3 py-2.5 text-sm transition-all",
-                          active ? "border-white/40 bg-white/[0.08]" : "border-white/[0.06] hover:border-white/20",
+                          "rounded-xl border bg-slate-900 px-3 py-2.5 text-sm transition-colors",
+                          active ? "border-rose-500 bg-rose-950/40" : "border-slate-700 hover:border-slate-500",
                         )}
                       >
                         {PLATFORM_LABELS[p]}
@@ -407,7 +407,7 @@ export function StealthSubscribe() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/60 p-4">
+          <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Subscription URL</p>
             <p className="font-mono text-xs text-zinc-200 break-all">{subUrl ?? "—"}</p>
           </div>

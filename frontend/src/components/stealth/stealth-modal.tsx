@@ -1,9 +1,8 @@
 /**
  * StealthModal — lightbox-стиль модалка для Stealth-дизайна.
  *
- * Открывается поверх контента: тёмный backdrop с blur, в центре карточка с
- * заголовком и close-X. Контент модалки — children. Idiom как у Hundler:
- * не fullscreen, а compact-card.
+ * Открывается поверх контента: тёмный backdrop, в центре простая карточка с
+ * заголовком и close-X.
  */
 
 import { type ReactNode, useEffect } from "react";
@@ -38,7 +37,7 @@ export function StealthModal({ open, onClose, title, children, maxWidth = "28rem
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center pb-24 sm:pb-0 px-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-md"
+        className="absolute inset-0 bg-black/65"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -46,9 +45,9 @@ export function StealthModal({ open, onClose, title, children, maxWidth = "28rem
       {/* Card */}
       <div
         className={cn(
-          "relative w-full rounded-3xl border border-white/[0.08] bg-zinc-900/95 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)]",
+          "relative w-full rounded-2xl border border-slate-700 bg-slate-900 shadow-xl",
           "p-5 max-h-[80vh] overflow-y-auto",
-          "animate-in slide-in-from-bottom-4 duration-200",
+          "animate-in slide-in-from-bottom-2 duration-150",
         )}
         style={{ maxWidth }}
       >
@@ -57,7 +56,7 @@ export function StealthModal({ open, onClose, title, children, maxWidth = "28rem
           <button
             type="button"
             onClick={onClose}
-            className="h-8 w-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.08] active:scale-95 transition shrink-0"
+            className="h-8 w-8 rounded-lg border border-slate-700 bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition-colors shrink-0"
             aria-label="Закрыть"
           >
             <X className="h-4 w-4" />

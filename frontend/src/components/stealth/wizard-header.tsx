@@ -32,7 +32,7 @@ export function WizardHeader({ step, totalSteps, onBack, onClose }: Props) {
           type="button"
           onClick={onBack}
           disabled={!onBack || step <= 1}
-          className="h-10 w-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.08] active:scale-95 transition disabled:opacity-30"
+          className="h-10 w-10 rounded-xl border border-slate-700 bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition-colors disabled:opacity-30"
           aria-label="Назад"
         >
           <ChevronLeft className="h-5 w-5" />
@@ -48,7 +48,7 @@ export function WizardHeader({ step, totalSteps, onBack, onClose }: Props) {
           type="button"
           onClick={onClose}
           disabled={!onClose}
-          className="h-10 w-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.08] active:scale-95 transition disabled:opacity-30"
+          className="h-10 w-10 rounded-xl border border-slate-700 bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition-colors disabled:opacity-30"
           aria-label="Закрыть"
         >
           <X className="h-5 w-5" />
@@ -63,7 +63,7 @@ export function WizardHeader({ step, totalSteps, onBack, onClose }: Props) {
             className={cn(
               "h-[3px] flex-1 rounded-full transition-colors",
               i + 1 < step && "bg-rose-500/70",
-              i + 1 === step && "bg-rose-500 shadow-[0_0_8px_rgba(255,35,87,0.5)]",
+              i + 1 === step && "bg-rose-500",
               i + 1 > step && "bg-zinc-800",
             )}
           />

@@ -1,15 +1,6 @@
 /**
- * NetworkBg — характерный фон для Stealth-дизайна:
- *   - Чёрный background `#020202`
- *   - Триангулированная SVG-сетка (тонкие красные линии + точки в узлах)
- *   - 3 ambient red blobs (top-right, mid-left, bottom-right) — мягкое свечение
- *
- * Зачем SVG, а не PNG: масштабируется без потерь, легче, цвет можно менять
- * через --stealth-accent CSS-переменную.
- *
- * Производительность: SVG рендерится один раз, blobs — обычные `div` с
- * `background: radial-gradient`. Никаких filter:blur — на бюджетных Android в
- * Telegram WebView это лагает.
+ * NetworkBg — легкий статичный фон для мобильного кабинета.
+ * Без blur, canvas и анимаций: старые WebView не тратят ресурсы на фон.
  */
 
 import { useId } from "react";
@@ -27,12 +18,19 @@ export function NetworkBg({ accent = "#ff2357", opacity = 0.18, flatten = false 
   const patternId = useId();
   return (
     <>
-      {/* Базовая заливка */}
-      <div className="fixed inset-0 -z-30 bg-[#020202] pointer-events-none" />
+      <div className="fixed inset-0 -z-30 bg-[#0f172a] pointer-events-none" />
+      <div
+        className="fixed inset-0 -z-20 pointer-events-none"
+        style={{
+          background:
+            "linear-gradient(180deg, #111827 0%, #0f172a 42%, #111827 100%)," +
+            `radial-gradient(circle at 85% 0%, ${accent}1a 0, transparent 32%)`,
+        }}
+      />
 
       {/* SVG-сетка (триангуляция) */}
       <svg
-        className="fixed inset-0 -z-20 w-full h-full pointer-events-none"
+        className="fixed inset-0 -z-10 w-full h-full pointer-events-none"
         xmlns="http://www.w3.org/2000/svg"
         preserveAspectRatio="xMidYMid slice"
         aria-hidden="true"
@@ -67,50 +65,7 @@ export function NetworkBg({ accent = "#ff2357", opacity = 0.18, flatten = false 
         <rect width="100%" height="100%" fill={`url(#${patternId})`} />
       </svg>
 
-      {/* Ambient red blobs */}
-      {!flatten && (
-        <>
-          <div
-            className="fixed -z-10 pointer-events-none rounded-full"
-            style={{
-              top: "-15%",
-              right: "-10%",
-              width: "55vw",
-              height: "55vw",
-              maxWidth: 600,
-              maxHeight: 600,
-              background: `radial-gradient(circle at center, ${accent}33 0%, transparent 60%)`,
-              filter: "blur(40px)",
-            }}
-          />
-          <div
-            className="fixed -z-10 pointer-events-none rounded-full"
-            style={{
-              top: "30%",
-              left: "-15%",
-              width: "50vw",
-              height: "50vw",
-              maxWidth: 500,
-              maxHeight: 500,
-              background: `radial-gradient(circle at center, ${accent}22 0%, transparent 65%)`,
-              filter: "blur(50px)",
-            }}
-          />
-          <div
-            className="fixed -z-10 pointer-events-none rounded-full"
-            style={{
-              bottom: "-10%",
-              right: "-5%",
-              width: "40vw",
-              height: "40vw",
-              maxWidth: 450,
-              maxHeight: 450,
-              background: `radial-gradient(circle at center, ${accent}28 0%, transparent 65%)`,
-              filter: "blur(45px)",
-            }}
-          />
-        </>
-      )}
+      {!flatten && <div className="fixed inset-x-0 bottom-0 -z-10 h-40 bg-black/10 pointer-events-none" />}
     </>
   );
 }

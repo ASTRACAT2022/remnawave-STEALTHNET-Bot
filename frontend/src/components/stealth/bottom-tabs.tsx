@@ -28,7 +28,7 @@ export function BottomTabs() {
   const location = useLocation();
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-30 bg-[#020202]/95 backdrop-blur-xl border-t border-white/[0.04]"
+      className="fixed inset-x-0 bottom-0 z-30 bg-slate-950 border-t border-slate-800"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="mx-auto max-w-md grid grid-cols-3 px-4 pt-2 pb-2">
@@ -40,7 +40,10 @@ export function BottomTabs() {
             <Link
               key={t.to}
               to={t.to}
-              className="relative flex flex-col items-center gap-1 py-1 transition-all"
+              className={cn(
+                "relative flex flex-col items-center gap-1 rounded-xl py-1.5 transition-colors",
+                active && "bg-slate-900",
+              )}
               aria-current={active ? "page" : undefined}
             >
               <Icon
@@ -59,7 +62,7 @@ export function BottomTabs() {
                 {t.label}
               </span>
               {active && (
-                <span className="absolute -bottom-1 h-[3px] w-6 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(255,35,87,0.6)]" />
+                <span className="absolute -bottom-1 h-[3px] w-6 rounded-full bg-rose-500" />
               )}
             </Link>
           );

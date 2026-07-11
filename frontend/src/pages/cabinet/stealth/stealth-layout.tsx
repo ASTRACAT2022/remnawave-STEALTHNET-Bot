@@ -32,15 +32,10 @@ export function StealthLayout() {
     <div className="min-h-screen w-full text-white relative overflow-x-hidden">
       <NetworkBg />
 
-      {/* Header: бренд по центру + ambient glow */}
-      <header className="relative pt-6 pb-3 px-4 text-center">
+      <header className="relative border-b border-slate-800 bg-slate-950 px-4 pb-3 pt-5 text-center">
         <div className="inline-block relative">
-          <span
-            className="absolute inset-0 -z-10 blur-2xl opacity-50"
-            style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.18), transparent 70%)" }}
-          />
           <h1
-            className="text-base md:text-lg font-bold tracking-[0.18em] text-white"
+            className="text-sm md:text-base font-bold tracking-[0.14em] text-white"
             style={{ fontFamily: '"Syncopate", "Inter", system-ui, sans-serif' }}
           >
             {brand}
