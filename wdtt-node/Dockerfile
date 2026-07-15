@@ -1,7 +1,7 @@
 # WDTT Node Dockerfile
 # Builds both the WDTT server and the STEALTHNET API wrapper
 
-FROM golang:alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 ENV GOTOOLCHAIN=auto
 RUN apk add --no-cache git gcc musl-dev linux-headers
@@ -10,8 +10,9 @@ RUN apk add --no-cache git gcc musl-dev linux-headers
 WORKDIR /build
 RUN git clone https://github.com/amurcanov/proxy-turn-vk-android.git --depth=1 wdtt-source
 
-# Build WDTT server
-WORKDIR /build/wdtt-source
+# Build WDTT server. The upstream repository is an Android project; the
+# Linux server Go module lives under app/src/main/assets/linux-server.
+WORKDIR /build/wdtt-source/app/src/main/assets/linux-server
 RUN go mod tidy && \
     CGO_ENABLED=0 go build -o /wdtt-server -ldflags="-s -w" .
 
