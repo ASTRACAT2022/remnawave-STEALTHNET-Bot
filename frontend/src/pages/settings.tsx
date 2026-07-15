@@ -383,6 +383,7 @@ export function SettingsPage() {
   const [heleketWebhookCopied, setHeleketWebhookCopied] = useState(false);
   const [lavaWebhookCopied, setLavaWebhookCopied] = useState(false);
   const [overpayWebhookCopied, setOverpayWebhookCopied] = useState(false);
+  const [freekassaWebhookCopied, setFreekassaWebhookCopied] = useState(false);
   const [defaultSubpageConfig, setDefaultSubpageConfig] = useState<SubscriptionPageConfig | null>(null);
   const [autoRenewStats, setAutoRenewStats] = useState<AutoRenewStats | null>(null);
   const defaultJourneySteps = [
@@ -785,6 +786,9 @@ export function SettingsPage() {
         overpayProjectId: settings.overpayProjectId ?? null,
         overpayLogin: settings.overpayLogin ?? null,
         overpayPassword: settings.overpayPassword && settings.overpayPassword !== "********" ? settings.overpayPassword : undefined,
+        freekassaShopId: settings.freekassaShopId ?? null,
+        freekassaApiKey: settings.freekassaApiKey && settings.freekassaApiKey !== "********" ? settings.freekassaApiKey : undefined,
+        freekassaSecretWord2: settings.freekassaSecretWord2 && settings.freekassaSecretWord2 !== "********" ? settings.freekassaSecretWord2 : undefined,
         groqApiKey: settings.groqApiKey && settings.groqApiKey !== "********" ? settings.groqApiKey : undefined,
         groqModel: settings.groqModel ?? undefined,
         groqFallback1: settings.groqFallback1 ?? undefined,
@@ -2858,6 +2862,101 @@ export function SettingsPage() {
                     <Button type="submit" disabled={saving}>
                       {saving ? t("admin.settings.saving") : t("admin.settings.save")}
                     </Button>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible defaultOpen={false} className="group mt-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-t-lg text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <CardHeader className="pointer-events-none [&_.chevron]:transition-transform [&_.chevron]:duration-200 group-data-[state=open]:[&_.chevron]:rotate-180">
+                      <div className="flex items-center justify-between pr-2">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="h-5 w-5 text-primary" />
+                          <CardTitle>KASSA</CardTitle>
+                          <span className="text-xs font-normal text-muted-foreground">{t("admin.settings.freekassa_desc_short")}</span>
+                        </div>
+                        <ChevronDown className="chevron h-5 w-5 shrink-0 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {t("admin.settings.freekassa_register")} <a href="https://freekassa.net" target="_blank" rel="noreferrer" className="text-primary underline">freekassa.net</a>
+                      </p>
+                    </CardHeader>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 border-t pt-4">
+                    <div className="space-y-2">
+                      <Label>{t("admin.settings.freekassa_webhook")}</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          readOnly
+                          value={(settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/freekassa` : t("admin.settings.specify_url_hint")}
+                          className="font-mono text-sm bg-muted/50"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={async () => {
+                            const url = (settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/freekassa` : "";
+                            if (url && navigator.clipboard) {
+                              await navigator.clipboard.writeText(url);
+                              setFreekassaWebhookCopied(true);
+                              setTimeout(() => setFreekassaWebhookCopied(false), 2000);
+                            }
+                          }}
+                          disabled={!(settings.publicAppUrl ?? "").trim()}
+                          title={t("admin.settings.copy")}
+                        >
+                          {freekassaWebhookCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{t("admin.settings.freekassa_webhook_hint")}</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {t("admin.settings.freekassa_desc")}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>{t("admin.settings.freekassa_shop_id")}</Label>
+                        <Input
+                          value={settings.freekassaShopId ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, freekassaShopId: e.target.value || null } : s))}
+                          placeholder="12345"
+                        />
+                        <p className="text-xs text-muted-foreground">{t("admin.settings.freekassa_shop_id_hint")}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t("admin.settings.freekassa_api_key")}</Label>
+                        <Input
+                          type="password"
+                          value={settings.freekassaApiKey ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, freekassaApiKey: e.target.value || null } : s))}
+                          placeholder={t("admin.settings.freekassa_api_key_placeholder")}
+                        />
+                        <p className="text-xs text-muted-foreground">{t("admin.settings.freekassa_api_key_hint")}</p>
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>{t("admin.settings.freekassa_secret_word2")}</Label>
+                        <Input
+                          type="password"
+                          value={settings.freekassaSecretWord2 ?? ""}
+                          onChange={(e) => setSettings((s) => (s ? { ...s, freekassaSecretWord2: e.target.value || null } : s))}
+                          placeholder={t("admin.settings.freekassa_secret_word2_placeholder")}
+                        />
+                        <p className="text-xs text-muted-foreground">{t("admin.settings.freekassa_secret_word2_hint")}</p>
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <Button type="submit" disabled={saving} className="min-w-[140px]">
+                        {saving ? t("admin.settings.saving") : t("admin.settings.save")}
+                      </Button>
+                    </div>
                   </CardContent>
                 </CollapsibleContent>
               </Collapsible>

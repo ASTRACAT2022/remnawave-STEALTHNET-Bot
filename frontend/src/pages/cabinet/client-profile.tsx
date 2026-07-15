@@ -60,6 +60,7 @@ function ClassicProfilePage() {
   const [lavaEnabled, setLavaEnabled] = useState(false);
   // Lava.top removed from balance top-up — оставлен только для тарифов (см. client-tariffs.tsx)
   const [overpayEnabled, setOverpayEnabled] = useState(false);
+  const [freekassaEnabled, setFreekassaEnabled] = useState(false);
   const [paymentProviders, setPaymentProviders] = useState<{ id: string; label: string; sortOrder: number }[]>([]);
   const [publicAppUrl, setPublicAppUrl] = useState<string | null>(null);
   const [yookassaRecurringEnabled, setYookassaRecurringEnabled] = useState(false);
@@ -307,6 +308,7 @@ function ClassicProfilePage() {
       setHeleketEnabled(Boolean(c.heleketEnabled));
       setLavaEnabled(Boolean(c.lavaEnabled));
       setOverpayEnabled(Boolean(c.overpayEnabled));
+      setFreekassaEnabled(Boolean(c.freekassaEnabled));
       setPaymentProviders(c.paymentProviders ?? []);
       setPublicAppUrl(c.publicAppUrl ?? null);
       setTelegramBotUsername(c.telegramBotUsername ?? null);
@@ -462,6 +464,25 @@ function ClassicProfilePage() {
     try {
       const res = await api.overpayCreatePayment(token, { amount, currency });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Overpay" });
+    } catch (e) {
+      setTopUpError(e instanceof Error ? e.message : t("cabinet.profile.top_up_error"));
+    } finally {
+      setTopUpLoading(false);
+    }
+  }
+
+  async function startTopUpFreekassa() {
+    if (!token || !client) return;
+    const amount = Number(topUpAmount?.replace(",", "."));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError(t("cabinet.profile.top_up_enter_amount_rub"));
+      return;
+    }
+    setTopUpError(null);
+    setTopUpLoading(true);
+    try {
+      const res = await api.freekassaCreatePayment(token, { amount, currency: "RUB" });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
     } catch (e) {
       setTopUpError(e instanceof Error ? e.message : t("cabinet.profile.top_up_error"));
     } finally {
@@ -930,7 +951,7 @@ function ClassicProfilePage() {
         transition={{ duration: 0.3, delay: 0.1 }}
         className={`grid gap-6 ${isMiniapp ? "grid-cols-1" : "lg:grid-cols-2"} min-w-0`}
       >
-        {(plategaMethods.length > 0 || yoomoneyEnabled || yookassaEnabled || cryptopayEnabled || heleketEnabled || lavaEnabled || overpayEnabled) && (
+        {(plategaMethods.length > 0 || yoomoneyEnabled || yookassaEnabled || cryptopayEnabled || heleketEnabled || lavaEnabled || overpayEnabled || freekassaEnabled) && (
           <div id="topup" className="relative flex flex-col rounded-[2rem] shadow-[0_8px_40px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_40px_rgba(0,0,0,0.3)]">
             <div className="absolute inset-0 overflow-hidden rounded-[2rem] border border-white/10 dark:border-white/5 bg-background/40 backdrop-blur-2xl">
               <div className="absolute -top-32 -left-32 h-64 w-64 rounded-full bg-primary/20 blur-[80px] pointer-events-none" />
@@ -1182,6 +1203,7 @@ function ClassicProfilePage() {
                 yoomoney: { bg10: "bg-green-500/10", bg20: "group-hover:bg-green-500/20", text: "text-green-500" },
                 lava: { bg10: "bg-sky-500/10", bg20: "group-hover:bg-sky-500/20", text: "text-sky-500" },
                 overpay: { bg10: "bg-indigo-500/10", bg20: "group-hover:bg-indigo-500/20", text: "text-indigo-500" },
+                freekassa: { bg10: "bg-emerald-500/10", bg20: "group-hover:bg-emerald-500/20", text: "text-emerald-500" },
               };
 
               type ProviderEntry = { id: string; enabled: boolean; onClick: () => void; label: string; icon: "crypto" | "card" };
@@ -1193,6 +1215,7 @@ function ClassicProfilePage() {
                 { id: "lava", enabled: lavaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpLava(), label: providerLabel("lava", "LAVA"), icon: "card" },
                 // Lava.top — только subscription для тарифов, не для top-up баланса
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startTopUpOverpay(), label: providerLabel("overpay", "Overpay"), icon: "card" },
+                { id: "freekassa", enabled: freekassaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpFreekassa(), label: providerLabel("freekassa", "KASSA"), icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0

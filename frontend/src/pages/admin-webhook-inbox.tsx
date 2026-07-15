@@ -1,5 +1,5 @@
 /**
- * Webhook inbox: входящие webhook'и от Platega/YooKassa/Lava/Crypto/Heleket/YooMoney/Overpay.
+ * Webhook inbox: входящие webhook'и от Platega/YooKassa/Lava/Crypto/Heleket/YooMoney/Overpay/KASSA.
  * Фильтр по провайдеру и outcome. Drawer с raw body + headers + кнопкой replay.
  */
 
@@ -28,7 +28,7 @@ const OUTCOME_META: Record<string, { label: string; cls: string; icon: typeof Ch
   error: { label: "Ошибка обработки", cls: "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30", icon: XCircle },
 };
 
-const PROVIDERS = ["platega", "yookassa", "yoomoney", "cryptopay", "heleket", "lava", "overpay"];
+const PROVIDERS = ["platega", "yookassa", "yoomoney", "cryptopay", "heleket", "lava", "overpay", "freekassa"];
 
 export function AdminWebhookInboxPage() {
   const { state } = useAuth();
