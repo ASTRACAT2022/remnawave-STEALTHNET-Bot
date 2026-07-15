@@ -57,6 +57,7 @@ import { getServerStats, getSshConfig, updateSshConfig } from "../server/server.
 import { syncFromRemna, syncToRemna, createRemnaUsersForClientsWithoutUuid } from "../sync/sync.service.js";
 import { distributeReferralRewards } from "../referral/referral.service.js";
 import { markPaymentPaid } from "../payment/mark-paid.service.js";
+import { syncPendingFreekassaPayments } from "../freekassa/freekassa-reconcile.service.js";
 // activateTariffForClient больше не используется в admin —
 // выдача подписки идёт через createAdditionalSubscription (создание новой Subscription).
 import { registerBackupRoutes } from "../backup/backup.routes.js";
@@ -396,6 +397,13 @@ adminRouter.get("/notifications/counters", asyncRoute(async (_req, res) => {
 /** Отметить платёж как оплаченный и начислить реферальные бонусы (3 уровня) */
 const paymentIdParamSchema = z.object({ id: z.string().min(1) });
 const markPaymentPaidSchema = z.object({ status: z.literal("PAID") });
+adminRouter.post("/payments/freekassa/sync", asyncRoute(async (req, res) => {
+  const limit = Math.max(1, Math.min(200, Number(req.body?.limit ?? 50) || 50));
+  const result = await syncPendingFreekassaPayments(limit);
+  if (!result.ok) return res.status(400).json({ message: result.error });
+  return res.json(result);
+}));
+
 adminRouter.patch("/payments/:id", asyncRoute(async (req, res) => {
   const params = paymentIdParamSchema.safeParse(req.params);
   const body = markPaymentPaidSchema.safeParse(req.body);

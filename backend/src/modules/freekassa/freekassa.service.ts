@@ -64,6 +64,10 @@ export type CreateFreekassaOrderResult =
   | { ok: true; orderId: number; orderHash: string; location: string }
   | { ok: false; error: string; status?: number };
 
+export type FreekassaOrderStatusResult =
+  | { ok: true; paid: boolean; status: number | null; order: Record<string, unknown> | null }
+  | { ok: false; error: string; status?: number };
+
 export async function createFreekassaOrder(params: CreateFreekassaOrderParams): Promise<CreateFreekassaOrderResult> {
   const shopId = params.config.shopId?.trim();
   const apiKey = params.config.apiKey?.trim();
@@ -141,6 +145,70 @@ export async function createFreekassaOrder(params: CreateFreekassaOrderParams): 
   }
 }
 
+export async function getFreekassaOrderStatus(params: {
+  config: Pick<FreekassaConfig, "shopId" | "apiKey">;
+  orderId?: string | number | null;
+  paymentId?: string | null;
+}): Promise<FreekassaOrderStatusResult> {
+  const shopId = params.config.shopId?.trim();
+  const apiKey = params.config.apiKey?.trim();
+  if (!shopId || !apiKey) return { ok: false, error: "FreeKassa не настроена" };
+
+  const payload: Record<string, string | number> = {
+    shopId: Number(shopId),
+    nonce: makeNonce(),
+  };
+  const orderId = params.orderId != null ? String(params.orderId).trim() : "";
+  if (orderId && /^\d+$/.test(orderId)) payload.orderId = Number(orderId);
+  const paymentId = params.paymentId?.trim();
+  if (paymentId) payload.paymentId = paymentId;
+  payload.signature = signFreekassaApiRequest(payload, apiKey);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const proxy = await getProxyUrl("payments");
+    const res = await proxyFetch(`${FREEKASSA_API_BASE}/orders`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }, proxy);
+    clearTimeout(timeoutId);
+
+    const text = await res.text();
+    let data: Record<string, unknown>;
+    try {
+      data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      return { ok: false, error: `FreeKassa: не JSON (HTTP ${res.status})`, status: res.status };
+    }
+
+    if (!res.ok || data.type !== "success") {
+      const msg = extractFreekassaError(data) ?? (text.slice(0, 300) || `HTTP ${res.status}`);
+      return { ok: false, error: `FreeKassa: ${msg}`, status: res.status };
+    }
+
+    const order = pickFreekassaOrder(data, { orderId, paymentId });
+    const rawStatus = order ? (order.status ?? order.orderStatus ?? order.order_status) : null;
+    const statusValue = Number(rawStatus);
+    const status = Number.isFinite(statusValue) ? statusValue : null;
+    const paid = status === 1 || String(rawStatus ?? "").trim().toLowerCase() === "paid";
+    return { ok: true, paid, status, order };
+  } catch (e) {
+    clearTimeout(timeoutId);
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("fetch") || message.includes("ECONNREFUSED") || message.includes("ENOTFOUND") || message.includes("ETIMEDOUT") || (e instanceof Error && e.name === "AbortError")) {
+      return { ok: false, error: "Нет связи с FreeKassa. Проверьте интернет и настройки прокси." };
+    }
+    return { ok: false, error: message };
+  }
+}
+
 export function signFreekassaApiRequest(payload: Record<string, string | number>, apiKey: string): string {
   const values = Object.entries(payload)
     .filter(([key]) => key !== "signature")
@@ -200,5 +268,24 @@ function extractFreekassaError(data: unknown): string | null {
   if (typeof d.error === "string" && d.error.trim()) return d.error.trim();
   if (typeof d.desc === "string" && d.desc.trim()) return d.desc.trim();
   if (Array.isArray(d.errors) && typeof d.errors[0] === "string") return d.errors[0];
+  return null;
+}
+
+function pickFreekassaOrder(
+  data: Record<string, unknown>,
+  ids: { orderId: string; paymentId?: string },
+): Record<string, unknown> | null {
+  const orders = Array.isArray(data.orders) ? data.orders : (Array.isArray(data.data) ? data.data : []);
+  const normalizedOrderId = ids.orderId.trim();
+  const normalizedPaymentId = ids.paymentId?.trim() ?? "";
+  for (const item of orders) {
+    if (!item || typeof item !== "object") continue;
+    const order = item as Record<string, unknown>;
+    const fkOrderId = String(order.fk_order_id ?? order.orderId ?? order.order_id ?? order.id ?? "").trim();
+    const merchantOrderId = String(order.merchant_order_id ?? order.paymentId ?? order.payment_id ?? "").trim();
+    if (normalizedOrderId && fkOrderId === normalizedOrderId) return order;
+    if (normalizedPaymentId && merchantOrderId === normalizedPaymentId) return order;
+  }
+  if (orders.length === 1 && orders[0] && typeof orders[0] === "object") return orders[0] as Record<string, unknown>;
   return null;
 }
