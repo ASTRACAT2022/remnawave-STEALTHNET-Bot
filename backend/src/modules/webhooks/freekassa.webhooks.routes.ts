@@ -31,7 +31,7 @@ function requestIP(req: Request): string {
   return (req.ip || req.socket.remoteAddress || "").replace(/^::ffff:/, "");
 }
 
-freekassaWebhooksRouter.post("/freekassa", async (req: Request, res: Response) => {
+export async function handleFreekassaWebhook(req: Request, res: Response) {
   const sourceIp = requestIP(req);
   if (!isFreekassaWebhookIPAllowed(sourceIp)) {
     console.warn("[FreeKassa Webhook] Rejected IP", { sourceIp });
@@ -98,4 +98,6 @@ freekassaWebhooksRouter.post("/freekassa", async (req: Request, res: Response) =
 
   console.log("[FreeKassa Webhook] Payment accepted", { paymentId: payment.id, orderId, fkOrderId, currencyId });
   return res.status(200).send("YES");
-});
+}
+
+freekassaWebhooksRouter.post("/freekassa", handleFreekassaWebhook);

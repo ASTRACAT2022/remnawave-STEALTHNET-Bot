@@ -6567,6 +6567,8 @@ const freekassaCreatePaymentSchema = z.object({
   }).optional(),
 });
 
+const FREEKASSA_WEBHOOK_URL = "https://cabinet.astracat.ru/api/kassaai";
+
 clientRouter.post("/freekassa/create-payment", async (req, res) => {
   try {
     const clientId = (req as unknown as { clientId: string }).clientId;
@@ -6794,7 +6796,7 @@ clientRouter.post("/freekassa/create-payment", async (req, res) => {
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
     const successUrl = appUrl ? `${appUrl}/cabinet?freekassa=success` : undefined;
     const failureUrl = appUrl ? `${appUrl}/cabinet?freekassa=fail` : undefined;
-    const notificationUrl = appUrl ? `${appUrl}/api/webhooks/freekassa` : undefined;
+    const notificationUrl = FREEKASSA_WEBHOOK_URL;
 
     const result = await createFreekassaOrder({
       config: freekassaConfig,
@@ -7552,6 +7554,4 @@ publicConfigRouter.get("/singbox-tariffs", async (req, res) => {
     return res.status(500).json({ message: "Ошибка загрузки тарифов Sing-box" });
   }
 });
-
-
 

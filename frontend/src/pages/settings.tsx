@@ -43,6 +43,7 @@ const LANG_NAMES: Record<string, string> = {
   fa: "فارسی",
 };
 const ALLOWED_CURRENCIES = ["usd", "rub"];
+const FREEKASSA_WEBHOOK_URL = "https://cabinet.astracat.ru/api/kassaai";
 
 const DEFAULT_PLATEGA_METHODS: { id: number; enabled: boolean; label: string }[] = [
   { id: 2, enabled: true, label: "СБП" },
@@ -2894,7 +2895,7 @@ export function SettingsPage() {
                       <div className="flex gap-2">
                         <Input
                           readOnly
-                          value={(settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/freekassa` : t("admin.settings.specify_url_hint")}
+                          value={FREEKASSA_WEBHOOK_URL}
                           className="font-mono text-sm bg-muted/50"
                         />
                         <Button
@@ -2903,14 +2904,12 @@ export function SettingsPage() {
                           size="icon"
                           className="shrink-0"
                           onClick={async () => {
-                            const url = (settings.publicAppUrl ?? "").replace(/\/$/, "") ? `${(settings.publicAppUrl ?? "").replace(/\/$/, "")}/api/webhooks/freekassa` : "";
-                            if (url && navigator.clipboard) {
-                              await navigator.clipboard.writeText(url);
+                            if (navigator.clipboard) {
+                              await navigator.clipboard.writeText(FREEKASSA_WEBHOOK_URL);
                               setFreekassaWebhookCopied(true);
                               setTimeout(() => setFreekassaWebhookCopied(false), 2000);
                             }
                           }}
-                          disabled={!(settings.publicAppUrl ?? "").trim()}
                           title={t("admin.settings.copy")}
                         >
                           {freekassaWebhookCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
