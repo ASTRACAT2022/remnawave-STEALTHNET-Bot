@@ -38,6 +38,10 @@ export function setProviderLabels(list: Array<{ id: string; label: string }> | n
 function providerLabel(id: string, fallback: string): string {
   return CURRENT_PROVIDER_LABELS[id] ?? fallback;
 }
+function freekassaMethodLabel(method: "sbp" | "card"): string {
+  const base = providerLabel("freekassa", "KASSA").replace(/^💳\s*/, "").trim() || "KASSA";
+  return method === "sbp" ? `💳 ${base} — СБП QR` : `💳 ${base} — Карта РФ`;
+}
 
 // Стрип ведущего unicode-эмодзи (с опциональным VS16, ZWJ-секвенциями и пробелом).
 // Когда у кнопки задан `icon_custom_emoji_id`, Telegram рендерит премиум-иконку слева
@@ -629,6 +633,7 @@ export function tariffPaymentMethodButtons(
   heleketEnabled?: boolean,
   lavaEnabled?: boolean,
   lavatopEnabled?: boolean,
+  freekassaEnabled?: boolean,
   // bot_emojis для backButton (text "← Назад" + premium icon).
   botEmojis?: Record<string, { unicode?: string | null; tgEmojiId?: string | null }> | null,
 ): InlineMarkup {
@@ -657,6 +662,11 @@ export function tariffPaymentMethodButtons(
   // Lava.top — RUB / USD / EUR через product/offer модель
   if (lavatopEnabled) {
     rows.push([btn(providerLabel("lavatop", "💳 Lava.top — СБП / Карты"), `pay_tariff_lavatop:${tariffId}`, undefined, cardId)]);
+  }
+  // KASSA / FreeKassa API: i=44 — СБП QR, i=36 — банковские карты РФ.
+  if (freekassaEnabled && (!tariffCurrency || tariffCurrency.toUpperCase() === "RUB")) {
+    rows.push([btn(freekassaMethodLabel("sbp"), `pay_tariff_freekassa_sbp:${tariffId}`, undefined, cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `pay_tariff_freekassa_card:${tariffId}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) {
     rows.push([btn(providerLabel("cryptopay", "💳 Crypto Bot — криптовалюта"), `pay_tariff_cryptopay:${tariffId}`, undefined, cardId)]);
@@ -779,6 +789,7 @@ export function proxyPaymentMethodButtons(
   yookassaEnabled?: boolean,
   cryptopayEnabled?: boolean,
   currency?: string,
+  freekassaEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = undefined;
@@ -790,6 +801,10 @@ export function proxyPaymentMethodButtons(
   }
   if (yookassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
     rows.push([btn(providerLabel("yookassa", "💳 ЮKassa — карта / СБП"), `pay_proxy_yookassa:${proxyTariffId}`, undefined, cardId)]);
+  }
+  if (freekassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
+    rows.push([btn(freekassaMethodLabel("sbp"), `pay_proxy_freekassa_sbp:${proxyTariffId}`, undefined, cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `pay_proxy_freekassa_card:${proxyTariffId}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) rows.push([btn(providerLabel("cryptopay", "💳 Crypto Bot — криптовалюта"), `pay_proxy_cryptopay:${proxyTariffId}`, undefined, cardId)]);
   for (const m of methods) {
@@ -866,6 +881,7 @@ export function singboxPaymentMethodButtons(
   yookassaEnabled?: boolean,
   cryptopayEnabled?: boolean,
   currency?: string,
+  freekassaEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = undefined;
@@ -877,6 +893,10 @@ export function singboxPaymentMethodButtons(
   }
   if (yookassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
     rows.push([btn(providerLabel("yookassa", "💳 ЮKassa — карта / СБП"), `pay_singbox_yookassa:${singboxTariffId}`, undefined, cardId)]);
+  }
+  if (freekassaEnabled && (!currency || currency.toUpperCase() === "RUB")) {
+    rows.push([btn(freekassaMethodLabel("sbp"), `pay_singbox_freekassa_sbp:${singboxTariffId}`, undefined, cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `pay_singbox_freekassa_card:${singboxTariffId}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) rows.push([btn(providerLabel("cryptopay", "💳 Crypto Bot — криптовалюта"), `pay_singbox_cryptopay:${singboxTariffId}`, undefined, cardId)]);
   for (const m of methods) {
@@ -899,6 +919,7 @@ export function topupPaymentMethodButtons(
   heleketEnabled?: boolean,
   lavaEnabled?: boolean,
   lavatopEnabled?: boolean,
+  freekassaEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = resolveStyle(toStyle(backStyle), "danger");
@@ -912,6 +933,10 @@ export function topupPaymentMethodButtons(
   }
   if (lavaEnabled) {
     rows.push([btn(providerLabel("lava", "💳 Lava — СБП / Карты"), `topup_lava:${amount}`, "primary", cardId)]);
+  }
+  if (freekassaEnabled) {
+    rows.push([btn(freekassaMethodLabel("sbp"), `topup_freekassa_sbp:${amount}`, "primary", cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `topup_freekassa_card:${amount}`, "primary", cardId)]);
   }
   // Lava.top — только для тарифов (subscription mode), не для топ-апа баланса.
   // Параметр lavatopEnabled оставлен в сигнатуре для обратной совместимости.
@@ -975,6 +1000,7 @@ export function optionPaymentMethodButtons(
   yoomoneyEnabled?: boolean,
   yookassaEnabled?: boolean,
   cryptopayEnabled?: boolean,
+  freekassaEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = undefined;
@@ -991,6 +1017,10 @@ export function optionPaymentMethodButtons(
   }
   if (cryptopayEnabled) {
     rows.push([btn(providerLabel("cryptopay", "💳 Crypto Bot — криптовалюта"), `pay_option_cryptopay:${option.kind}:${option.id}`, undefined, cardId)]);
+  }
+  if (freekassaEnabled && option.currency.toUpperCase() === "RUB") {
+    rows.push([btn(freekassaMethodLabel("sbp"), `pay_option_freekassa_sbp:${option.kind}:${option.id}`, undefined, cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `pay_option_freekassa_card:${option.kind}:${option.id}`, undefined, cardId)]);
   }
   for (const m of plategaMethods) {
     rows.push([btn(m.label, `pay_option_platega:${option.kind}:${option.id}:${m.id}`, undefined, cardId)]);
@@ -1349,6 +1379,7 @@ export function giftPaymentButtons(
   heleketEnabled?: boolean,
   lavaEnabled?: boolean,
   tariffCurrency?: string,
+  freekassaEnabled?: boolean,
 ): InlineMarkup {
   const back = (backLabel && backLabel.trim()) || DEFAULT_BACK_LABEL;
   const backSty = resolveStyle(toStyle(innerStyles?.back), "danger");
@@ -1366,6 +1397,10 @@ export function giftPaymentButtons(
   }
   if (lavaEnabled && isRub) {
     rows.push([btn(providerLabel("lava", "💳 Lava — СБП / Карты"), `gift_pay_lava:${tariffId}`, undefined, cardId)]);
+  }
+  if (freekassaEnabled && isRub) {
+    rows.push([btn(freekassaMethodLabel("sbp"), `gift_pay_freekassa_sbp:${tariffId}`, undefined, cardId)]);
+    rows.push([btn(freekassaMethodLabel("card"), `gift_pay_freekassa_card:${tariffId}`, undefined, cardId)]);
   }
   if (cryptopayEnabled) {
     rows.push([btn(providerLabel("cryptopay", "💳 Crypto Bot — криптовалюта"), `gift_pay_cryptopay:${tariffId}`, undefined, cardId)]);

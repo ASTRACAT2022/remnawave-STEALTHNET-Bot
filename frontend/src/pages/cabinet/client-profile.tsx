@@ -471,7 +471,7 @@ function ClassicProfilePage() {
     }
   }
 
-  async function startTopUpFreekassa() {
+  async function startTopUpFreekassa(method: "sbp" | "cardRub") {
     if (!token || !client) return;
     const amount = Number(topUpAmount?.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -481,8 +481,8 @@ function ClassicProfilePage() {
     setTopUpError(null);
     setTopUpLoading(true);
     try {
-      const res = await api.freekassaCreatePayment(token, { amount, currency: "RUB" });
-      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+      const res = await api.freekassaCreatePayment(token, { amount, currency: "RUB", method });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: method === "cardRub" ? "KASSA Карта" : "KASSA СБП QR" });
     } catch (e) {
       setTopUpError(e instanceof Error ? e.message : t("cabinet.profile.top_up_error"));
     } finally {
@@ -1215,11 +1215,12 @@ function ClassicProfilePage() {
                 { id: "lava", enabled: lavaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpLava(), label: providerLabel("lava", "LAVA"), icon: "card" },
                 // Lava.top — только subscription для тарифов, не для top-up баланса
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startTopUpOverpay(), label: providerLabel("overpay", "Overpay"), icon: "card" },
-                { id: "freekassa", enabled: freekassaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpFreekassa(), label: providerLabel("freekassa", "KASSA"), icon: "card" },
+                { id: "freekassa_sbp", enabled: freekassaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpFreekassa("sbp"), label: `${providerLabel("freekassa", "KASSA")} — СБП QR`, icon: "card" },
+                { id: "freekassa_card", enabled: freekassaEnabled && currency.toLowerCase() === "rub", onClick: () => startTopUpFreekassa("cardRub"), label: `${providerLabel("freekassa", "KASSA")} — Карта РФ`, icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0
-                ? paymentProviders.map((pp) => providers.find((p) => p.id === pp.id)).filter((p): p is ProviderEntry => !!p)
+                ? paymentProviders.flatMap((pp) => pp.id === "freekassa" ? providers.filter((p) => p.id === "freekassa_sbp" || p.id === "freekassa_card") : providers.find((p) => p.id === pp.id) ? [providers.find((p) => p.id === pp.id)!] : []).filter((p): p is ProviderEntry => !!p)
                 : providers;
 
               return (

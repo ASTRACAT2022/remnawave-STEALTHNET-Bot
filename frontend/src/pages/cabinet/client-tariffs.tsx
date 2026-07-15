@@ -486,7 +486,7 @@ function ClassicTariffsPage() {
     }
   }
 
-  async function startFreekassaPayment(tariff: TariffForPay) {
+  async function startFreekassaPayment(tariff: TariffForPay, method: "sbp" | "cardRub") {
     if (!token) return;
     setPayError(null);
     setPayLoading(true);
@@ -494,12 +494,13 @@ function ClassicTariffsPage() {
       const res = await api.freekassaCreatePayment(token, {
         amount: tariff.price,
         currency: tariff.currency,
+        method,
         tariffId: tariff.id,
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
       });
-      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: method === "cardRub" ? "KASSA Карта" : "KASSA СБП QR" });
     } catch (e) {
       setPayError(e instanceof Error ? e.message : t("cabinet.tariffs.error_payment"));
     } finally {
@@ -714,11 +715,12 @@ function ClassicTariffsPage() {
                 { id: "lava", enabled: lavaEnabled && isRub, onClick: () => startLavaPayment(tariff), label: providerLabel("lava", "LAVA"), icon: "card" },
                 { id: "lavatop", enabled: lavatopEnabled, onClick: () => startLavatopPayment(tariff), label: providerLabel("lavatop", "Lava.top"), icon: "card" },
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startOverpayPayment(tariff), label: providerLabel("overpay", "Overpay"), icon: "card" },
-                { id: "freekassa", enabled: freekassaEnabled && isRub, onClick: () => startFreekassaPayment(tariff), label: providerLabel("freekassa", "KASSA"), icon: "card" },
+                { id: "freekassa_sbp", enabled: freekassaEnabled && isRub, onClick: () => startFreekassaPayment(tariff, "sbp"), label: `${providerLabel("freekassa", "KASSA")} — СБП QR`, icon: "card" },
+                { id: "freekassa_card", enabled: freekassaEnabled && isRub, onClick: () => startFreekassaPayment(tariff, "cardRub"), label: `${providerLabel("freekassa", "KASSA")} — Карта РФ`, icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0
-                ? paymentProviders.map((pp) => providers.find((p) => p.id === pp.id)).filter((p): p is ProviderEntry => !!p)
+                ? paymentProviders.flatMap((pp) => pp.id === "freekassa" ? providers.filter((p) => p.id === "freekassa_sbp" || p.id === "freekassa_card") : providers.find((p) => p.id === pp.id) ? [providers.find((p) => p.id === pp.id)!] : []).filter((p): p is ProviderEntry => !!p)
                 : providers;
 
               return (

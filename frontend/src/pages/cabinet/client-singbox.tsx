@@ -260,7 +260,7 @@ export function ClientSingboxPage() {
     }
   }
 
-  async function startFreekassaPayment(tariff: SingboxTariff) {
+  async function startFreekassaPayment(tariff: SingboxTariff, method: "sbp" | "cardRub") {
     if (!token) return;
     setPayError(null);
     setPayLoading(true);
@@ -268,9 +268,10 @@ export function ClientSingboxPage() {
       const res = await api.freekassaCreatePayment(token, {
         amount: tariff.price,
         currency: tariff.currency,
+        method,
         singboxTariffId: tariff.id,
       } as Parameters<typeof api.freekassaCreatePayment>[1]);
-      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: method === "cardRub" ? "KASSA Карта" : "KASSA СБП QR" });
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Ошибка");
     } finally {
@@ -427,11 +428,12 @@ export function ClientSingboxPage() {
                 { id: "yoomoney", enabled: yoomoneyEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startYoomoneyPayment(payModal), label: providerLabel("yoomoney", "ЮMoney / Карты"), icon: "card" },
                 { id: "lava", enabled: lavaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startLavaPayment(payModal), label: providerLabel("lava", "LAVA"), icon: "card" },
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startOverpayPayment(payModal), label: providerLabel("overpay", "Overpay"), icon: "card" },
-                { id: "freekassa", enabled: freekassaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startFreekassaPayment(payModal), label: providerLabel("freekassa", "KASSA"), icon: "card" },
+                { id: "freekassa_sbp", enabled: freekassaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startFreekassaPayment(payModal, "sbp"), label: `${providerLabel("freekassa", "KASSA")} — СБП QR`, icon: "card" },
+                { id: "freekassa_card", enabled: freekassaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startFreekassaPayment(payModal, "cardRub"), label: `${providerLabel("freekassa", "KASSA")} — Карта РФ`, icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0
-                ? paymentProviders.map((pp) => providers.find((p) => p.id === pp.id)).filter((p): p is ProviderEntry => !!p)
+                ? paymentProviders.flatMap((pp) => pp.id === "freekassa" ? providers.filter((p) => p.id === "freekassa_sbp" || p.id === "freekassa_card") : providers.find((p) => p.id === pp.id) ? [providers.find((p) => p.id === pp.id)!] : []).filter((p): p is ProviderEntry => !!p)
                 : providers;
 
               return (

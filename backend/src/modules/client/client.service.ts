@@ -902,7 +902,7 @@ const DEFAULT_PAYMENT_PROVIDERS: PaymentProviderConfig[] = [
   { id: "lava", label: "LAVA (СБП / Карты / СберPay)", sortOrder: 4 },
   { id: "lavatop", label: "Lava.top (СБП / Карты)", sortOrder: 5 },
   { id: "overpay", label: "Overpay (Карты / СБП)", sortOrder: 6 },
-  { id: "freekassa", label: "KASSA (СБП / Карты)", sortOrder: 7 },
+  { id: "freekassa", label: "KASSA", sortOrder: 7 },
 ];
 
 function parsePaymentProviders(raw: string | undefined): PaymentProviderConfig[] {

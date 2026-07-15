@@ -2015,7 +2015,7 @@ async function showPaymentMethodsForTariff(ctx: any, userId: number, tariff: Tar
   // Для тарифов с несколькими opts (Стандартная) описание уже показано в picker'е длительности.
   const desc = ((tariff as TariffItem & { description?: string | null }).description ?? "").trim();
   const finalText = desc && opts.length === 1 ? `${desc}\n\n${pay.text}` : pay.text;
-  await editMessageContent(ctx, finalText, tariffPaymentMethodButtons(tariff.id, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, balanceLabel, !!config?.yoomoneyEnabled, !!config?.yookassaEnabled, !!config?.cryptopayEnabled, tariff.currency, !!config?.heleketEnabled, !!config?.lavaEnabled, !!config?.lavatopEnabled, config?.botEmojis ?? null), pay.entities);
+  await editMessageContent(ctx, finalText, tariffPaymentMethodButtons(tariff.id, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, balanceLabel, !!config?.yoomoneyEnabled, !!config?.yookassaEnabled, !!config?.cryptopayEnabled, tariff.currency, !!config?.heleketEnabled, !!config?.lavaEnabled, !!config?.lavatopEnabled, !!config?.freekassaEnabled, config?.botEmojis ?? null), pay.entities);
 }
 
 /** Picker доп. устройств для подарочной подписки. */
@@ -2092,6 +2092,7 @@ async function showGiftPaymentConfirm(ctx: any, userId: number, tariff: TariffIt
     !!config?.heleketEnabled,
     !!config?.lavaEnabled,
     tariff.currency,
+    !!config?.freekassaEnabled,
   ));
 }
 
@@ -3319,6 +3320,35 @@ composer.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    if (data.startsWith("pay_proxy_freekassa_sbp:") || data.startsWith("pay_proxy_freekassa_card:")) {
+      const isCard = data.startsWith("pay_proxy_freekassa_card:");
+      const proxyTariffId = data.slice(isCard ? "pay_proxy_freekassa_card:".length : "pay_proxy_freekassa_sbp:".length);
+      const { items } = await api.getPublicProxyTariffs();
+      const tariff = items?.flatMap((c: { tariffs: { id: string; name: string; price: number; currency: string }[] }) => c.tariffs).find((t: { id: string }) => t.id === proxyTariffId);
+      if (!tariff) {
+        await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (tariff.currency.toUpperCase() !== "RUB") {
+        await editMessageContent(ctx, "KASSA принимает только рубли (RUB).", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      try {
+        const payment = await api.createFreekassaPayment(token, {
+          amount: tariff.price,
+          currency: "RUB",
+          method: isCard ? "cardRub" : "sbp",
+          proxyTariffId,
+        });
+        const msg = buildPaymentMessage(config, { name: tariff.name, price: formatMoney(tariff.price, tariff.currency), amount: String(tariff.price), currency: tariff.currency, action: "Нажмите для оплаты:" });
+        await editMessageContent(ctx, msg.text, payUrlMarkup(payment.payUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), msg.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа KASSA";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
     if (data.startsWith("pay_proxy:")) {
       const rest = data.slice("pay_proxy:".length);
       const parts = rest.split(":");
@@ -3375,6 +3405,7 @@ composer.on("callback_query:data", async (ctx) => {
         !!config?.yookassaEnabled,
         !!config?.cryptopayEnabled,
         tariff.currency,
+        !!config?.freekassaEnabled,
       );
       const msg = buildPaymentMessage(config, {
         name: tariff.name,
@@ -3487,6 +3518,35 @@ composer.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    if (data.startsWith("pay_singbox_freekassa_sbp:") || data.startsWith("pay_singbox_freekassa_card:")) {
+      const isCard = data.startsWith("pay_singbox_freekassa_card:");
+      const singboxTariffId = data.slice(isCard ? "pay_singbox_freekassa_card:".length : "pay_singbox_freekassa_sbp:".length);
+      const { items } = await api.getPublicSingboxTariffs();
+      const tariff = items?.flatMap((c: { tariffs: { id: string; name: string; price: number; currency: string }[] }) => c.tariffs).find((t: { id: string }) => t.id === singboxTariffId);
+      if (!tariff) {
+        await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (tariff.currency.toUpperCase() !== "RUB") {
+        await editMessageContent(ctx, "KASSA принимает только рубли (RUB).", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      try {
+        const payment = await api.createFreekassaPayment(token, {
+          amount: tariff.price,
+          currency: "RUB",
+          method: isCard ? "cardRub" : "sbp",
+          singboxTariffId,
+        });
+        const msg = buildPaymentMessage(config, { name: tariff.name, price: formatMoney(tariff.price, tariff.currency), amount: String(tariff.price), currency: tariff.currency, action: "Нажмите для оплаты:" });
+        await editMessageContent(ctx, msg.text, payUrlMarkup(payment.payUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), msg.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа KASSA";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
     if (data.startsWith("pay_singbox:")) {
       const rest = data.slice("pay_singbox:".length);
       const parts = rest.split(":");
@@ -3543,6 +3603,7 @@ composer.on("callback_query:data", async (ctx) => {
         !!config?.yookassaEnabled,
         !!config?.cryptopayEnabled,
         tariff.currency,
+        !!config?.freekassaEnabled,
       );
       const msg = buildPaymentMessage(config, {
         name: tariff.name,
@@ -3802,6 +3863,84 @@ composer.on("callback_query:data", async (ctx) => {
         await editMessageContent(ctx, receiptPromptText(savedEmailYk), receiptPromptKeyboard(tokRcptT, savedEmailYk));
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Ошибка создания платежа ЮKassa";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
+    if (data.startsWith("pay_tariff_freekassa_sbp:") || data.startsWith("pay_tariff_freekassa_card:")) {
+      const isCard = data.startsWith("pay_tariff_freekassa_card:");
+      const tariffId = data.slice(isCard ? "pay_tariff_freekassa_card:".length : "pay_tariff_freekassa_sbp:".length);
+      const { items } = await api.getPublicTariffs();
+      const tariff = items?.flatMap((c: TariffCategory) => c.tariffs).find((t: TariffItem) => t.id === tariffId);
+      if (!tariff) {
+        await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (tariff.currency.toUpperCase() !== "RUB") {
+        await editMessageContent(ctx, "KASSA принимает только рубли (RUB).", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      try {
+        const discountInfoFk = activeDiscountCode.get(userId);
+        const promoCode = discountInfoFk?.code;
+        const sel = selectedTariffOption.get(userId);
+        const opts = sortedPriceOptions(tariff.priceOptions);
+        const eff = sel?.tariffId === tariff.id ? sel.option : (opts.length === 1 ? opts[0]! : null);
+        const unitPrice = eff?.price ?? tariff.price;
+        const effectiveDays = eff?.durationDays ?? tariff.durationDays;
+        const extraDevices = sel?.tariffId === tariff.id ? sel.extraDevices : 0;
+        const { extrasTotal } = applyExtraDevicesPriceBot(tariff.pricePerExtraDevice ?? 0, extraDevices, tariff.deviceDiscountTiers, effectiveDays);
+        const effectivePrice = unitPrice + extrasTotal;
+        const asAdditional = addsubPending.get(userId) === tariff.id;
+        const extPairT = extendingSecondaryPending.get(userId);
+        const extendsSecondarySubId = extPairT && extPairT.tariffId === tariff.id ? extPairT.secondaryId : undefined;
+        const removeExtrasOnActivate = !!(extendsSecondarySubId && pendingDropExtras.get(userId) === extendsSecondarySubId);
+        let subExtrasForPeriod = 0;
+        if (extendsSecondarySubId && !removeExtrasOnActivate) {
+          try {
+            const allSubs = await api.getAllSubscriptions(token);
+            const target = allSubs.items?.find((it) => it.id === extendsSecondarySubId);
+            const monthly = target?.extraDevicesMonthlyPrice ?? 0;
+            if (monthly > 0 && effectiveDays > 0) {
+              subExtrasForPeriod = Math.round(monthly * (effectiveDays / 30) * 100) / 100;
+            }
+          } catch { /* ignore */ }
+        }
+        const totalPrice = effectivePrice + subExtrasForPeriod;
+        const meFk = await api.getMe(token);
+        const pdFk = meFk?.personalDiscountPercent ?? 0;
+        const { discountArg: discountArgFk, finalPrice: priceWithDiscountFk } = buildTariffDiscountArg(totalPrice, pdFk, discountInfoFk, tariff.currency);
+        const payment = await api.createFreekassaPayment(token, {
+          amount: totalPrice,
+          currency: "RUB",
+          method: isCard ? "cardRub" : "sbp",
+          tariffId: tariff.id,
+          tariffPriceOptionId: eff?.id,
+          deviceCount: extraDevices,
+          promoCode,
+          asAdditional: asAdditional || undefined,
+          extendsSecondarySubId,
+          removeExtrasOnActivate,
+        });
+        if (promoCode) activeDiscountCode.delete(userId);
+        selectedTariffOption.delete(userId);
+        if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
+        if (asAdditional) addsubPending.delete(userId);
+        if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
+          ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
+          : tariff.name;
+        const msg = buildPaymentMessage(config, {
+          name: nameWithDays,
+          price: formatMoney(priceWithDiscountFk, tariff.currency),
+          amount: String(priceWithDiscountFk),
+          currency: tariff.currency,
+          action: "Нажмите кнопку ниже для оплаты:",
+        }, discountArgFk);
+        await editMessageContent(ctx, msg.text, payUrlMarkup(payment.payUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), msg.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа KASSA";
         await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
       }
       return;
@@ -4489,6 +4628,65 @@ composer.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    if (data.startsWith("pay_option_freekassa_sbp:") || data.startsWith("pay_option_freekassa_card:")) {
+      const isCard = data.startsWith("pay_option_freekassa_card:");
+      const rest = data.slice(isCard ? "pay_option_freekassa_card:".length : "pay_option_freekassa_sbp:".length);
+      const parts = rest.split(":");
+      const kind = (parts[0] ?? "") as "traffic" | "devices" | "servers";
+      const productId = parts.slice(1).join(":");
+      const options = config?.sellOptions ?? [];
+      const option = options.find((o) => o.kind === kind && o.id === productId);
+      if (!option) {
+        await editMessageContent(ctx, "Опция не найдена.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      if (option.currency.toUpperCase() !== "RUB") {
+        await editMessageContent(ctx, "KASSA принимает только рубли (RUB).", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      const target = extraOptionTargetSub.get(userId);
+      const targetSubscriptionId = target && target !== "primary" ? target : undefined;
+
+      let displayPrice = option.price;
+      if (option.kind === "devices" && targetSubscriptionId) {
+        try {
+          const subs = await api.getAllSubscriptions(token);
+          const target_sub = subs.items?.find((it) => it.id === targetSubscriptionId);
+          const inner = target_sub?.subscription as Record<string, unknown> | null;
+          const innerData = inner ? ((inner.response ?? inner.data ?? inner) as Record<string, unknown>) : null;
+          const expireAtRaw = innerData?.expireAt ?? innerData?.expire_at;
+          let daysLeft = 30;
+          if (typeof expireAtRaw === "string" || typeof expireAtRaw === "number") {
+            const exp = typeof expireAtRaw === "number" ? new Date(expireAtRaw * 1000) : new Date(expireAtRaw);
+            if (!isNaN(exp.getTime())) daysLeft = Math.max(0, (exp.getTime() - Date.now()) / 86_400_000);
+          }
+          const coef = Math.max(1, daysLeft / 30);
+          displayPrice = Math.floor(option.price * coef);
+        } catch { /* ignore */ }
+      }
+      const me = await api.getMe(token).catch(() => null);
+      const pd = me?.personalDiscountPercent ?? 0;
+      if (pd > 0) {
+        displayPrice = Math.max(0, Math.floor(displayPrice * (1 - pd / 100)));
+      }
+
+      try {
+        const payment = await api.createFreekassaPayment(token, {
+          method: isCard ? "cardRub" : "sbp",
+          extraOption: { kind: option.kind, productId: option.id, targetSubscriptionId },
+        });
+        const optName = option.name || (option.kind === "traffic" ? `+${option.trafficGb} ГБ` : option.kind === "devices" ? `+${option.deviceCount} устр.` : "Сервер");
+        const msg = buildPaymentMessage(config, { name: optName, price: formatMoney(displayPrice, option.currency), amount: String(displayPrice), currency: option.currency, action: "Нажмите кнопку ниже для оплаты:" });
+        await editMessageContent(ctx, msg.text, payUrlMarkup(payment.payUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), msg.entities);
+        extraOptionTargetSub.delete(userId);
+        extraOptionPending.delete(userId);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа KASSA";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
     if (data.startsWith("pay_option_yoomoney:")) {
       const parts = data.split(":");
       const kind = (parts[1] ?? "") as "traffic" | "devices" | "servers";
@@ -4676,7 +4874,8 @@ composer.on("callback_query:data", async (ctx) => {
         config?.plategaMethods ?? [],
         !!config?.yoomoneyEnabled,
         !!config?.yookassaEnabled,
-        !!config?.cryptopayEnabled
+        !!config?.cryptopayEnabled,
+        !!config?.freekassaEnabled
       );
       await editMessageContent(ctx, choiceText.text, markup, choiceText.entities);
       return;
@@ -5491,7 +5690,8 @@ composer.on("callback_query:data", async (ctx) => {
       const methods = config?.plategaMethods ?? [];
       const yooEnabled = !!config?.yoomoneyEnabled;
       const yookassaEnabledTopup = !!config?.yookassaEnabled;
-      if (!methods.length && !yooEnabled && !yookassaEnabledTopup) {
+      const freekassaEnabledTopup = !!config?.freekassaEnabled;
+      if (!methods.length && !yooEnabled && !yookassaEnabledTopup && !freekassaEnabledTopup) {
         await editMessageContent(ctx, _t("topup.unavailable", lang), backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
       }
@@ -5631,6 +5831,29 @@ composer.on("callback_query:data", async (ctx) => {
       return;
     }
 
+    if (data.startsWith("topup_freekassa_sbp:") || data.startsWith("topup_freekassa_card:")) {
+      const isCard = data.startsWith("topup_freekassa_card:");
+      const amountStr = data.slice(isCard ? "topup_freekassa_card:".length : "topup_freekassa_sbp:".length);
+      const amount = Number(amountStr);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        await editMessageContent(ctx, "Неверная сумма.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+        return;
+      }
+      try {
+        const payment = await api.createFreekassaPayment(token, {
+          amount,
+          currency: "RUB",
+          method: isCard ? "cardRub" : "sbp",
+        });
+        const fkTopup = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, "RUB")}\n\nНажмите кнопку ниже для оплаты:`, config?.botEmojis);
+        await editMessageContent(ctx, fkTopup.text, payUrlMarkup(payment.payUrl, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds), fkTopup.entities);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания платежа KASSA";
+        await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
     if (data.startsWith("topup:")) {
       const rest = data.slice("topup:".length);
       // «Ввести свою сумму» — переход в conversation flow.
@@ -5671,12 +5894,13 @@ composer.on("callback_query:data", async (ctx) => {
       const heleketEnabled = !!config?.heleketEnabled;
       const lavaEnabled = !!config?.lavaEnabled;
       const lavatopEnabled = !!config?.lavatopEnabled;
+      const freekassaEnabled = !!config?.freekassaEnabled;
       // Если есть >1 способа любого типа — показываем выбор
-      const anyOnline = yooEnabled || yookassaEnabled || cryptopayEnabled || heleketEnabled || lavaEnabled || lavatopEnabled;
-      const enabledOnlineCount = [yooEnabled, yookassaEnabled, cryptopayEnabled, heleketEnabled, lavaEnabled, lavatopEnabled].filter(Boolean).length;
-      if (methods.length > 1 || (methods.length >= 1 && anyOnline) || (methods.length === 0 && enabledOnlineCount >= 2)) {
+      const anyOnline = yooEnabled || yookassaEnabled || cryptopayEnabled || heleketEnabled || lavaEnabled || lavatopEnabled || freekassaEnabled;
+      const enabledOnlineCount = [yooEnabled, yookassaEnabled, cryptopayEnabled, heleketEnabled, lavaEnabled, lavatopEnabled, freekassaEnabled].filter(Boolean).length;
+      if (methods.length > 1 || (methods.length >= 1 && anyOnline) || (methods.length === 0 && (enabledOnlineCount >= 2 || freekassaEnabled))) {
         const topupPay2 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(amount, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
-        await editMessageContent(ctx, topupPay2.text, topupPaymentMethodButtons(amountStr, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, yooEnabled, yookassaEnabled, cryptopayEnabled, heleketEnabled, lavaEnabled, lavatopEnabled), topupPay2.entities);
+        await editMessageContent(ctx, topupPay2.text, topupPaymentMethodButtons(amountStr, methods, config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds, yooEnabled, yookassaEnabled, cryptopayEnabled, heleketEnabled, lavaEnabled, lavatopEnabled, freekassaEnabled), topupPay2.entities);
         return;
       }
       // Если ЮMoney единственный способ (нет platega, нет ЮKassa) — сразу создаём платёж ЮMoney
@@ -6743,11 +6967,13 @@ composer.on("callback_query:data", async (ctx) => {
     // покупка подарочной через внешние платёжки.
     // Создаём обычный pay_tariff* платёж с флагом asGift=true. Webhook при оплате
     // создаст Subscription с purchasedAsGift=true (попадёт в «🎁 Мои подарки» юзера).
-    if (data.startsWith("gift_pay_yookassa:") || data.startsWith("gift_pay_yoomoney:") || data.startsWith("gift_pay_cryptopay:") || data.startsWith("gift_pay_heleket:") || data.startsWith("gift_pay_lava:")) {
+    if (data.startsWith("gift_pay_yookassa:") || data.startsWith("gift_pay_yoomoney:") || data.startsWith("gift_pay_cryptopay:") || data.startsWith("gift_pay_heleket:") || data.startsWith("gift_pay_lava:") || data.startsWith("gift_pay_freekassa_sbp:") || data.startsWith("gift_pay_freekassa_card:")) {
       const provider = data.startsWith("gift_pay_yookassa:") ? "yookassa"
         : data.startsWith("gift_pay_yoomoney:") ? "yoomoney"
         : data.startsWith("gift_pay_cryptopay:") ? "cryptopay"
         : data.startsWith("gift_pay_heleket:") ? "heleket"
+        : data.startsWith("gift_pay_freekassa_sbp:") ? "freekassa_sbp"
+        : data.startsWith("gift_pay_freekassa_card:") ? "freekassa_card"
         : "lava";
       const tariffId = data.slice(data.indexOf(":") + 1);
       try {
@@ -6812,6 +7038,9 @@ composer.on("callback_query:data", async (ctx) => {
           payUrl = p.payUrl;
         } else if (provider === "heleket") {
           const p = await api.createHeleketPayment(token, { amount: effectivePrice, currency: tariff.currency, tariffId: tariff.id, tariffPriceOptionId: eff?.id, deviceCount: extraDevices, asAdditional: true, asGift: true });
+          payUrl = p.payUrl;
+        } else if (provider === "freekassa_sbp" || provider === "freekassa_card") {
+          const p = await api.createFreekassaPayment(token, { amount: effectivePrice, currency: "RUB", method: provider === "freekassa_card" ? "cardRub" : "sbp", tariffId: tariff.id, tariffPriceOptionId: eff?.id, deviceCount: extraDevices, asAdditional: true, asGift: true });
           payUrl = p.payUrl;
         } else {
           const p = await api.createLavaPayment(token, { amount: effectivePrice, currency: "RUB", tariffId: tariff.id, tariffPriceOptionId: eff?.id, deviceCount: extraDevices, asAdditional: true, asGift: true });
@@ -7378,6 +7607,7 @@ composer.on("message:text", async (ctx) => {
         !!cfgT?.heleketEnabled,
         !!cfgT?.lavaEnabled,
         !!cfgT?.lavatopEnabled,
+        !!cfgT?.freekassaEnabled,
       ),
     });
     return;
@@ -7488,7 +7718,8 @@ composer.on("message:text", async (ctx) => {
     const heleketEnabledMsg = !!config?.heleketEnabled;
     const lavaEnabledMsg = !!config?.lavaEnabled;
     const lavatopEnabledMsg = !!config?.lavatopEnabled;
-    if (!methods.length && !yooEnabled && !yookassaEnabledMsg && !cryptopayEnabledMsg && !heleketEnabledMsg && !lavaEnabledMsg && !lavatopEnabledMsg) {
+    const freekassaEnabledMsg = !!config?.freekassaEnabled;
+    if (!methods.length && !yooEnabled && !yookassaEnabledMsg && !cryptopayEnabledMsg && !heleketEnabledMsg && !lavaEnabledMsg && !lavatopEnabledMsg && !freekassaEnabledMsg) {
       await ctx.reply("Пополнение временно недоступно.");
       return;
     }
@@ -7506,13 +7737,13 @@ composer.on("message:text", async (ctx) => {
           connect: botEmojis.SERVERS?.tgEmojiId || botEmojis.CONNECT?.tgEmojiId,
         }
       : undefined;
-    const enabledOnlineMsg = [yooEnabled, yookassaEnabledMsg, cryptopayEnabledMsg, heleketEnabledMsg, lavaEnabledMsg, lavatopEnabledMsg].filter(Boolean).length;
+    const enabledOnlineMsg = [yooEnabled, yookassaEnabledMsg, cryptopayEnabledMsg, heleketEnabledMsg, lavaEnabledMsg, lavatopEnabledMsg, freekassaEnabledMsg].filter(Boolean).length;
     const anyOnlineMsg = enabledOnlineMsg > 0;
-    if (methods.length > 1 || (methods.length >= 1 && anyOnlineMsg) || (methods.length === 0 && enabledOnlineMsg >= 2)) {
+    if (methods.length > 1 || (methods.length >= 1 && anyOnlineMsg) || (methods.length === 0 && (enabledOnlineMsg >= 2 || freekassaEnabledMsg))) {
       const topupMsg1 = titleWithEmoji("CARD", `Пополнение на ${formatMoney(num, client.preferredCurrency)}\n\nВыберите способ оплаты:`, config?.botEmojis);
       await ctx.reply(topupMsg1.text, {
         entities: topupMsg1.entities.length ? topupMsg1.entities : undefined,
-        reply_markup: topupPaymentMethodButtons(String(num), methods, config?.botBackLabel ?? null, backStyle, msgEmojiIds, yooEnabled, yookassaEnabledMsg, cryptopayEnabledMsg, heleketEnabledMsg, lavaEnabledMsg, lavatopEnabledMsg),
+        reply_markup: topupPaymentMethodButtons(String(num), methods, config?.botBackLabel ?? null, backStyle, msgEmojiIds, yooEnabled, yookassaEnabledMsg, cryptopayEnabledMsg, heleketEnabledMsg, lavaEnabledMsg, lavatopEnabledMsg, freekassaEnabledMsg),
       });
       return;
     }

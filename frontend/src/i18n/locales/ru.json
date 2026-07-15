@@ -1273,7 +1273,7 @@
       "freekassa_register": "Получите API-ключ в настройках личного кабинета:",
       "freekassa_webhook": "URL оповещения для KASSA",
       "freekassa_webhook_hint": "В ЛК FreeKassa укажите этот URL как URL оповещения. Обработчик проверяет IP и подпись Secret word 2.",
-      "freekassa_desc": "Приём платежей через FreeKassa API без SCI. В кабинете клиента провайдер отображается как KASSA; по умолчанию используется СБП, также backend поддерживает карты РФ.",
+      "freekassa_desc": "Приём платежей через FreeKassa API без SCI. В кабинете клиента провайдер отображается как KASSA с отдельными кнопками: СБП QR (i=44) и Карта РФ (i=36).",
       "freekassa_shop_id": "Shop ID / ID магазина",
       "freekassa_shop_id_hint": "ID магазина из личного кабинета FreeKassa.",
       "freekassa_api_key": "API Key",

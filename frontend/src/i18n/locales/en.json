@@ -1273,7 +1273,7 @@
       "freekassa_register": "Get the API key in your merchant dashboard settings:",
       "freekassa_webhook": "KASSA notification URL",
       "freekassa_webhook_hint": "Set this URL as the notification URL in FreeKassa dashboard. The handler verifies IP and Secret word 2 signature.",
-      "freekassa_desc": "Accept payments via FreeKassa API without SCI. Clients see the provider as KASSA; SBP is used by default, and Russian cards are also supported by the backend.",
+      "freekassa_desc": "Accept payments via FreeKassa API without SCI. Clients see KASSA as separate buttons: SBP QR (i=44) and Russian cards (i=36).",
       "freekassa_shop_id": "Shop ID",
       "freekassa_shop_id_hint": "Shop ID from the FreeKassa dashboard.",
       "freekassa_api_key": "API Key",

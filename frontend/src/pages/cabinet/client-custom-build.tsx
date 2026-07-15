@@ -225,17 +225,18 @@ export function ClientCustomBuildPage() {
     }
   }
 
-  async function payByFreekassa() {
+  async function payByFreekassa(method: "sbp" | "cardRub") {
     if (!token || !cb) return;
     setPayError(null);
     setPayLoading(true);
     try {
       const res = await api.freekassaCreatePayment(token, {
+        method,
         customBuild: customBuildPayload,
         currency: cb.currency,
         promoCode: promoCode.trim() || undefined,
       });
-      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: method === "cardRub" ? "KASSA Карта" : "KASSA СБП QR" });
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Ошибка создания платежа");
     } finally {
@@ -483,11 +484,12 @@ export function ClientCustomBuildPage() {
                   { id: "yoomoney", enabled: !!config?.yoomoneyEnabled && cb.currency.toUpperCase() === "RUB", onClick: () => payByYoomoney(), label: providerLabel("yoomoney", "ЮMoney / Карты"), icon: "card" },
                   { id: "lava", enabled: !!config?.lavaEnabled && cb.currency.toUpperCase() === "RUB", onClick: () => payByLava(), label: providerLabel("lava", "LAVA"), icon: "card" },
                   { id: "overpay", enabled: !!config?.overpayEnabled, onClick: () => payByOverpay(), label: providerLabel("overpay", "Overpay"), icon: "card" },
-                  { id: "freekassa", enabled: !!config?.freekassaEnabled && cb.currency.toUpperCase() === "RUB", onClick: () => payByFreekassa(), label: providerLabel("freekassa", "KASSA"), icon: "card" },
+                  { id: "freekassa_sbp", enabled: !!config?.freekassaEnabled && cb.currency.toUpperCase() === "RUB", onClick: () => payByFreekassa("sbp"), label: `${providerLabel("freekassa", "KASSA")} — СБП QR`, icon: "card" },
+                  { id: "freekassa_card", enabled: !!config?.freekassaEnabled && cb.currency.toUpperCase() === "RUB", onClick: () => payByFreekassa("cardRub"), label: `${providerLabel("freekassa", "KASSA")} — Карта РФ`, icon: "card" },
                 ];
 
                 const sortedProviders = paymentProviders.length > 0
-                  ? paymentProviders.map((pp) => providers.find((p) => p.id === pp.id)).filter((p): p is ProviderEntry => !!p)
+                  ? paymentProviders.flatMap((pp) => pp.id === "freekassa" ? providers.filter((p) => p.id === "freekassa_sbp" || p.id === "freekassa_card") : providers.find((p) => p.id === pp.id) ? [providers.find((p) => p.id === pp.id)!] : []).filter((p): p is ProviderEntry => !!p)
                   : providers;
 
                 const plategaMethods = config?.plategaMethods ?? [];

@@ -113,6 +113,7 @@ export async function getPublicConfig(): Promise<{
   heleketEnabled?: boolean;
   lavaEnabled?: boolean;
   lavatopEnabled?: boolean;
+  freekassaEnabled?: boolean;
   botWelcomeEnabled?: boolean;
   botWelcomeText?: string | null;
   botWelcomeImage?: string | null;
@@ -518,6 +519,31 @@ export async function createLavaPayment(
   body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
 ): Promise<{ paymentId: string; payUrl: string }> {
   return fetchJson("/api/client/lava/create-payment", { method: "POST", body, token });
+}
+
+/** FreeKassa API / KASSA — создать заказ (RUB: i=44 СБП QR, i=36 карты РФ) */
+export async function createFreekassaPayment(
+  token: string,
+  body: {
+    amount?: number;
+    currency?: string;
+    method?: "sbp" | "cardRub" | "qiwi" | number;
+    tariffId?: string;
+    tariffPriceOptionId?: string;
+    deviceCount?: number;
+    proxyTariffId?: string;
+    singboxTariffId?: string;
+    wdttTariffId?: string;
+    promoCode?: string;
+    extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
+    customBuild?: { days: number; devices: number; trafficGb?: number };
+    asAdditional?: boolean;
+    extendsSecondarySubId?: string;
+    asGift?: boolean;
+    removeExtrasOnActivate?: boolean;
+  }
+): Promise<{ paymentId: string; payUrl: string; freekassaOrderId: number }> {
+  return fetchJson("/api/client/freekassa/create-payment", { method: "POST", body, token });
 }
 
 /** Помечает что онбординг (приветствие в боте) завершён — `client.onboardingCompleted=true` */
