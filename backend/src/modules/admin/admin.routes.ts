@@ -2238,6 +2238,9 @@ const updateSettingsSchema = z.object({
   overpayProjectId: z.string().max(100).nullable().optional(),
   overpayLogin: z.string().max(200).nullable().optional(),
   overpayPassword: z.string().max(500).nullable().optional(),
+  freekassaShopId: z.string().max(100).nullable().optional(),
+  freekassaApiKey: z.string().max(500).nullable().optional(),
+  freekassaSecretWord2: z.string().max(500).nullable().optional(),
   groqApiKey: z.string().max(500).nullable().optional(),
   groqModel: z.string().max(100).nullable().optional(),
   groqFallback1: z.string().max(100).nullable().optional(),
@@ -2822,6 +2825,18 @@ adminRouter.patch("/settings", async (req, res) => {
   if (updates.overpayPassword !== undefined) {
     const val = updates.overpayPassword ?? "";
     await prisma.systemSetting.upsert({ where: { key: "overpay_password" }, create: { key: "overpay_password", value: val }, update: { value: val } });
+  }
+  if (updates.freekassaShopId !== undefined) {
+    const val = updates.freekassaShopId ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "freekassa_shop_id" }, create: { key: "freekassa_shop_id", value: val }, update: { value: val } });
+  }
+  if (updates.freekassaApiKey !== undefined) {
+    const val = updates.freekassaApiKey ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "freekassa_api_key" }, create: { key: "freekassa_api_key", value: val }, update: { value: val } });
+  }
+  if (updates.freekassaSecretWord2 !== undefined) {
+    const val = updates.freekassaSecretWord2 ?? "";
+    await prisma.systemSetting.upsert({ where: { key: "freekassa_secret_word2" }, create: { key: "freekassa_secret_word2", value: val }, update: { value: val } });
   }
   if (updates.groqApiKey !== undefined) {
     const val = updates.groqApiKey ?? "";

@@ -42,6 +42,7 @@ import { createHeleketInvoice, isHeleketConfigured } from "../heleket/heleket.se
 import { createLavaInvoice, isLavaConfigured } from "../lava/lava.service.js";
 import { createLavatopInvoice, isLavatopConfigured } from "../lavatop/lavatop.service.js";
 import { createOverpayPayformOrder, isOverpayConfigured } from "../overpay/overpay.service.js";
+import { createFreekassaOrder, isFreekassaConfigured, normalizeFreekassaPaymentSystem, type FreekassaPaymentMethod } from "../freekassa/freekassa.service.js";
 import { applyPersonalDiscount } from "./personal-discount.js";
 import { getBotByToken, getPrimaryBot, paymentSnapshotTopup, paymentSnapshotProduct, applyMarkup } from "../bot/bot.service.js";
 import { extractBotTokenFromRequest, optionalBot, type ReqWithBot } from "../bot/bot.middleware.js";
@@ -56,6 +57,13 @@ import { validateEmailForSignup } from "../signup-protection/email-blocklist.js"
 
 /** Извлекает реальный IP клиента (с учётом trust proxy). */
 function getRequestIp(req: Request): string | null {
+  const real = req.headers["x-real-ip"];
+  if (typeof real === "string" && real.trim()) return real.trim().replace(/^::ffff:/, "");
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first.replace(/^::ffff:/, "");
+  }
   const ip = req.ip || req.socket?.remoteAddress || null;
   if (!ip) return null;
   return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
@@ -6527,6 +6535,300 @@ clientRouter.post("/overpay/create-payment", async (req, res) => {
   }
 });
 
+// ═════════════════════════════════════════════════════════════════
+// FreeKassa API — создание заказа через /orders/create (не SCI).
+// i=44 — СБП QR, i=36 — карты РФ, i=35 — QIWI API.
+// Клиенту возвращаем location из ответа FreeKassa.
+// ═════════════════════════════════════════════════════════════════
+const freekassaCreatePaymentSchema = z.object({
+  amount: z.number().positive().optional(),
+  currency: z.string().min(1).max(10).optional(),
+  method: z.union([z.enum(["sbp", "cardRub", "qiwi"]), z.number().int().positive()]).optional(),
+  tariffId: z.string().min(1).optional(),
+  tariffPriceOptionId: z.string().min(1).optional(),
+  deviceCount: z.number().int().min(0).max(100).optional(),
+  proxyTariffId: z.string().min(1).optional(),
+  singboxTariffId: z.string().min(1).optional(),
+  wdttTariffId: z.string().min(1).optional(),
+  promoCode: z.string().max(50).optional(),
+  asAdditional: z.boolean().optional(),
+  asGift: z.boolean().optional(),
+  extendsSecondarySubId: z.string().min(1).max(64).optional(),
+  removeExtrasOnActivate: z.boolean().optional(),
+  extraOption: z.object({
+    kind: z.enum(["traffic", "devices", "servers"]),
+    productId: z.string().min(1),
+    targetSubscriptionId: z.string().min(1).optional(),
+  }).optional(),
+  customBuild: z.object({
+    days: z.number().int().min(1).max(360),
+    devices: z.number().int().min(1).max(20),
+    trafficGb: z.number().min(0).nullable().optional(),
+  }).optional(),
+});
+
+clientRouter.post("/freekassa/create-payment", async (req, res) => {
+  try {
+    const clientId = (req as unknown as { clientId: string }).clientId;
+    const parsed = freekassaCreatePaymentSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Неверные параметры", errors: parsed.error.flatten() });
+
+    const config = await getSystemConfig();
+    const freekassaConfig = {
+      shopId: (config as { freekassaShopId?: string | null }).freekassaShopId ?? "",
+      apiKey: (config as { freekassaApiKey?: string | null }).freekassaApiKey ?? "",
+    };
+    if (!isFreekassaConfigured(freekassaConfig)) return res.status(503).json({ message: "FreeKassa не настроена" });
+
+    const {
+      amount: amountBody,
+      currency: currencyBody,
+      tariffId: tariffIdBody,
+      proxyTariffId: proxyTariffIdBody,
+      singboxTariffId: singboxTariffIdBody,
+      wdttTariffId: wdttTariffIdBody,
+      promoCode: promoCodeStr,
+      extraOption,
+      customBuild: customBuildBody,
+      asAdditional,
+      asGift,
+      extendsSecondarySubId,
+      removeExtrasOnActivate,
+    } = parsed.data;
+
+    let amountRounded: number;
+    let currencyUpper = (currencyBody ?? "RUB").toUpperCase();
+    let tariffIdToStore: string | null = null;
+    let proxyTariffIdToStore: string | null = null;
+    let singboxTariffIdToStore: string | null = null;
+    let wdttTariffIdToStore: string | null = null;
+    let metadataObj: Record<string, unknown> = promoCodeStr ? { promoCode: promoCodeStr } : {};
+
+    if (currencyUpper !== "RUB") return res.status(400).json({ message: "FreeKassa для KASSA принимает только рубли (RUB)" });
+
+    if (customBuildBody) {
+      const cfg = getCustomBuildConfig(config);
+      if (!cfg) return res.status(400).json({ message: "Гибкий тариф отключён" });
+      const { days, devices, trafficGb } = customBuildBody;
+      if (days > cfg.maxDays || devices > cfg.maxDevices) {
+        return res.status(400).json({ message: `Дни: 1–${cfg.maxDays}, устройств: 1–${cfg.maxDevices}` });
+      }
+      if (cfg.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+      const trafficLimitBytes =
+        cfg.trafficMode === "per_gb" && trafficGb != null && trafficGb >= 0
+          ? Math.round(trafficGb * 1024 ** 3)
+          : null;
+      amountRounded = days * cfg.pricePerDay + devices * cfg.pricePerDevice;
+      if (cfg.trafficMode === "per_gb" && trafficGb != null && trafficGb > 0) amountRounded += trafficGb * cfg.pricePerGb;
+      amountRounded = Math.round(amountRounded * 100) / 100;
+      metadataObj = {
+        customBuild: {
+          durationDays: days,
+          deviceLimit: devices,
+          trafficLimitBytes,
+          internalSquadUuids: [cfg.squadUuid],
+        },
+      };
+    } else if (extraOption) {
+      const cfg = config as { sellOptionsEnabled?: boolean; sellOptionsTrafficEnabled?: boolean; sellOptionsTrafficProducts?: SellOptionTrafficProduct[]; sellOptionsDevicesEnabled?: boolean; sellOptionsDevicesProducts?: SellOptionDeviceProduct[]; sellOptionsServersEnabled?: boolean; sellOptionsServersProducts?: SellOptionServerProduct[] };
+      if (!cfg.sellOptionsEnabled) return res.status(400).json({ message: "Продажа опций отключена" });
+      if (extraOption.kind === "traffic") {
+        const product = cfg.sellOptionsTrafficEnabled && cfg.sellOptionsTrafficProducts?.find((p) => p.id === extraOption.productId);
+        if (!product) return res.status(400).json({ message: "Опция не найдена" });
+        if (product.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+        amountRounded = Math.round(product.price * 100) / 100;
+        metadataObj = { extraOption: { kind: "traffic", trafficBytes: Math.round(product.trafficGb * 1024 ** 3) } };
+      } else if (extraOption.kind === "devices") {
+        const product = cfg.sellOptionsDevicesEnabled && cfg.sellOptionsDevicesProducts?.find((p) => p.id === extraOption.productId);
+        if (!product) return res.status(400).json({ message: "Опция не найдена" });
+        if (product.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+        const prorataCoef = extraOption.targetSubscriptionId ? await calculateDevicesProrataPriceCoefficient(extraOption.targetSubscriptionId) : await calculateDevicesProrataPriceCoefficientForPrimary(clientId);
+        amountRounded = Math.floor(product.price * prorataCoef);
+        metadataObj = { extraOption: { kind: "devices", deviceCount: product.deviceCount, productPriceMonthly: product.price } };
+      } else {
+        const product = cfg.sellOptionsServersEnabled && cfg.sellOptionsServersProducts?.find((p) => p.id === extraOption.productId);
+        if (!product) return res.status(400).json({ message: "Опция не найдена" });
+        if (product.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+        amountRounded = Math.round(product.price * 100) / 100;
+        metadataObj = { extraOption: { kind: "servers", squadUuid: product.squadUuid, ...((product.trafficGb ?? 0) > 0 && { trafficBytes: Math.round((product.trafficGb ?? 0) * 1024 ** 3) }) } };
+      }
+      if (extraOption.targetSubscriptionId) metadataObj = { ...metadataObj, targetSubscriptionId: extraOption.targetSubscriptionId };
+    } else if (tariffIdBody) {
+      const tariff = await prisma.tariff.findUnique({ where: { id: tariffIdBody }, include: { priceOptions: true } });
+      if (!tariff) return res.status(400).json({ message: "Тариф не найден" });
+      if (tariff.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+      if (extendsSecondarySubId) {
+        const { checkSubscriptionRenewalCooldown } = await import("../tariff/tariff-cooldown.service.js");
+        const cd = await checkSubscriptionRenewalCooldown(extendsSecondarySubId);
+        if (!cd.ok) return res.status(429).json({ message: cd.message, code: "TARIFF_COOLDOWN", daysLeft: cd.daysLeft });
+      }
+      tariffIdToStore = tariffIdBody;
+      let unitPriceCalc = tariff.price;
+      let effectiveDaysCalc = tariff.durationDays;
+      if (parsed.data.tariffPriceOptionId) {
+        const opt = (tariff.priceOptions ?? []).find((p) => p.id === parsed.data.tariffPriceOptionId);
+        if (opt) {
+          unitPriceCalc = opt.price;
+          effectiveDaysCalc = opt.durationDays;
+        }
+      }
+      if (extendsSecondarySubId) {
+        const sub = await prisma.subscription.findUnique({
+          where: { id: extendsSecondarySubId },
+          select: { extraDevicesMonthlyPrice: true },
+        });
+        const monthlyPrice = sub?.extraDevicesMonthlyPrice ?? 0;
+        if (monthlyPrice > 0 && effectiveDaysCalc > 0) {
+          unitPriceCalc += Math.round(monthlyPrice * (effectiveDaysCalc / 30) * 100) / 100;
+        }
+      } else {
+        const newExtrasCalc = Math.max(0, parsed.data.deviceCount ?? 0);
+        if (newExtrasCalc > 0) {
+          const { calcExtrasPrice } = await import("../tariff/extras-pricing.js");
+          const r = calcExtrasPrice(
+            tariff.pricePerExtraDevice ?? 0,
+            newExtrasCalc,
+            tariff.deviceDiscountTiers,
+            effectiveDaysCalc,
+          );
+          unitPriceCalc += r.extrasTotal;
+        }
+      }
+      amountRounded = Math.round(unitPriceCalc * 100) / 100;
+    } else if (proxyTariffIdBody) {
+      const proxyTariff = await prisma.proxyTariff.findUnique({ where: { id: proxyTariffIdBody } });
+      if (!proxyTariff || !proxyTariff.enabled) return res.status(400).json({ message: "Прокси-тариф не найден" });
+      if (proxyTariff.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+      proxyTariffIdToStore = proxyTariffIdBody;
+      amountRounded = Math.round((amountBody ?? proxyTariff.price) * 100) / 100;
+    } else if (singboxTariffIdBody) {
+      const singboxTariff = await prisma.singboxTariff.findUnique({ where: { id: singboxTariffIdBody } });
+      if (!singboxTariff || !singboxTariff.enabled) return res.status(400).json({ message: "Тариф Sing-box не найден" });
+      if (singboxTariff.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+      singboxTariffIdToStore = singboxTariffIdBody;
+      amountRounded = Math.round((amountBody ?? singboxTariff.price) * 100) / 100;
+    } else if (wdttTariffIdBody) {
+      const wdttTariff = await prisma.wdttTariff.findUnique({ where: { id: wdttTariffIdBody } });
+      if (!wdttTariff || !wdttTariff.enabled) return res.status(400).json({ message: "WDTT тариф не найден" });
+      if (wdttTariff.currency.toUpperCase() !== "RUB") return res.status(400).json({ message: "FreeKassa принимает только рубли (RUB)" });
+      wdttTariffIdToStore = wdttTariffIdBody;
+      amountRounded = Math.round((amountBody ?? wdttTariff.price) * 100) / 100;
+    } else {
+      if (amountBody == null) return res.status(400).json({ message: "Укажите сумму" });
+      amountRounded = Math.round(amountBody * 100) / 100;
+    }
+
+    if (amountRounded < 1) return res.status(400).json({ message: "Минимальная сумма платежа — 1" });
+
+    const freekassaIsTopup = !tariffIdToStore && !proxyTariffIdToStore && !singboxTariffIdToStore && !wdttTariffIdToStore && !customBuildBody && !extraOption;
+    if (!freekassaIsTopup) {
+      const originalBeforePersonal = amountRounded;
+      const pd = await applyPersonalDiscount(amountRounded, clientId);
+      if (pd.personalDiscountPercent > 0) {
+        amountRounded = pd.amount;
+        metadataObj = { ...metadataObj, personalDiscountPercent: pd.personalDiscountPercent, originalAmount: originalBeforePersonal };
+      }
+    }
+
+    if (promoCodeStr?.trim() && !extraOption && !customBuildBody) {
+      const result = await validatePromoCode(promoCodeStr.trim(), clientId);
+      if (!result.ok) return res.status(result.status).json({ message: result.error });
+      const promo = result.promo;
+      if (promo.type !== "DISCOUNT") return res.status(400).json({ message: "Этот промокод не даёт скидку на оплату" });
+      const originalAmount = (metadataObj as { originalAmount?: number }).originalAmount ?? amountRounded;
+      if (promo.discountPercent && promo.discountPercent > 0) {
+        amountRounded = Math.max(0, amountRounded - amountRounded * promo.discountPercent / 100);
+      }
+      if (promo.discountFixed && promo.discountFixed > 0) {
+        amountRounded = Math.max(0, amountRounded - promo.discountFixed);
+      }
+      amountRounded = Math.round(amountRounded * 100) / 100;
+      if (amountRounded <= 0) return res.status(400).json({ message: "Итоговая сумма не может быть 0" });
+      metadataObj = { ...metadataObj, promoCodeId: promo.id, originalAmount };
+    }
+
+    const fkSnap = freekassaIsTopup ? await paymentSnapshotTopup(clientId, amountRounded) : await paymentSnapshotProduct(clientId, amountRounded);
+    const orderId = randomUUID();
+    const meta = { ...metadataObj };
+    if (asAdditional && tariffIdToStore) meta.isAdditionalSubscription = true;
+    if (asGift) meta.purchasedAsGift = true;
+    if (extendsSecondarySubId) {
+      meta.extendsSecondarySubId = extendsSecondarySubId;
+      if (removeExtrasOnActivate === true) meta.removeExtrasOnActivate = true;
+    }
+
+    const payment = await createPayment({
+      data: asPaymentUncheckedCreate({
+        clientId,
+        orderId,
+        amount: fkSnap.amount,
+        currency: currencyUpper,
+        status: "PENDING",
+        provider: "freekassa",
+        tariffId: tariffIdToStore,
+        tariffPriceOptionId: parsed.data.tariffPriceOptionId ?? null,
+        deviceCount: parsed.data.deviceCount ?? null,
+        proxyTariffId: proxyTariffIdToStore,
+        singboxTariffId: singboxTariffIdToStore,
+        wdttTariffId: wdttTariffIdToStore,
+        metadata: Object.keys(meta).length > 0 ? JSON.stringify(meta) : null,
+      }),
+    });
+
+    const clientRow = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { email: true, telegramId: true },
+    });
+    const customerEmail = clientRow?.email?.trim() || (clientRow?.telegramId ? `${clientRow.telegramId}@telegram.org` : "");
+    if (!customerEmail) {
+      await prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
+      return res.status(400).json({ message: "Для FreeKassa нужен email клиента или Telegram ID" });
+    }
+
+    const clientIp = getRequestIp(req);
+    if (!clientIp || clientIp === "127.0.0.1" || clientIp === "::1") {
+      await prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
+      return res.status(400).json({ message: "FreeKassa требует реальный IP клиента; 127.0.0.1 блокируется" });
+    }
+
+    const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
+    const successUrl = appUrl ? `${appUrl}/cabinet?freekassa=success` : undefined;
+    const failureUrl = appUrl ? `${appUrl}/cabinet?freekassa=fail` : undefined;
+    const notificationUrl = appUrl ? `${appUrl}/api/webhooks/freekassa` : undefined;
+
+    const result = await createFreekassaOrder({
+      config: freekassaConfig,
+      amount: fkSnap.amount,
+      currency: currencyUpper,
+      paymentId: orderId,
+      paymentSystemId: normalizeFreekassaPaymentSystem(parsed.data.method as FreekassaPaymentMethod | number | undefined),
+      email: customerEmail,
+      ip: clientIp,
+      successUrl,
+      failureUrl,
+      notificationUrl,
+    });
+
+    if (!result.ok) {
+      await prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
+      return res.status(500).json({ message: result.error });
+    }
+
+    await prisma.payment.update({ where: { id: payment.id }, data: { externalId: String(result.orderId) } });
+    const payUrl = await saveRedirectAndBuildUrl(payment.id, orderId, result.location, config.publicAppUrl);
+
+    return res.status(201).json({
+      paymentId: payment.id,
+      payUrl,
+      freekassaOrderId: result.orderId,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[freekassa/create-payment]", message, err);
+    return res.status(500).json({ message: message || "Ошибка создания платежа FreeKassa" });
+  }
+});
+
 const aiChatSchema = z.object({
   messages: z.array(z.object({
     role: z.enum(["user", "assistant", "system"]),
@@ -6583,6 +6885,7 @@ clientRouter.post("/ai/chat", async (req, res) => {
     if (publicConfig.yoomoneyEnabled) paymentMethods.push("YooMoney (Кошелек, Карты)");
     if (publicConfig.cryptopayEnabled) paymentMethods.push("Crypto Pay (Криптовалюта в Telegram)");
     if (publicConfig.heleketEnabled) paymentMethods.push("Heleket (Криптовалюта)");
+    if ((publicConfig as { freekassaEnabled?: boolean }).freekassaEnabled) paymentMethods.push("KASSA (СБП, банковские карты РФ)");
     if (publicConfig.plategaMethods && publicConfig.plategaMethods.length > 0) {
       paymentMethods.push("Platega (" + publicConfig.plategaMethods.map(m => m.label).join(", ") + ")");
     }

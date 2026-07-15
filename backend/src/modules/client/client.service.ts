@@ -122,6 +122,7 @@ const SYSTEM_CONFIG_KEYS = [
   "lava_shop_id", "lava_secret_key", "lava_additional_key",
   "lavatop_api_key", "lavatop_default_offer_id",
   "overpay_api_url", "overpay_project_id", "overpay_login", "overpay_password",
+  "freekassa_shop_id", "freekassa_api_key", "freekassa_secret_word2",
   "groq_api_key", "groq_model", "groq_fallback_1", "groq_fallback_2", "groq_fallback_3", "ai_system_prompt",
   "bot_buttons", "bot_buttons_per_row", "bot_back_label", "bot_menu_texts", "bot_menu_line_visibility", "bot_inner_button_styles",
   "bot_tariffs_text", "bot_tariffs_fields", "bot_payment_text",
@@ -609,6 +610,9 @@ async function loadSystemConfigFromDb() {
     overpayProjectId: (map.overpay_project_id ?? "").trim() || null,
     overpayLogin: (map.overpay_login ?? "").trim() || null,
     overpayPassword: (map.overpay_password ?? "").trim() || null,
+    freekassaShopId: (map.freekassa_shop_id ?? "").trim() || null,
+    freekassaApiKey: (map.freekassa_api_key ?? "").trim() || null,
+    freekassaSecretWord2: (map.freekassa_secret_word2 ?? "").trim() || null,
     groqApiKey: (map.groq_api_key ?? "").trim() || null,
     groqModel: (map.groq_model ?? "").trim() || "llama3-8b-8192",
     groqFallback1: (map.groq_fallback_1 ?? "").trim() || null,
@@ -898,6 +902,7 @@ const DEFAULT_PAYMENT_PROVIDERS: PaymentProviderConfig[] = [
   { id: "lava", label: "LAVA (СБП / Карты / СберPay)", sortOrder: 4 },
   { id: "lavatop", label: "Lava.top (СБП / Карты)", sortOrder: 5 },
   { id: "overpay", label: "Overpay (Карты / СБП)", sortOrder: 6 },
+  { id: "freekassa", label: "KASSA (СБП / Карты)", sortOrder: 7 },
 ];
 
 function parsePaymentProviders(raw: string | undefined): PaymentProviderConfig[] {
@@ -1171,6 +1176,10 @@ export async function getPublicConfig(_forCloneBot?: { markupPercent?: number | 
       (full as { overpayProjectId?: string | null }).overpayProjectId?.trim() &&
       (full as { overpayLogin?: string | null }).overpayLogin?.trim() &&
       (full as { overpayPassword?: string | null }).overpayPassword?.trim(),
+    ),
+    freekassaEnabled: Boolean(
+      (full as { freekassaShopId?: string | null }).freekassaShopId?.trim() &&
+      (full as { freekassaApiKey?: string | null }).freekassaApiKey?.trim(),
     ),
     paymentProviders: full.paymentProviders,
     skipEmailVerification: full.skipEmailVerification ?? false,
