@@ -21,7 +21,7 @@ import { cryptopayWebhooksRouter } from "./modules/webhooks/cryptopay.webhooks.r
 import { heleketWebhooksRouter } from "./modules/webhooks/heleket.webhooks.routes.js";
 import { lavaWebhooksRouter } from "./modules/webhooks/lava.webhooks.routes.js";
 import { lavatopWebhooksRouter } from "./modules/webhooks/lavatop.webhooks.routes.js";
-import { freekassaWebhooksRouter, handleFreekassaWebhook } from "./modules/webhooks/freekassa.webhooks.routes.js";
+import { freekassaWebhooksRouter, handleFreekassaWebhook, freekassaFormParser } from "./modules/webhooks/freekassa.webhooks.routes.js";
 import { botAdminRouter } from "./modules/bot-admin/bot-admin.routes.js";
 import { contestAdminRouter } from "./modules/contest/contest.admin.routes.js";
 import { contestPublicRouter, contestClientRouter } from "./modules/contest/contest.public.routes.js";
@@ -361,7 +361,7 @@ app.use("/api/webhooks", plategaWebhooksRouter); // raw body для /platega у�
 app.use("/api/webhooks", yoomoneyWebhooksRouter);
 app.use("/api/webhooks", yookassaWebhooksRouter);
 app.use("/api/webhooks", freekassaWebhooksRouter);
-app.post("/api/kassaai", handleFreekassaWebhook);
+app.post("/api/kassaai", freekassaFormParser, handleFreekassaWebhook);
 // cryptopay уже смонтирован выше с raw body
 // Lava.top использует X-Api-Key вместо HMAC, поэтому raw body не нужен — обычный JSON
 app.use("/api/webhooks/lavatop", lavatopWebhooksRouter);
