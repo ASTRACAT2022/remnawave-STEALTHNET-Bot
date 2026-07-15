@@ -100,6 +100,7 @@ function ClassicTariffsPage() {
   const [lavaEnabled, setLavaEnabled] = useState(false);
   const [lavatopEnabled, setLavatopEnabled] = useState(false);
   const [overpayEnabled, setOverpayEnabled] = useState(false);
+  const [freekassaEnabled, setFreekassaEnabled] = useState(false);
   const [paymentProviders, setPaymentProviders] = useState<{ id: string; label: string; sortOrder: number }[]>([]);
   const [trialConfig, setTrialConfig] = useState<{ trialEnabled: boolean; trialDays: number }>({ trialEnabled: false, trialDays: 0 });
   const [payModal, setPayModal] = useState<{ tariff: TariffForPay } | null>(null);
@@ -155,6 +156,7 @@ function ClassicTariffsPage() {
       setLavaEnabled(Boolean(c.lavaEnabled));
       setLavatopEnabled(Boolean(c.lavatopEnabled));
       setOverpayEnabled(Boolean(c.overpayEnabled));
+      setFreekassaEnabled(Boolean(c.freekassaEnabled));
       setPaymentProviders(c.paymentProviders ?? []);
       setTrialConfig({ trialEnabled: !!c.trialEnabled, trialDays: c.trialDays ?? 0 });
     }).catch(() => { });
@@ -484,6 +486,27 @@ function ClassicTariffsPage() {
     }
   }
 
+  async function startFreekassaPayment(tariff: TariffForPay) {
+    if (!token) return;
+    setPayError(null);
+    setPayLoading(true);
+    try {
+      const res = await api.freekassaCreatePayment(token, {
+        amount: tariff.price,
+        currency: tariff.currency,
+        tariffId: tariff.id,
+        tariffPriceOptionId: selectedPriceOptionId ?? undefined,
+        deviceCount: selectedExtraDevices,
+        promoCode: promoResult ? promoInput.trim() : undefined,
+      });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : t("cabinet.tariffs.error_payment"));
+    } finally {
+      setPayLoading(false);
+    }
+  }
+
   const closePayment = () => {
     setPayModal(null);
     setPromoInput("");
@@ -679,6 +702,7 @@ function ClassicTariffsPage() {
                 yoomoney: { bg10: "bg-green-500/10", bg20: "group-hover:bg-green-500/20", text: "text-green-500" },
                 lava: { bg10: "bg-sky-500/10", bg20: "group-hover:bg-sky-500/20", text: "text-sky-500" },
                 overpay: { bg10: "bg-indigo-500/10", bg20: "group-hover:bg-indigo-500/20", text: "text-indigo-500" },
+                freekassa: { bg10: "bg-emerald-500/10", bg20: "group-hover:bg-emerald-500/20", text: "text-emerald-500" },
               };
 
               type ProviderEntry = { id: string; enabled: boolean; onClick: () => void; label: string; icon: "crypto" | "card" };
@@ -690,6 +714,7 @@ function ClassicTariffsPage() {
                 { id: "lava", enabled: lavaEnabled && isRub, onClick: () => startLavaPayment(tariff), label: providerLabel("lava", "LAVA"), icon: "card" },
                 { id: "lavatop", enabled: lavatopEnabled, onClick: () => startLavatopPayment(tariff), label: providerLabel("lavatop", "Lava.top"), icon: "card" },
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startOverpayPayment(tariff), label: providerLabel("overpay", "Overpay"), icon: "card" },
+                { id: "freekassa", enabled: freekassaEnabled && isRub, onClick: () => startFreekassaPayment(tariff), label: providerLabel("freekassa", "KASSA"), icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0

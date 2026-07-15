@@ -56,6 +56,7 @@ export function ClientExtraOptionsPage() {
   const [heleketEnabled, setHeleketEnabled] = useState(false);
   const [lavaEnabled, setLavaEnabled] = useState(false);
   const [overpayEnabled, setOverpayEnabled] = useState(false);
+  const [freekassaEnabled, setFreekassaEnabled] = useState(false);
   const [paymentProviders, setPaymentProviders] = useState<{ id: string; label: string; sortOrder: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [payModal, setPayModal] = useState<PublicSellOption | null>(null);
@@ -76,6 +77,7 @@ export function ClientExtraOptionsPage() {
       setHeleketEnabled(Boolean(c.heleketEnabled));
       setLavaEnabled(Boolean(c.lavaEnabled));
       setOverpayEnabled(Boolean(c.overpayEnabled));
+      setFreekassaEnabled(Boolean(c.freekassaEnabled));
       setPaymentProviders(c.paymentProviders ?? []);
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -154,6 +156,22 @@ export function ClientExtraOptionsPage() {
         extraOption: { kind: option.kind, productId: option.id },
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Overpay" });
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "Ошибка создания платежа");
+    } finally {
+      setPayLoading(false);
+    }
+  }
+
+  async function startFreekassaPayment(option: PublicSellOption) {
+    if (!token) return;
+    setPayError(null);
+    setPayLoading(true);
+    try {
+      const res = await api.freekassaCreatePayment(token, {
+        extraOption: { kind: option.kind, productId: option.id },
+      });
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Ошибка создания платежа");
     } finally {
@@ -313,6 +331,7 @@ export function ClientExtraOptionsPage() {
                 yoomoney: { bg10: "bg-green-500/10", bg20: "group-hover:bg-green-500/20", text: "text-green-500" },
                 lava: { bg10: "bg-sky-500/10", bg20: "group-hover:bg-sky-500/20", text: "text-sky-500" },
                 overpay: { bg10: "bg-indigo-500/10", bg20: "group-hover:bg-indigo-500/20", text: "text-indigo-500" },
+                freekassa: { bg10: "bg-emerald-500/10", bg20: "group-hover:bg-emerald-500/20", text: "text-emerald-500" },
               };
 
               type ProviderEntry = { id: string; enabled: boolean; onClick: () => void; label: string; icon: "crypto" | "card" };
@@ -323,6 +342,7 @@ export function ClientExtraOptionsPage() {
                 { id: "yoomoney", enabled: yoomoneyEnabled && payModal?.currency.toUpperCase() === "RUB", onClick: () => startYoomoneyPayment(payModal!), label: providerLabel("yoomoney", "ЮMoney / Карты"), icon: "card" },
                 { id: "lava", enabled: lavaEnabled && payModal?.currency.toUpperCase() === "RUB", onClick: () => startLavaPayment(payModal!), label: providerLabel("lava", "LAVA"), icon: "card" },
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startOverpayPayment(payModal!), label: providerLabel("overpay", "Overpay"), icon: "card" },
+                { id: "freekassa", enabled: freekassaEnabled && payModal?.currency.toUpperCase() === "RUB", onClick: () => startFreekassaPayment(payModal!), label: providerLabel("freekassa", "KASSA"), icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0

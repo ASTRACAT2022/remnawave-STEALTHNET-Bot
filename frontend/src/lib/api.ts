@@ -2197,6 +2197,31 @@ export const api = {
     return request("/client/lavatop/create-payment", { method: "POST", body: JSON.stringify(data), token });
   },
 
+  /** FreeKassa API — создание заказа KASSA (СБП/карты РФ), возвращает ссылку на оплату */
+  async freekassaCreatePayment(
+    token: string,
+    data: {
+      amount?: number;
+      currency?: string;
+      method?: "sbp" | "cardRub" | "qiwi" | number;
+      tariffId?: string;
+      tariffPriceOptionId?: string;
+      deviceCount?: number;
+      proxyTariffId?: string;
+      singboxTariffId?: string;
+      wdttTariffId?: string;
+      promoCode?: string;
+      extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
+      customBuild?: { days: number; devices: number; trafficGb?: number };
+      extendsSecondarySubId?: string;
+      asAdditional?: boolean;
+      asGift?: boolean;
+      removeExtrasOnActivate?: boolean;
+    }
+  ): Promise<{ paymentId: string; payUrl: string; freekassaOrderId: number }> {
+    return request("/client/freekassa/create-payment", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   /** Overpay — создание платёжной формы (Карты/СБП), возвращает ссылку на оплату */
   async overpayCreatePayment(
     token: string,
@@ -3010,6 +3035,9 @@ export type UpdateSettingsPayload = {
   overpayProjectId?: string | null;
   overpayLogin?: string | null;
   overpayPassword?: string | null;
+  freekassaShopId?: string | null;
+  freekassaApiKey?: string | null;
+  freekassaSecretWord2?: string | null;
   paymentProvidersConfig?: string | null;
   groqApiKey?: string | null;
   groqModel?: string | null;
@@ -3468,6 +3496,9 @@ export interface AdminSettings {
   overpayProjectId?: string | null;
   overpayLogin?: string | null;
   overpayPassword?: string | null;
+  freekassaShopId?: string | null;
+  freekassaApiKey?: string | null;
+  freekassaSecretWord2?: string | null;
   paymentProviders?: { id: string; label: string; sortOrder: number }[];
   groqApiKey?: string | null;
   groqModel?: string | null;
@@ -4722,6 +4753,7 @@ export interface PublicConfig {
   lavaEnabled?: boolean;
   lavatopEnabled?: boolean;
   overpayEnabled?: boolean;
+  freekassaEnabled?: boolean;
   paymentProviders?: { id: string; label: string; sortOrder: number }[];
   trialEnabled?: boolean;
   trialDays?: number;

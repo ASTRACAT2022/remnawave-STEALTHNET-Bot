@@ -77,6 +77,7 @@ export function ClientSingboxPage() {
   const [heleketEnabled, setHeleketEnabled] = useState(false);
   const [lavaEnabled, setLavaEnabled] = useState(false);
   const [overpayEnabled, setOverpayEnabled] = useState(false);
+  const [freekassaEnabled, setFreekassaEnabled] = useState(false);
   const [paymentProviders, setPaymentProviders] = useState<{ id: string; label: string; sortOrder: number }[]>([]);
   const [payModal, setPayModal] = useState<SingboxTariff | null>(null);
   const [payLoading, setPayLoading] = useState(false);
@@ -104,6 +105,7 @@ export function ClientSingboxPage() {
       setHeleketEnabled(Boolean(c.heleketEnabled));
       setLavaEnabled(Boolean(c.lavaEnabled));
       setOverpayEnabled(Boolean(c.overpayEnabled));
+      setFreekassaEnabled(Boolean(c.freekassaEnabled));
       setPaymentProviders(c.paymentProviders ?? []);
     }).catch(() => { });
   }, []);
@@ -258,6 +260,24 @@ export function ClientSingboxPage() {
     }
   }
 
+  async function startFreekassaPayment(tariff: SingboxTariff) {
+    if (!token) return;
+    setPayError(null);
+    setPayLoading(true);
+    try {
+      const res = await api.freekassaCreatePayment(token, {
+        amount: tariff.price,
+        currency: tariff.currency,
+        singboxTariffId: tariff.id,
+      } as Parameters<typeof api.freekassaCreatePayment>[1]);
+      if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "KASSA" });
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setPayLoading(false);
+    }
+  }
+
   async function startPlategaPayment(tariff: SingboxTariff, methodId: number) {
     if (!token) return;
     setPayError(null);
@@ -396,6 +416,7 @@ export function ClientSingboxPage() {
                 yoomoney: { bg10: "bg-green-500/10", bg20: "group-hover:bg-green-500/20", text: "text-green-500" },
                 lava: { bg10: "bg-sky-500/10", bg20: "group-hover:bg-sky-500/20", text: "text-sky-500" },
                 overpay: { bg10: "bg-indigo-500/10", bg20: "group-hover:bg-indigo-500/20", text: "text-indigo-500" },
+                freekassa: { bg10: "bg-emerald-500/10", bg20: "group-hover:bg-emerald-500/20", text: "text-emerald-500" },
               };
 
               type ProviderEntry = { id: string; enabled: boolean; onClick: () => void; label: string; icon: "crypto" | "card" };
@@ -406,6 +427,7 @@ export function ClientSingboxPage() {
                 { id: "yoomoney", enabled: yoomoneyEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startYoomoneyPayment(payModal), label: providerLabel("yoomoney", "ЮMoney / Карты"), icon: "card" },
                 { id: "lava", enabled: lavaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startLavaPayment(payModal), label: providerLabel("lava", "LAVA"), icon: "card" },
                 { id: "overpay", enabled: overpayEnabled, onClick: () => startOverpayPayment(payModal), label: providerLabel("overpay", "Overpay"), icon: "card" },
+                { id: "freekassa", enabled: freekassaEnabled && payModal.currency.toUpperCase() === "RUB", onClick: () => startFreekassaPayment(payModal), label: providerLabel("freekassa", "KASSA"), icon: "card" },
               ];
 
               const sortedProviders = paymentProviders.length > 0
