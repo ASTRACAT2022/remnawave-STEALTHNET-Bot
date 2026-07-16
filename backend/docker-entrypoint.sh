@@ -50,6 +50,16 @@ log() {
   printf '%s\n' "[docker-entrypoint] $*"
 }
 
+start_process() {
+  if [ "${STEALTHNET_PROCESS:-api}" = "broadcast-worker" ]; then
+    exec node dist/worker/broadcast-worker.js
+  fi
+  if [ "$#" -gt 0 ]; then
+    exec "$@"
+  fi
+  exec node dist/index.js
+}
+
 # Применяет SQL по statement'ам через psql с ON_ERROR_STOP=0 — пропускает
 # дубликаты ('already exists'/'duplicate'), но выполняет все остальные statement'ы.
 # Это критично для drift SQL'я от prisma migrate diff: Prisma может включать
@@ -311,7 +321,7 @@ if npx prisma migrate deploy >"$MIGRATE_LOG" 2>&1; then
   cat "$MIGRATE_LOG" || true
   log "migrate deploy: OK"
   reconcile_schema_drift
-  exec node dist/index.js
+  start_process "$@"
 fi
 
 cat "$MIGRATE_LOG" >&2 || true
@@ -334,7 +344,7 @@ if grep -q "P3009" "$MIGRATE_LOG"; then
     cat "$MIGRATE_LOG" || true
     log "migrate deploy: OK (после P3009 recovery)"
     reconcile_schema_drift
-    exec node dist/index.js
+    start_process "$@"
   fi
   cat "$MIGRATE_LOG" >&2 || true
 
@@ -354,7 +364,7 @@ if grep -q "P3009" "$MIGRATE_LOG"; then
       cat "$MIGRATE_LOG" || true
       log "migrate deploy: OK (после P3009→P3018 adaptive recovery)"
       reconcile_schema_drift
-      exec node dist/index.js
+      start_process "$@"
     fi
     cat "$MIGRATE_LOG" >&2 || true
     # Возможно ещё одна миграция в том же состоянии — попробуем итеративно
@@ -369,7 +379,7 @@ if grep -q "P3009" "$MIGRATE_LOG"; then
         cat "$MIGRATE_LOG" || true
         log "migrate deploy: OK (после итеративного adaptive recovery)"
         reconcile_schema_drift
-        exec node dist/index.js
+        start_process "$@"
       fi
       cat "$MIGRATE_LOG" >&2 || true
     done
@@ -423,7 +433,7 @@ if ! grep -q "P3005" "$MIGRATE_LOG"; then
         log "migrate deploy: OK (greenfield)"
         # На всякий случай — даже greenfield может содержать остаточный benign drift
         reconcile_schema_drift
-        exec node dist/index.js
+        start_process "$@"
       fi
       log "ERROR: migrate deploy после greenfield всё ещё падает — см. лог выше"
       exit 1
@@ -503,8 +513,4 @@ npx prisma migrate deploy
 # верифицирует результат.
 reconcile_schema_drift
 
-if [ "$#" -gt 0 ]; then
-  exec "$@"
-fi
-
-exec node dist/index.js
+start_process "$@"

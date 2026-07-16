@@ -98,6 +98,7 @@ services:
     command: ["node", "dist/worker/broadcast-worker.js"]
     environment:
       NODE_ENV: production
+      STEALTHNET_PROCESS: "broadcast-worker"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-stealthnet}:${POSTGRES_PASSWORD:-stealthnet_change_me}@postgres:5432/${POSTGRES_DB:-stealthnet}"
       JWT_SECRET: "${JWT_SECRET}"
       BOT_TOKEN: "${BOT_TOKEN:-}"
