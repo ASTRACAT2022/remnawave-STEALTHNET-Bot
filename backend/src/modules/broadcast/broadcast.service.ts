@@ -912,6 +912,7 @@ export async function getBroadcastJob(jobId: string): Promise<BroadcastJob | nul
       sentEmail: row.sentEmail,
       failedTelegram: row.failedTelegram,
       failedEmail: row.failedEmail,
+      errors: Array.isArray(row.errors) ? row.errors.filter((e): e is string => typeof e === "string") : undefined,
     },
     result: row.status === "completed" || row.status === "error" || row.status === "cancelled"
       ? {

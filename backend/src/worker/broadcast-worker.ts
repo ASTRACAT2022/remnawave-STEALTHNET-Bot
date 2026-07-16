@@ -59,6 +59,7 @@ async function claimNextJob() {
      WHERE id = (
        SELECT id FROM broadcast_history
         WHERE status = 'pending'
+          AND cancel_requested = false
         ORDER BY started_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -67,6 +68,20 @@ async function claimNextJob() {
               attachment_name, attachment_path, attachment_mime, target_group;
   `;
   return rows[0] ?? null;
+}
+
+/**
+ * Если админ уже нажал отмену пока задача ещё ждала в очереди, не даём ей
+ * занимать worker-цикл: сразу переводим в финальный cancelled.
+ */
+async function finalizeCancelledPending(): Promise<void> {
+  const updated = await prisma.broadcastHistory.updateMany({
+    where: { status: "pending", cancelRequested: true },
+    data: { status: "cancelled", finishedAt: new Date() },
+  });
+  if (updated.count > 0) {
+    log(`cancelled ${updated.count} pending broadcast(s) with cancel_requested=true`);
+  }
 }
 
 async function processOne(job: NonNullable<Awaited<ReturnType<typeof claimNextJob>>>): Promise<void> {
@@ -193,8 +208,16 @@ async function processOne(job: NonNullable<Awaited<ReturnType<typeof claimNextJo
  * skip уже отправленных получателей).
  */
 async function reanimateZombies(): Promise<void> {
+  const cancelled = await prisma.broadcastHistory.updateMany({
+    where: { status: "running", cancelRequested: true },
+    data: { status: "cancelled", finishedAt: new Date() },
+  });
+  if (cancelled.count > 0) {
+    log(`finalized ${cancelled.count} cancelled zombie broadcast(s)`);
+  }
+
   const updated = await prisma.broadcastHistory.updateMany({
-    where: { status: "running" },
+    where: { status: "running", cancelRequested: false },
     data: { status: "pending" },
   });
   if (updated.count > 0) {
@@ -205,8 +228,10 @@ async function reanimateZombies(): Promise<void> {
 async function mainLoop(): Promise<void> {
   log(`starting (poll interval ${POLL_INTERVAL_MS}ms)`);
   await reanimateZombies();
+  await finalizeCancelledPending();
   while (!shuttingDown) {
     try {
+      await finalizeCancelledPending();
       const job = await claimNextJob();
       if (job) {
         await processOne(job);
