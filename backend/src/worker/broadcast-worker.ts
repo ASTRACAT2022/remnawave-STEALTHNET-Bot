@@ -136,6 +136,7 @@ async function processOne(job: NonNullable<Awaited<ReturnType<typeof claimNextJo
             totalEmail: p.totalEmail,
             sentEmail: p.sentEmail,
             failedEmail: p.failedEmail,
+            errors: p.errors?.length ? p.errors.slice(0, 50) : undefined,
           },
         }).catch(() => { /* ignore */ });
       },

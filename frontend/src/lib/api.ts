@@ -2869,6 +2869,7 @@ export interface BroadcastProgress {
   failedTelegram: number;
   failedEmail: number;
   currentChannel?: "telegram" | "email";
+  errors?: string[];
 }
 
 export interface BroadcastHistoryItem {

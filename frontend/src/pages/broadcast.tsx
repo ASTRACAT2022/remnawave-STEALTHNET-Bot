@@ -638,6 +638,16 @@ function BroadcastProgressPanel({ progress, jobId }: { progress: BroadcastProgre
       {progress.totalTelegram === 0 && progress.totalEmail === 0 && (
         <p className="text-xs text-muted-foreground">Подготавливаем получателей…</p>
       )}
+      {progress.errors && progress.errors.length > 0 && (
+        <details className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+          <summary className="cursor-pointer text-amber-700 dark:text-amber-300">
+            Первые ошибки доставки ({progress.errors.length})
+          </summary>
+          <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto pl-4 text-foreground/75 list-disc">
+            {progress.errors.map((err, i) => <li key={i} className="break-words">{err}</li>)}
+          </ul>
+        </details>
+      )}
     </motion.div>
   );
 }

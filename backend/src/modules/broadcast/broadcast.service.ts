@@ -39,6 +39,7 @@ const TELEGRAM_MEDIA_DELAY_MS = envInt("BROADCAST_TELEGRAM_MEDIA_DELAY_MS", 180,
 const EMAIL_SEND_CONCURRENCY = envInt("BROADCAST_EMAIL_CONCURRENCY", 5, 1, 20);
 const EMAIL_SEND_DELAY_MS = envInt("BROADCAST_EMAIL_DELAY_MS", 100, 0, 10000);
 const TELEGRAM_429_MAX_RETRIES = 3;
+const TELEGRAM_API_ROOT = (process.env.TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/+$/, "");
 
 export type BroadcastChannel = "telegram" | "email" | "both";
 
@@ -53,6 +54,18 @@ export type BroadcastResult = {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function telegramApiUrl(botToken: string, method: string): string {
+  return `${TELEGRAM_API_ROOT}/bot${botToken}/${method}`;
+}
+
+function isTelegramParseError(error: string | undefined): boolean {
+  const normalized = (error ?? "").toLowerCase();
+  return normalized.includes("parse entities")
+    || normalized.includes("can't parse")
+    || normalized.includes("can't find end tag")
+    || normalized.includes("unsupported start tag");
 }
 
 type InlineKeyboardButton =
@@ -91,15 +104,15 @@ async function sendTelegramMessage(
   replyMarkup: InlineKeyboard | undefined,
   proxy: string | null,
 ): Promise<TgSendResult> {
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-  const payload: Record<string, unknown> = {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-  };
-  if (replyMarkup) payload.reply_markup = replyMarkup;
-  return telegramSendWith429Retry(async () => {
+  const url = telegramApiUrl(botToken, "sendMessage");
+  const send = (parseHtml: boolean) => telegramSendWith429Retry(async () => {
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      text,
+      disable_web_page_preview: true,
+    };
+    if (parseHtml) payload.parse_mode = "HTML";
+    if (replyMarkup) payload.reply_markup = replyMarkup;
     const res = await proxyFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -107,6 +120,9 @@ async function sendTelegramMessage(
     }, proxy);
     return res;
   });
+  const result = await send(true);
+  if (!result.ok && isTelegramParseError(result.error)) return send(false);
+  return result;
 }
 
 /**
@@ -190,19 +206,22 @@ async function sendTelegramPhoto(
   replyMarkup: InlineKeyboard | undefined,
   proxy: string | null,
 ): Promise<TgSendResult> {
-  const url = `https://api.telegram.org/bot${botToken}/sendPhoto`;
-  return telegramSendWith429Retry(async () => {
+  const url = telegramApiUrl(botToken, "sendPhoto");
+  const send = (parseHtml: boolean) => telegramSendWith429Retry(async () => {
     const form = new FormData();
     form.append("chat_id", chatId);
     if (typeof photo === "string") form.append("photo", photo);
     else form.append("photo", new Blob([photo], { type: mimeType }), fileName || "image");
     if (caption) {
       form.append("caption", caption);
-      form.append("parse_mode", "HTML");
+      if (parseHtml) form.append("parse_mode", "HTML");
     }
     if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
     return await proxyFetch(url, { method: "POST", body: form }, proxy);
   });
+  const result = await send(true);
+  if (!result.ok && isTelegramParseError(result.error)) return send(false);
+  return result;
 }
 
 /**
@@ -347,15 +366,15 @@ async function sendTelegramVideo(
   thumbnail: Buffer | null | undefined,
   proxy: string | null,
 ): Promise<TgSendResult> {
-  const url = `https://api.telegram.org/bot${botToken}/sendVideo`;
-  return telegramSendWith429Retry(async () => {
+  const url = telegramApiUrl(botToken, "sendVideo");
+  const send = (parseHtml: boolean) => telegramSendWith429Retry(async () => {
     const form = new FormData();
     form.append("chat_id", chatId);
     if (typeof video === "string") form.append("video", video);
     else form.append("video", new Blob([video], { type: mimeType }), fileName || "video");
     if (caption) {
       form.append("caption", caption);
-      form.append("parse_mode", "HTML");
+      if (parseHtml) form.append("parse_mode", "HTML");
     }
     form.append("supports_streaming", "true");
     if (meta?.width) form.append("width", String(meta.width));
@@ -369,6 +388,9 @@ async function sendTelegramVideo(
     if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
     return await proxyFetch(url, { method: "POST", body: form }, proxy);
   });
+  const result = await send(true);
+  if (!result.ok && isTelegramParseError(result.error)) return send(false);
+  return result;
 }
 
 /**
@@ -384,19 +406,22 @@ async function sendTelegramDocument(
   replyMarkup: InlineKeyboard | undefined,
   proxy: string | null,
 ): Promise<TgSendResult> {
-  const url = `https://api.telegram.org/bot${botToken}/sendDocument`;
-  return telegramSendWith429Retry(async () => {
+  const url = telegramApiUrl(botToken, "sendDocument");
+  const send = (parseHtml: boolean) => telegramSendWith429Retry(async () => {
     const form = new FormData();
     form.append("chat_id", chatId);
     if (typeof document === "string") form.append("document", document);
     else form.append("document", new Blob([document], { type: mimeType }), fileName || "file");
     if (caption) {
       form.append("caption", caption);
-      form.append("parse_mode", "HTML");
+      if (parseHtml) form.append("parse_mode", "HTML");
     }
     if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
     return await proxyFetch(url, { method: "POST", body: form }, proxy);
   });
+  const result = await send(true);
+  if (!result.ok && isTelegramParseError(result.error)) return send(false);
+  return result;
 }
 
 export type BroadcastAttachment = {
@@ -413,6 +438,7 @@ export type BroadcastProgress = {
   failedTelegram: number;
   failedEmail: number;
   currentChannel?: "telegram" | "email";
+  errors?: string[];
 };
 
 /**
@@ -549,6 +575,7 @@ export async function runBroadcast(options: {
     progress.sentEmail = result.sentEmail;
     progress.failedTelegram = result.failedTelegram;
     progress.failedEmail = result.failedEmail;
+    progress.errors = result.errors.slice(0, 10);
     onProgress?.(progress);
   };
   report();
@@ -637,7 +664,11 @@ export async function runBroadcast(options: {
           }
         } else {
           result.failedTelegram++;
-          if (result.errors.length < 10) result.errors.push(`Telegram ${tid}: ${send.error ?? "error"}`);
+          if (result.errors.length < 10) {
+            const error = `Telegram ${tid}: ${send.error ?? "error"}`;
+            result.errors.push(error);
+            console.warn(`[broadcast] ${error}`);
+          }
         }
       };
 
