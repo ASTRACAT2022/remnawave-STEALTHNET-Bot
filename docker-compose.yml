@@ -51,10 +51,18 @@ services:
       INIT_ADMIN_EMAIL: "${INIT_ADMIN_EMAIL:-admin@stealthnet.local}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
       BOT_TOKEN: "${BOT_TOKEN:-}"
+      BROADCAST_ATTACHMENT_DIR: "/data/broadcast-attachments"
+      BROADCAST_TELEGRAM_TEXT_CONCURRENCY: "${BROADCAST_TELEGRAM_TEXT_CONCURRENCY:-6}"
+      BROADCAST_TELEGRAM_TEXT_DELAY_MS: "${BROADCAST_TELEGRAM_TEXT_DELAY_MS:-100}"
+      BROADCAST_TELEGRAM_MEDIA_CONCURRENCY: "${BROADCAST_TELEGRAM_MEDIA_CONCURRENCY:-2}"
+      BROADCAST_TELEGRAM_MEDIA_DELAY_MS: "${BROADCAST_TELEGRAM_MEDIA_DELAY_MS:-180}"
+      BROADCAST_EMAIL_CONCURRENCY: "${BROADCAST_EMAIL_CONCURRENCY:-5}"
+      BROADCAST_EMAIL_DELAY_MS: "${BROADCAST_EMAIL_DELAY_MS:-100}"
     volumes:
       - /etc/ssh:/host-etc/ssh
       - /proc:/host-proc:ro
       - uploads_data:/app/uploads
+      - broadcast_attachments:/data/broadcast-attachments
       # Read-only frontend bundle: модуль branding/spa-html.ts читает index.html
       # отсюда чтобы инжектить per-bot брендинг в SPA-shell перед отдачей через nginx /_spa.
       - frontend_dist:/var/www/stealthnet:ro
@@ -77,6 +85,37 @@ services:
     networks:
       - stealthnet
       - remnawave-network
+
+  # ── Broadcast Worker ────────────────────────────────────────────
+  # Фоновая рассылка: API только кладёт задачу в БД, этот контейнер отправляет
+  # сообщения независимо от открытого браузера/админки.
+  broadcast-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stealthnet-broadcast-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker/broadcast-worker.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-stealthnet}:${POSTGRES_PASSWORD:-stealthnet_change_me}@postgres:5432/${POSTGRES_DB:-stealthnet}"
+      BOT_TOKEN: "${BOT_TOKEN:-}"
+      BROADCAST_ATTACHMENT_DIR: "/data/broadcast-attachments"
+      BROADCAST_TELEGRAM_TEXT_CONCURRENCY: "${BROADCAST_TELEGRAM_TEXT_CONCURRENCY:-6}"
+      BROADCAST_TELEGRAM_TEXT_DELAY_MS: "${BROADCAST_TELEGRAM_TEXT_DELAY_MS:-100}"
+      BROADCAST_TELEGRAM_MEDIA_CONCURRENCY: "${BROADCAST_TELEGRAM_MEDIA_CONCURRENCY:-2}"
+      BROADCAST_TELEGRAM_MEDIA_DELAY_MS: "${BROADCAST_TELEGRAM_MEDIA_DELAY_MS:-180}"
+      BROADCAST_EMAIL_CONCURRENCY: "${BROADCAST_EMAIL_CONCURRENCY:-5}"
+      BROADCAST_EMAIL_DELAY_MS: "${BROADCAST_EMAIL_DELAY_MS:-100}"
+    volumes:
+      - broadcast_attachments:/data/broadcast-attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - stealthnet
 
   # ── Telegram Bot ────────────────────────────────────────────────
   bot:
@@ -147,6 +186,7 @@ volumes:
   postgres_data:
   frontend_dist:
   uploads_data:
+  broadcast_attachments:
   certbot_www:
   certbot_certs:
 

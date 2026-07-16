@@ -1401,7 +1401,7 @@ export const api = {
   /** Проверить статус фоновой рассылки. */
   async broadcastStatus(token: string, jobId: string): Promise<{
     id: string;
-    status: "running" | "completed" | "error" | "cancelled";
+    status: "pending" | "running" | "completed" | "error" | "cancelled";
     progress: BroadcastProgress;
     result: (BroadcastResult & { cancelled?: boolean }) | null;
     error: string | null;

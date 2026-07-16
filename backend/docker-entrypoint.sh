@@ -503,4 +503,8 @@ npx prisma migrate deploy
 # верифицирует результат.
 reconcile_schema_drift
 
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 exec node dist/index.js

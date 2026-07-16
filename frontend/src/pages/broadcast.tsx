@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const MAX_ATTACHMENT_MB = 20;
+const MAX_ATTACHMENT_MB = 50;
 
 const BUTTON_ACTIONS = [
   { value: "", label: "Без кнопки" },
@@ -82,6 +82,7 @@ export function BroadcastPage() {
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState<BroadcastResult | null>(null);
   const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
+  const [activeBroadcastJobId, setActiveBroadcastJobId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [activeTab, setActiveTab] = useState<"compose" | "history">("compose");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -130,18 +131,26 @@ export function BroadcastPage() {
         },
         broadcastAttachment ?? undefined
       );
-      const finalResult = await pollBroadcastJob(jobId);
-      setBroadcastResult(finalResult);
-      if (finalResult.ok) {
-        setBroadcastMessage("");
-        setBroadcastSubject("");
-        setBroadcastAttachment(null);
-        setBroadcastButtonText("");
-        setBroadcastButtonAction("");
-        setBroadcastButtonCustomUrl("");
-        api.broadcastRecipientsCount(token).then(setBroadcastRecipients).catch(() => {});
-      }
+      setActiveBroadcastJobId(jobId);
+      setBroadcastProgress({
+        totalTelegram: 0,
+        totalEmail: 0,
+        sentTelegram: 0,
+        sentEmail: 0,
+        failedTelegram: 0,
+        failedEmail: 0,
+      });
+      setBroadcastMessage("");
+      setBroadcastSubject("");
+      setBroadcastAttachment(null);
+      setBroadcastButtonText("");
+      setBroadcastButtonAction("");
+      setBroadcastButtonCustomUrl("");
+      api.broadcastRecipientsCount(token).then(setBroadcastRecipients).catch(() => {});
+      void pollBroadcastJob(jobId);
     } catch (err) {
+      setBroadcastLoading(false);
+      setActiveBroadcastJobId(null);
       setBroadcastResult({
         ok: false,
         sentTelegram: 0,
@@ -150,42 +159,49 @@ export function BroadcastPage() {
         failedEmail: 0,
         errors: [err instanceof Error ? err.message : "Ошибка отправки"],
       });
-    } finally {
-      setBroadcastLoading(false);
-      setBroadcastProgress(null);
     }
   }
 
-  async function pollBroadcastJob(jobId: string): Promise<BroadcastResult> {
+  async function pollBroadcastJob(jobId: string): Promise<void> {
     const deadline = Date.now() + 30 * 60 * 1000;
     while (Date.now() < deadline) {
       try {
         const s = await api.broadcastStatus(token, jobId);
         if (s.progress) setBroadcastProgress(s.progress);
-        if (s.status === "completed" && s.result) return s.result;
+        if ((s.status === "completed" || s.status === "cancelled") && s.result) {
+          setBroadcastResult(s.result);
+          setBroadcastLoading(false);
+          setActiveBroadcastJobId(null);
+          return;
+        }
         if (s.status === "error") {
-          return {
+          setBroadcastResult({
             ok: false,
             sentTelegram: s.progress?.sentTelegram ?? 0,
             sentEmail: s.progress?.sentEmail ?? 0,
             failedTelegram: s.progress?.failedTelegram ?? 0,
             failedEmail: s.progress?.failedEmail ?? 0,
             errors: [s.error || "Ошибка рассылки"],
-          };
+          });
+          setBroadcastLoading(false);
+          setActiveBroadcastJobId(null);
+          return;
         }
       } catch {
         // network blip — retry
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
-    return {
+    setBroadcastResult({
       ok: false,
       sentTelegram: 0,
       sentEmail: 0,
       failedTelegram: 0,
       failedEmail: 0,
-      errors: ["Превышен таймаут опроса статуса. Рассылка, возможно, всё ещё идёт — проверьте позже."],
-    };
+      errors: ["Опрос статуса остановлен. Рассылка продолжает идти в фоне — проверьте историю позже."],
+    });
+    setBroadcastLoading(false);
+    setActiveBroadcastJobId(null);
   }
 
   const channelMeta = CHANNEL_META[broadcastChannel];
@@ -493,7 +509,7 @@ export function BroadcastPage() {
               </div>
 
               {broadcastLoading && broadcastProgress && !broadcastResult && (
-                <BroadcastProgressPanel progress={broadcastProgress} />
+                <BroadcastProgressPanel progress={broadcastProgress} jobId={activeBroadcastJobId} />
               )}
 
               {broadcastResult && (
@@ -570,7 +586,7 @@ function StatPill({ icon: Icon, label, value, colorClass }: { icon: typeof Send;
   );
 }
 
-function BroadcastProgressPanel({ progress }: { progress: BroadcastProgress }) {
+function BroadcastProgressPanel({ progress, jobId }: { progress: BroadcastProgress; jobId: string | null }) {
   const tgDone = progress.sentTelegram + progress.failedTelegram;
   const emailDone = progress.sentEmail + progress.failedEmail;
   const tgPct = progress.totalTelegram > 0 ? Math.min(100, Math.round((tgDone / progress.totalTelegram) * 100)) : 0;
@@ -590,7 +606,9 @@ function BroadcastProgressPanel({ progress }: { progress: BroadcastProgress }) {
           <p className="font-semibold">
             Рассылка идёт{progress.currentChannel === "telegram" ? " — Telegram" : progress.currentChannel === "email" ? " — Email" : ""}…
           </p>
-          <p className="text-[11px] text-muted-foreground">Не закрывай вкладку до завершения</p>
+          <p className="text-[11px] text-muted-foreground">
+            Работает на сервере в фоне, вкладку можно закрыть{jobId ? ` · ${jobId.slice(0, 8)}` : ""}
+          </p>
         </div>
       </div>
       {progress.totalTelegram > 0 && (
@@ -649,7 +667,9 @@ function ProgressBar({ label, icon: Icon, done, total, failed, pct, colorClass, 
 
 function statusBadge(status: BroadcastHistoryItem["status"]): { text: string; cls: string; dot: string } {
   if (status === "completed") return { text: "Готово", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30", dot: "bg-emerald-500" };
+  if (status === "pending") return { text: "В очереди", cls: "bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30", dot: "bg-sky-500 animate-pulse" };
   if (status === "running") return { text: "Идёт…", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30", dot: "bg-amber-500 animate-pulse" };
+  if (status === "cancelled") return { text: "Отменена", cls: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30", dot: "bg-zinc-500" };
   return { text: "Ошибка", cls: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30", dot: "bg-red-500" };
 }
 
@@ -686,6 +706,12 @@ function BroadcastHistoryPanel({ token }: { token: string }) {
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [load]);
 
   // Aggregate stats для верхних карточек.
   const stats = useMemo(() => {

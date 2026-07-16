@@ -22,14 +22,22 @@ import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
 //   text:  CONCURRENCY=4, DELAY=50ms  → ~20 msg/sec  (под global 30)
 //   media: CONCURRENCY=1, DELAY=200ms → ~5  msg/sec  (под media-throttle)
 // 429-retry с respect retry_after — страховка если всё равно превысим.
-const TELEGRAM_TEXT_CONCURRENCY = 4;
-const TELEGRAM_TEXT_DELAY_MS = 50;
+function envInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+const TELEGRAM_TEXT_CONCURRENCY = envInt("BROADCAST_TELEGRAM_TEXT_CONCURRENCY", 6, 1, 20);
+const TELEGRAM_TEXT_DELAY_MS = envInt("BROADCAST_TELEGRAM_TEXT_DELAY_MS", 100, 0, 5000);
 // после file_id-reuse upload пропадает → можем увеличить.
 // 1 worker для первой отправки (upload бинаря), потом file_id ускоряет всё в 20x.
 // delay 150ms = ~6.5 msg/sec безопасно под media-throttle Telegram (~5-8/sec).
-const TELEGRAM_MEDIA_CONCURRENCY = 1;
-const TELEGRAM_MEDIA_DELAY_MS = 150;
-const EMAIL_SEND_DELAY_MS = 200;
+const TELEGRAM_MEDIA_CONCURRENCY = envInt("BROADCAST_TELEGRAM_MEDIA_CONCURRENCY", 2, 1, 8);
+const TELEGRAM_MEDIA_DELAY_MS = envInt("BROADCAST_TELEGRAM_MEDIA_DELAY_MS", 180, 0, 10000);
+const EMAIL_SEND_CONCURRENCY = envInt("BROADCAST_EMAIL_CONCURRENCY", 5, 1, 20);
+const EMAIL_SEND_DELAY_MS = envInt("BROADCAST_EMAIL_DELAY_MS", 100, 0, 10000);
 const TELEGRAM_429_MAX_RETRIES = 3;
 
 export type BroadcastChannel = "telegram" | "email" | "both";
@@ -686,19 +694,30 @@ export async function runBroadcast(options: {
       const emailAttachments = attachment
         ? [{ filename: attachment.originalname || "file", content: attachment.buffer }]
         : undefined;
-      for (const c of clients) {
-        if (isCancelled?.()) { result.cancelled = true; break; }
-        const email = c.email!.trim();
-        if (!email) continue;
-        await delay(EMAIL_SEND_DELAY_MS);
-        const send = await sendEmail(smtpConfig, email, subj, htmlBody, emailAttachments);
-        if (send.ok) result.sentEmail++;
-        else {
-          result.failedEmail++;
-          if (result.errors.length < 10) result.errors.push(`Email ${email}: ${send.error ?? "error"}`);
+      console.log(`[broadcast] email: ${clients.length} matched (concurrency=${EMAIL_SEND_CONCURRENCY}, delay=${EMAIL_SEND_DELAY_MS}ms)`);
+
+      let nextEmailIdx = 0;
+      const emailWorker = async (): Promise<void> => {
+        while (true) {
+          if (isCancelled?.()) { result.cancelled = true; return; }
+          const idx = nextEmailIdx++;
+          if (idx >= clients.length) return;
+          const c = clients[idx];
+          const email = c.email?.trim();
+          if (!email) continue;
+          await delay(EMAIL_SEND_DELAY_MS);
+          const send = await sendEmail(smtpConfig, email, subj, htmlBody, emailAttachments);
+          if (send.ok) result.sentEmail++;
+          else {
+            result.failedEmail++;
+            if (result.errors.length < 10) result.errors.push(`Email ${email}: ${send.error ?? "error"}`);
+          }
+          if (idx % 25 === 0) report();
         }
-        report();
-      }
+      };
+
+      await Promise.all(Array.from({ length: EMAIL_SEND_CONCURRENCY }, () => emailWorker()));
+      report();
     }
   }
 
@@ -723,7 +742,7 @@ export async function getBroadcastRecipientsCount(): Promise<{ withTelegram: num
 // успешно завершается. Поэтому запускаем рассылку как фоновую задачу и
 // отдаём на фронт jobId — он опрашивает статус.
 
-export type BroadcastJobStatus = "running" | "completed" | "error" | "cancelled";
+export type BroadcastJobStatus = "pending" | "running" | "completed" | "error" | "cancelled";
 
 export type BroadcastJob = {
   id: string;
@@ -860,6 +879,17 @@ export async function getBroadcastJob(jobId: string): Promise<BroadcastJob | nul
       failedTelegram: row.failedTelegram,
       failedEmail: row.failedEmail,
     },
+    result: row.status === "completed" || row.status === "error" || row.status === "cancelled"
+      ? {
+          ok: row.status === "completed" && row.failedTelegram + row.failedEmail === 0 && !row.error,
+          sentTelegram: row.sentTelegram,
+          sentEmail: row.sentEmail,
+          failedTelegram: row.failedTelegram,
+          failedEmail: row.failedEmail,
+          errors: Array.isArray(row.errors) ? row.errors.filter((e): e is string => typeof e === "string") : (row.error ? [row.error] : []),
+          cancelled: row.status === "cancelled",
+        }
+      : undefined,
     cancelRequested: row.cancelRequested,
   };
 }
