@@ -99,6 +99,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-stealthnet}:${POSTGRES_PASSWORD:-stealthnet_change_me}@postgres:5432/${POSTGRES_DB:-stealthnet}"
+      JWT_SECRET: "${JWT_SECRET}"
       BOT_TOKEN: "${BOT_TOKEN:-}"
       BROADCAST_ATTACHMENT_DIR: "/data/broadcast-attachments"
       BROADCAST_TELEGRAM_TEXT_CONCURRENCY: "${BROADCAST_TELEGRAM_TEXT_CONCURRENCY:-6}"
