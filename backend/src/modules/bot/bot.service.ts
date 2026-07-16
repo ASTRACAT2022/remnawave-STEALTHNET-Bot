@@ -27,6 +27,18 @@ function envToken(): string {
   return (process.env.BOT_TOKEN ?? "").trim();
 }
 
+export type PrimaryBotTokenSource = "env" | "settings";
+
+export function resolvePrimaryBotToken(settingsToken?: string | null): { token: string; source: PrimaryBotTokenSource } | null {
+  const fromEnv = envToken();
+  if (fromEnv) return { token: fromEnv, source: "env" };
+
+  const fromSettings = (settingsToken ?? "").trim();
+  if (fromSettings) return { token: fromSettings, source: "settings" };
+
+  return null;
+}
+
 export function getPrimaryBot(): Promise<StubBot> {
   return Promise.resolve({
     id: PRIMARY_ID,

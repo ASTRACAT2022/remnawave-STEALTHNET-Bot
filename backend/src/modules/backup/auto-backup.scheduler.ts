@@ -4,6 +4,7 @@ import { parseDatabaseUrl, saveBackupToFile } from "./backup.service.js";
 import { readFile } from "node:fs/promises";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 
 const DEFAULT_CRON = "0 7 * * *";
 const LOG = "[auto-backup]";
@@ -45,7 +46,7 @@ async function runAutoBackup(): Promise<void> {
   const config = await getSystemConfig();
   if (!config.autoBackupEnabled) return;
 
-  const botToken = config.telegramBotToken?.trim();
+  const botToken = resolvePrimaryBotToken(config.telegramBotToken)?.token;
   const groupId = config.notificationTelegramGroupId?.trim();
   if (!botToken || !groupId) {
     console.warn(`${LOG} Bot token or group ID not configured, skip`);

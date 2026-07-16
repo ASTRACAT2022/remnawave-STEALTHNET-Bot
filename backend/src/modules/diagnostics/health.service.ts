@@ -16,6 +16,7 @@ import os from "node:os";
 import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { env } from "../../config/index.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 
 const exec = promisify(execCb);
 
@@ -76,11 +77,11 @@ async function checkRemna(): Promise<HealthCheck> {
 
 async function checkBot(): Promise<HealthCheck> {
   const config = await getSystemConfig();
-  const token = (config as { telegramBotToken?: string | null }).telegramBotToken?.trim();
-  if (!token) return { name: "telegram_bot", status: "skip", detail: "not configured" };
+  const tokenInfo = resolvePrimaryBotToken((config as { telegramBotToken?: string | null }).telegramBotToken);
+  if (!tokenInfo) return { name: "telegram_bot", status: "skip", detail: "not configured" };
 
   const t = await timed(async () => {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+    const res = await fetch(`https://api.telegram.org/bot${tokenInfo.token}/getMe`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -89,7 +90,7 @@ async function checkBot(): Promise<HealthCheck> {
     return data.result?.username ?? null;
   });
   if (t.error) return { name: "telegram_bot", status: "error", detail: String(t.error), durationMs: t.ms };
-  return { name: "telegram_bot", status: "ok", durationMs: t.ms, meta: { username: t.result } };
+  return { name: "telegram_bot", status: "ok", durationMs: t.ms, meta: { username: t.result, tokenSource: tokenInfo.source } };
 }
 
 async function checkDisk(): Promise<HealthCheck> {

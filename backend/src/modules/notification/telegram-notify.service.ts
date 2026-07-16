@@ -7,6 +7,7 @@ import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 
 /** Inline keyboard with a single "Back to menu" button for client notifications. */
 function backToMenuMarkup(backLabel?: string | null): Record<string, unknown> {
@@ -32,11 +33,11 @@ export async function sendTelegramToUser(
   replyMarkup?: Record<string, unknown>,
   _opts?: TelegramUserSendOptions,
 ): Promise<void> {
-  // v5.0.0: единственный бот, токен берётся из system_settings (или env).
+  // v5.0.0: единственный бот, основной токен берётся из BOT_TOKEN, settings — fallback.
   let token: string | undefined;
   {
     const config = await getSystemConfig();
-    token = config.telegramBotToken?.trim() ?? undefined;
+    token = resolvePrimaryBotToken(config.telegramBotToken)?.token;
   }
   if (!token) {
     console.warn("[Telegram notify] Bot token not configured, skip notification");
@@ -235,7 +236,7 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
       const codeResult = await createGiftCode(clientId, payment.subscriptionId, undefined, { skipConfigCheck: true });
       if (codeResult.ok) {
         const cfg = await getSystemConfig();
-        const botToken = (cfg.telegramBotToken || "").trim();
+        const botToken = resolvePrimaryBotToken(cfg.telegramBotToken)?.token;
         const botUsernameRes = botToken
           ? await fetch(`https://api.telegram.org/bot${botToken}/getMe`).then((r) => r.json() as Promise<{ ok: boolean; result?: { username?: string } }>).catch(() => null)
           : null;
@@ -396,7 +397,7 @@ export async function notifyExtraOptionApplied(clientId: string, paymentId: stri
   lines.push("", "Изменения вступили в силу мгновенно — можете пользоваться.");
 
   const cfg = await getSystemConfig();
-  const botToken = cfg.telegramBotToken?.trim();
+  const botToken = resolvePrimaryBotToken(cfg.telegramBotToken)?.token;
   if (!botToken) return;
   const replyMarkup = {
     inline_keyboard: [

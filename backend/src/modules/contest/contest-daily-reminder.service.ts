@@ -16,6 +16,7 @@
 import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { autoTransitionContestStatuses } from "./contest.service.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 
 const TELEGRAM_DELAY_MS = 80;
 const TELEGRAM_FETCH_TIMEOUT_MS = 10_000;
@@ -239,9 +240,9 @@ export async function runContestDailyReminder(): Promise<{ sent: number; errors:
   }
 
   const config = await getSystemConfig();
-  const botToken = config.telegramBotToken?.trim();
+  const botToken = resolvePrimaryBotToken(config.telegramBotToken)?.token;
   if (!botToken) {
-    console.warn("[contest-daily-reminder] telegram_bot_token not set, skip");
+    console.warn("[contest-daily-reminder] BOT_TOKEN/settings token not set, skip");
     return { sent: 0, errors: 0, ...transitions };
   }
 
@@ -369,8 +370,8 @@ export async function sendContestStartNotification(
   if (!contest) return { ok: false, error: "Конкурс не найден" };
 
   const config = await getSystemConfig();
-  const botToken = config.telegramBotToken?.trim();
-  if (!botToken) return { ok: false, error: "Не задан токен бота (Настройки → Telegram)" };
+  const botToken = resolvePrimaryBotToken(config.telegramBotToken)?.token;
+  if (!botToken) return { ok: false, error: "Не задан токен бота (BOT_TOKEN или Настройки → Telegram)" };
 
   const now = new Date();
   // Атомарно переводим в active + помечаем что старт-уведомление отправлено.
@@ -405,7 +406,7 @@ export async function sendContestDrawResults(contestId: string): Promise<void> {
   if (!contest || contest.winners.length === 0) return;
 
   const config = await getSystemConfig();
-  const botToken = config.telegramBotToken?.trim();
+  const botToken = resolvePrimaryBotToken(config.telegramBotToken)?.token;
   if (!botToken) return;
   const defaultCurrency = (config.defaultCurrency || "rub").toUpperCase();
   const cur = (contest.prizeBalanceCurrency || defaultCurrency).toUpperCase();

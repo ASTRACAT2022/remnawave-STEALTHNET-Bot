@@ -12,6 +12,7 @@ import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { markPaymentPaid } from "../payment/mark-paid.service.js";
 import { getBroadcastRecipientsCount, runBroadcast } from "../broadcast/broadcast.service.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 import {
   remnaGetUser,
   remnaGetInternalSquads,
@@ -546,11 +547,11 @@ botAdminRouter.post("/broadcast", async (req, res) => {
   let attachment: { buffer: Buffer; mimetype: string; originalname: string } | undefined;
   if (photoFileId) {
     const config = await getSystemConfig();
-    const botToken = (config.telegramBotToken ?? "").trim();
-    if (!botToken) {
+    const tokenInfo = resolvePrimaryBotToken(config.telegramBotToken);
+    if (!tokenInfo) {
       return res.status(500).json({ message: "Токен бота не настроен." });
     }
-    const file = await downloadTelegramFile(botToken, photoFileId);
+    const file = await downloadTelegramFile(tokenInfo.token, photoFileId);
     if (!file) {
       return res.status(400).json({ message: "Не удалось скачать фото из Telegram." });
     }

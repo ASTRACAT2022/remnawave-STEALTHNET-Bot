@@ -13,6 +13,7 @@ import { getSystemConfig } from "../client/client.service.js";
 import { sendEmail } from "../mail/mail.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
+import { resolvePrimaryBotToken } from "../bot/bot.service.js";
 
 // параметры throughput'а:
 // • Для ТЕКСТА Telegram global rate ~30 msg/sec — можно агрессивно.
@@ -583,11 +584,13 @@ export async function runBroadcast(options: {
   if (doTelegram) {
     progress.currentChannel = "telegram";
     report();
-    const botToken = config.telegramBotToken?.trim();
-    if (!botToken) {
-      result.errors.push("Telegram: не задан токен бота (Настройки → Почта и Telegram)");
+    const tokenInfo = resolvePrimaryBotToken(config.telegramBotToken);
+    if (!tokenInfo) {
+      result.errors.push("Telegram: не задан токен бота (BOT_TOKEN в .env или Настройки → Почта и Telegram)");
       result.ok = false;
     } else {
+      const botToken = tokenInfo.token;
+      console.log(`[broadcast] telegram bot token source: ${tokenInfo.source}`);
       // proxy URL берём ОДИН раз перед циклом
       // (раньше каждое сообщение делало getSystemConfig() → 50k DB roundtrips).
       const telegramProxy = await getProxyUrl("telegram");

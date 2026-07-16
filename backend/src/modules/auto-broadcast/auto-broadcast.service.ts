@@ -15,6 +15,7 @@ import { getSystemConfig } from "../client/client.service.js";
 import { sendEmail } from "../mail/mail.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
+import { resolvePrimaryBotToken, type PrimaryBotTokenSource } from "../bot/bot.service.js";
 
 /** Задержка между Telegram-сообщениями (мс). Telegram rate limit ~30 msg/sec, берём с запасом. */
 const TELEGRAM_DELAY_MS = 50;
@@ -120,7 +121,13 @@ function buildReplyMarkup(
   return { inline_keyboard: rows };
 }
 
-async function sendTelegram(botToken: string, chatId: string, text: string, replyMarkup?: InlineKeyboard): Promise<{ ok: boolean; error?: string }> {
+async function sendTelegram(
+  botToken: string,
+  chatId: string,
+  text: string,
+  replyMarkup?: InlineKeyboard,
+  tokenSource?: PrimaryBotTokenSource,
+): Promise<{ ok: boolean; error?: string }> {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   try {
     const payload: Record<string, unknown> = {
@@ -132,7 +139,7 @@ async function sendTelegram(botToken: string, chatId: string, text: string, repl
     if (replyMarkup) payload.reply_markup = replyMarkup;
     const proxy = await getProxyUrl("telegram");
     // T-debug (14.05.2026) — детальный лог для отладки авто-рассылки.
-    console.log(`${LOG_PREFIX} [DEBUG-SEND] POST chat=${chatId} proxy=${proxy ?? "none"} botToken=${botToken.slice(0, 10)}... text="${text.slice(0, 60).replace(/\n/g, " ")}"`);
+    console.log(`${LOG_PREFIX} [DEBUG-SEND] POST chat=${chatId} proxy=${proxy ?? "none"} tokenSource=${tokenSource ?? "unknown"} text="${text.slice(0, 60).replace(/\n/g, " ")}"`);
     const res = await proxyFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -709,12 +716,13 @@ export async function runRule(ruleId: string, opts?: { onlyClientId?: string }):
   const config = await getSystemConfig();
   const doTelegram = rule.channel === "telegram" || rule.channel === "both";
   const doEmail = rule.channel === "email" || rule.channel === "both";
-  const botToken = config.telegramBotToken?.trim();
+  const tokenInfo = resolvePrimaryBotToken(config.telegramBotToken);
+  const botToken = tokenInfo?.token;
 
   // Проверка конфигурации каналов
   if (doTelegram && !botToken) {
     console.error(
-      `${LOG_PREFIX} Rule "${rule.name}": telegram channel selected but telegram_bot_token is not configured in settings!`,
+      `${LOG_PREFIX} Rule "${rule.name}": telegram channel selected but BOT_TOKEN/settings token is not configured!`,
     );
   }
 
@@ -849,7 +857,7 @@ export async function runRule(ruleId: string, opts?: { onlyClientId?: string }):
 
     // Telegram (пропускаем, если клиенту уже отправили в этом прогоне — анти-задвоение)
     if (doTelegram && botToken && c.telegramId?.trim() && !alreadyMessagedClient) {
-      const tgResult = await sendTelegram(botToken, c.telegramId.trim(), perClientMessage, perClientMarkup);
+      const tgResult = await sendTelegram(botToken, c.telegramId.trim(), perClientMessage, perClientMarkup, tokenInfo?.source);
       telegramOk = tgResult.ok;
       if (telegramOk) clientMessagedThisRun.add(c.id);
       if (!telegramOk) {
