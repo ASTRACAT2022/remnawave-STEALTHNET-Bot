@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+}
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --muted: 214 32% 93%;
+    --muted-foreground: 215 16% 39%;
+    --accent: 214 32% 92%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --border: 214 24% 86%;
+    --input: 214 24% 86%;
+    --ring: 222.2 84% 4.9%;
+  }
+
+  .dark {
+    --background: 222 28% 8%;
+    --foreground: 210 40% 98%;
+    --card: 224 24% 12%;
+    --card-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --muted: 224 18% 16%;
+    --muted-foreground: 215 16% 70%;
+    --accent: 224 18% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --border: 224 16% 22%;
+    --input: 224 16% 22%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+}
+
+/* ── Simple Fast UI Overrides ── */
+@layer components {
+
+  /* Модальные окна — всегда непрозрачный фон (читаемо на любом фоне) */
+  .dialog-content-solid {
+    background-color: hsl(var(--card)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+
+  /* Панель навигации (хедер, сайдбар) */
+  .bg-background\/95 {
+    background-color: hsl(var(--background)) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: hsl(var(--border));
+  }
+
+  .border-b,
+  .border-r,
+  .border-t,
+  .border {
+    border-color: hsl(var(--border)) !important;
+  }
+
+  /* Инпуты */
+  .bg-transparent.border {
+    background-color: hsl(var(--background)) !important;
+    backdrop-filter: none;
+  }
+
+  /* Muted зоны (таблицы, плашки) */
+  .bg-muted,
+  .bg-muted\/50,
+  .bg-muted\/30 {
+    background-color: hsl(var(--muted)) !important;
+  }
+
+  /* ── Styled <select> elements ── */
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: hsl(var(--card)) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 0.5rem;
+    color: hsl(var(--foreground));
+    padding-right: 2rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1rem;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+    cursor: pointer;
+  }
+
+  select:hover {
+    background-color: hsl(var(--muted)) !important;
+    border-color: hsl(var(--ring)) !important;
+  }
+
+  select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--ring) / 0.18);
+    border-color: hsl(var(--ring)) !important;
+  }
+
+  select option {
+    background-color: hsl(var(--card));
+    color: hsl(var(--foreground));
+    padding: 0.5rem;
+  }
+}
+
+/* ── Fast Card Surface — вне @layer чтобы гарантированно побить Tailwind utilities ── */
+.glass-card {
+  background-color: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 1px 2px hsl(222 47% 11% / 0.06);
+}
+
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.backdrop-blur-3xl,
+.backdrop-blur-\[32px\],
+.backdrop-blur-\[100px\],
+.backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+[class*="shadow-[0_0"],
+[class*="shadow-[inset"],
+[class*="blur-"] {
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.admin-fast-ui [class*="backdrop-blur"],
+.admin-fast-ui [class*="blur-"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.admin-fast-ui [class*="shadow-2xl"],
+.admin-fast-ui [class*="shadow-xl"],
+.admin-fast-ui [class*="shadow-["] {
+  box-shadow: 0 1px 2px hsl(222 47% 11% / 0.08) !important;
+}
+
+.admin-fast-ui [class*="rounded-[2rem]"],
+.admin-fast-ui [class*="rounded-[1.5rem]"],
+.admin-fast-ui [class*="rounded-[1.35rem]"],
+.admin-fast-ui .rounded-3xl {
+  border-radius: 1rem !important;
+}
+
+.admin-fast-ui [class*="bg-background/"],
+.admin-fast-ui [class*="bg-card/"],
+.admin-fast-ui [class*="bg-white/10"],
+.admin-fast-ui [class*="dark:bg-white/5"] {
+  background-color: hsl(var(--card)) !important;
+}
+
+.admin-fast-ui [class*="border-white/"] {
+  border-color: hsl(var(--border)) !important;
+}
+
+.admin-fast-ui [class*="hover:scale"],
+.admin-fast-ui [class*="scale-"],
+.admin-fast-ui [class*="-translate-y"] {
+  transform: none !important;
+}
