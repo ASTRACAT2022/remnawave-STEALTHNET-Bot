@@ -19,7 +19,7 @@ interface AccentPalette {
 }
 
 export const ACCENT_PALETTES: Record<ThemeAccent, AccentPalette> = {
-  default: { label: "Стандарт", swatch: "#1e293b", light: {}, dark: {} },
+  default: { label: "Стандарт", swatch: "#3b82f6", light: {}, dark: {} },
   blue: { label: "Синяя", swatch: "#3b82f6", light: { "--primary": "217.2 91.2% 59.8%", "--primary-foreground": "0 0% 100%", "--ring": "217.2 91.2% 59.8%" }, dark: { "--primary": "217.2 91.2% 59.8%", "--primary-foreground": "0 0% 100%", "--ring": "217.2 91.2% 59.8%" } },
   violet: { label: "Фиолетовая", swatch: "#8b5cf6", light: { "--primary": "262.1 83.3% 57.8%", "--primary-foreground": "0 0% 100%", "--ring": "262.1 83.3% 57.8%" }, dark: { "--primary": "263.4 70% 50.4%", "--primary-foreground": "0 0% 100%", "--ring": "263.4 70% 50.4%" } },
   rose: { label: "Розовая", swatch: "#f43f5e", light: { "--primary": "346.8 77.2% 49.8%", "--primary-foreground": "0 0% 100%", "--ring": "346.8 77.2% 49.8%" }, dark: { "--primary": "346.8 77.2% 49.8%", "--primary-foreground": "0 0% 100%", "--ring": "346.8 77.2% 49.8%" } },
