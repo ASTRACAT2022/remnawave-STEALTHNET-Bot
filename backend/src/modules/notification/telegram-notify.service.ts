@@ -8,6 +8,7 @@ import { getSystemConfig } from "../client/client.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 /** Inline keyboard with a single "Back to menu" button for client notifications. */
 function backToMenuMarkup(backLabel?: string | null): Record<string, unknown> {
@@ -46,7 +47,7 @@ export async function sendTelegramToUser(
   const chatId = telegramId.trim();
   if (!chatId) return;
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const url = telegramApiUrl(token, "sendMessage");
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     text,
@@ -238,7 +239,7 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
         const cfg = await getSystemConfig();
         const botToken = resolvePrimaryBotToken(cfg.telegramBotToken)?.token;
         const botUsernameRes = botToken
-          ? await fetch(`https://api.telegram.org/bot${botToken}/getMe`).then((r) => r.json() as Promise<{ ok: boolean; result?: { username?: string } }>).catch(() => null)
+          ? await fetch(telegramApiUrl(botToken, "getMe")).then((r) => r.json() as Promise<{ ok: boolean; result?: { username?: string } }>).catch(() => null)
           : null;
         const botUsername = botUsernameRes?.result?.username ?? "bot";
         const giftUrl = `https://t.me/${botUsername}?start=gift_${codeResult.data.code}`;
@@ -268,7 +269,7 @@ export async function notifyTariffActivated(clientId: string, paymentId: string)
         const shareText = `У меня для тебя подарок 🎁\n \nПодписка на сервис безопасного удалённого доступа 🛡 \n\n💡 Нажми на ссылку, чтобы активировать:\n\n${giftUrl}`;
         const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(giftUrl)}&text=${encodeURIComponent(shareText)}`;
         if (botToken) {
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          await fetch(telegramApiUrl(botToken, "sendMessage"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -405,7 +406,7 @@ export async function notifyExtraOptionApplied(clientId: string, paymentId: stri
       [{ text: "🏠 Главное меню", callback_data: "menu:main" }],
     ],
   };
-  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  await fetch(telegramApiUrl(botToken, "sendMessage"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -651,7 +652,7 @@ export async function notifyClientAboutWithdrawalApproved(withdrawalId: string):
   // Фолбэк через Bot API напрямую.
   const botToken = process.env.BOT_TOKEN;
   if (!botToken) return;
-  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  await fetch(telegramApiUrl(botToken, "sendMessage"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: wr.client.telegramId, text, reply_markup: replyMarkup }),

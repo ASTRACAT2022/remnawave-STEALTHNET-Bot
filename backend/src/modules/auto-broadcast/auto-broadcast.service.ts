@@ -16,6 +16,7 @@ import { sendEmail } from "../mail/mail.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
 import { resolvePrimaryBotToken, type PrimaryBotTokenSource } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 /** Задержка между Telegram-сообщениями (мс). Telegram rate limit ~30 msg/sec, берём с запасом. */
 const TELEGRAM_DELAY_MS = 50;
@@ -128,7 +129,7 @@ async function sendTelegram(
   replyMarkup?: InlineKeyboard,
   tokenSource?: PrimaryBotTokenSource,
 ): Promise<{ ok: boolean; error?: string }> {
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const url = telegramApiUrl(botToken, "sendMessage");
   try {
     const payload: Record<string, unknown> = {
       chat_id: chatId,

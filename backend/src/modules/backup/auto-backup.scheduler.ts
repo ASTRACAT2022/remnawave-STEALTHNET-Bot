@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 const DEFAULT_CRON = "0 7 * * *";
 const LOG = "[auto-backup]";
@@ -19,7 +20,7 @@ async function sendDocumentToTelegram(
   filename: string,
   caption: string,
 ): Promise<boolean> {
-  const url = `https://api.telegram.org/bot${botToken}/sendDocument`;
+  const url = telegramApiUrl(botToken, "sendDocument");
   const form = new FormData();
   form.append("chat_id", chatId);
   if (topicId) form.append("message_thread_id", String(topicId));

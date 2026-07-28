@@ -77,6 +77,7 @@ import {
 import { runRule, runAllRules, getEligibleClientIds } from "../auto-broadcast/auto-broadcast.service.js";
 import { testNalogConnection } from "../nalog/nalog.service.js";
 import { adminCreateGiftCode } from "../gift/gift.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 import { languageRouter } from "./language.routes.js";
 import { adminGramadsRouter } from "./gramads.routes.js";
 
@@ -5566,7 +5567,7 @@ adminRouter.post("/gift-codes/create", asyncRoute(async (req, res) => {
     const cfg = await getSystemConfig();
     const botToken = (cfg.telegramBotToken || "").trim();
     if (botToken) {
-      const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`)
+      const meRes = await fetch(telegramApiUrl(botToken, "getMe"))
         .then((r) => r.json() as Promise<{ ok: boolean; result?: { username?: string } }>)
         .catch(() => null);
       const botUsername = meRes?.result?.username ?? "bot";
@@ -5585,7 +5586,7 @@ adminRouter.post("/gift-codes/create", asyncRoute(async (req, res) => {
             `${giftUrl}`;
           const shareText = `У меня для тебя подарок 🎁\n \nПодписка на сервис безопасного удалённого доступа 🛡 \n\n💡 Нажми на ссылку, чтобы активировать:\n\n${giftUrl}`;
           const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(giftUrl)}&text=${encodeURIComponent(shareText)}`;
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          await fetch(telegramApiUrl(botToken, "sendMessage"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

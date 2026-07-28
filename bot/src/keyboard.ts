@@ -1,6 +1,23 @@
 /**
  * Inline-клавиатуры с цветными кнопками (Telegram Bot API: style — primary, success, danger).
- * Эмодзи в тексте кнопок (Unicode).
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ * COLOR SEMANTICS (единая система для всего бота)
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *   success  — главный CTA: «Купить», «Оплатить», «Активировать»,
+ *              «Получить пробную», «Подписаться»
+ *   primary  — навигация и информационные: «Тарифы», «Профиль»,
+ *              «Прокси», «Устройства», «Реферальная»
+ *   danger   — деструктивные/возврат: «Назад», «Удалить»,
+ *              «Отменить код», «Заблокировать»
+ *   (default) — нейтральные: когда стиль не задан
+ *
+ * icon_custom_emoji_id — поддерживается для callback и url кнопок.
+ *   При отсутствии поддержки у клиента — просто игнорируется (graceful degradation).
+ *   При наличии premium-icon ведущий unicode-эмодзи УБИРАЕТСЯ из текста
+ *   чтобы не было двойной иконки.
+ * ═══════════════════════════════════════════════════════════════════
  */
 import { t as _t } from "./i18n.js";
 
@@ -88,11 +105,42 @@ function stripLeadingEmoji(text: string): string {
   return text.replace(LEADING_EMOJI_RE, "");
 }
 
+/**
+ * Safe button builder with graceful degradation.
+ * Handles icon_custom_emoji_id fallback: if the ID is empty or undefined,
+ * the button is created without it. Telegram clients that don't support
+ * custom emoji simply ignore the field — no errors.
+ */
 function btn(text: string, data: string, style?: ButtonStyle | null, iconCustomEmojiId?: string): InlineButton {
-  const finalText = iconCustomEmojiId ? stripLeadingEmoji(text) : text;
+  const safeIcon = iconCustomEmojiId?.trim() || undefined;
+  const finalText = safeIcon ? stripLeadingEmoji(text) : text;
   const b: InlineButton = { text: finalText, callback_data: data };
   if (style) b.style = style;
-  if (iconCustomEmojiId) b.icon_custom_emoji_id = iconCustomEmojiId;
+  if (safeIcon) b.icon_custom_emoji_id = safeIcon;
+  return b;
+}
+
+/**
+ * Build a URL button with graceful degradation for icon_custom_emoji_id.
+ */
+function urlBtn(text: string, url: string, style?: ButtonStyle | null, iconCustomEmojiId?: string): UrlButton {
+  const safeIcon = iconCustomEmojiId?.trim() || undefined;
+  const finalText = safeIcon ? stripLeadingEmoji(text) : text;
+  const b: UrlButton = { text: finalText, url };
+  if (style) b.style = style;
+  if (safeIcon) b.icon_custom_emoji_id = safeIcon;
+  return b;
+}
+
+/**
+ * Build a WebApp button with graceful degradation.
+ */
+function webAppBtn(text: string, webAppUrl: string, style?: ButtonStyle | null, iconCustomEmojiId?: string): WebAppButton {
+  const safeIcon = iconCustomEmojiId?.trim() || undefined;
+  const finalText = safeIcon ? stripLeadingEmoji(text) : text;
+  const b: WebAppButton = { text: finalText, web_app: { url: webAppUrl } };
+  if (style) b.style = style;
+  if (safeIcon) b.icon_custom_emoji_id = safeIcon;
   return b;
 }
 

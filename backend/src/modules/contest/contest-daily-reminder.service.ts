@@ -17,6 +17,7 @@ import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { autoTransitionContestStatuses } from "./contest.service.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 const TELEGRAM_DELAY_MS = 80;
 const TELEGRAM_FETCH_TIMEOUT_MS = 10_000;
@@ -46,7 +47,7 @@ async function sendTelegram(
   text: string,
   replyMarkup?: object,
 ): Promise<SendResult> {
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const url = telegramApiUrl(botToken, "sendMessage");
   try {
     const body: Record<string, unknown> = {
       chat_id: chatId,

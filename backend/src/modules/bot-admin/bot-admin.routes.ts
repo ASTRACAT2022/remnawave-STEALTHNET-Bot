@@ -13,6 +13,7 @@ import { getSystemConfig } from "../client/client.service.js";
 import { markPaymentPaid } from "../payment/mark-paid.service.js";
 import { getBroadcastRecipientsCount, runBroadcast } from "../broadcast/broadcast.service.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl, TELEGRAM_API_ROOT } from "../telegram/telegram-api-root.js";
 import {
   remnaGetUser,
   remnaGetInternalSquads,
@@ -521,11 +522,11 @@ const broadcastBodySchema = z.object({
 
 /** Скачать файл из Telegram по file_id. */
 async function downloadTelegramFile(botToken: string, fileId: string): Promise<{ buffer: Buffer; mimeType: string; originalname: string } | null> {
-  const getUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
+  const getUrl = `${TELEGRAM_API_ROOT}/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
   const getRes = await fetch(getUrl);
   const getData = (await getRes.json().catch(() => ({}))) as { ok?: boolean; result?: { file_path?: string } };
   if (!getRes.ok || !getData.ok || !getData.result?.file_path) return null;
-  const fileUrl = `https://api.telegram.org/file/bot${botToken}/${getData.result.file_path}`;
+  const fileUrl = `${TELEGRAM_API_ROOT}/file/bot${botToken}/${getData.result.file_path}`;
   const fileRes = await fetch(fileUrl);
   if (!fileRes.ok) return null;
   const buffer = Buffer.from(await fileRes.arrayBuffer());

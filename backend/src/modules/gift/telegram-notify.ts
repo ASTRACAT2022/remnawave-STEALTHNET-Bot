@@ -3,6 +3,8 @@
  * Использует BOT_TOKEN из env для прямых вызовов Telegram Bot API.
  */
 
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 /**
@@ -16,7 +18,7 @@ export async function sendTelegramNotification(
   if (!BOT_TOKEN) return;
   const chatId = String(telegramId);
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    await fetch(telegramApiUrl(BOT_TOKEN, "sendMessage"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

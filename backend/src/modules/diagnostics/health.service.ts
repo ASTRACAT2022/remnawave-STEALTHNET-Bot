@@ -17,6 +17,7 @@ import { prisma } from "../../db.js";
 import { getSystemConfig } from "../client/client.service.js";
 import { env } from "../../config/index.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 const exec = promisify(execCb);
 
@@ -81,7 +82,7 @@ async function checkBot(): Promise<HealthCheck> {
   if (!tokenInfo) return { name: "telegram_bot", status: "skip", detail: "not configured" };
 
   const t = await timed(async () => {
-    const res = await fetch(`https://api.telegram.org/bot${tokenInfo.token}/getMe`, {
+    const res = await fetch(telegramApiUrl(tokenInfo.token, "getMe"), {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

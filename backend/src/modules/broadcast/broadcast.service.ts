@@ -14,6 +14,7 @@ import { sendEmail } from "../mail/mail.service.js";
 import { proxyFetch } from "../proxy-util/proxy-fetch.js";
 import { getProxyUrl } from "../proxy-util/get-proxy-url.js";
 import { resolvePrimaryBotToken } from "../bot/bot.service.js";
+import { telegramApiUrl } from "../telegram/telegram-api-root.js";
 
 // параметры throughput'а:
 // • Для ТЕКСТА Telegram global rate ~30 msg/sec — можно агрессивно.
@@ -40,7 +41,6 @@ const TELEGRAM_MEDIA_DELAY_MS = envInt("BROADCAST_TELEGRAM_MEDIA_DELAY_MS", 180,
 const EMAIL_SEND_CONCURRENCY = envInt("BROADCAST_EMAIL_CONCURRENCY", 5, 1, 20);
 const EMAIL_SEND_DELAY_MS = envInt("BROADCAST_EMAIL_DELAY_MS", 100, 0, 10000);
 const TELEGRAM_429_MAX_RETRIES = 3;
-const TELEGRAM_API_ROOT = (process.env.TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/+$/, "");
 
 export type BroadcastChannel = "telegram" | "email" | "both";
 
@@ -57,9 +57,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function telegramApiUrl(botToken: string, method: string): string {
-  return `${TELEGRAM_API_ROOT}/bot${botToken}/${method}`;
-}
+// telegramApiUrl is now imported from shared utility
 
 function isTelegramParseError(error: string | undefined): boolean {
   const normalized = (error ?? "").toLowerCase();
