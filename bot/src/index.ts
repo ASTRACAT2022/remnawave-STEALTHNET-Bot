@@ -55,7 +55,8 @@ import {
   type InlineMarkup,
   type InnerEmojiIds,
 } from "./keyboard.js";
-import { t as _t, formatDays as _formatDays, setTranslations } from "./i18n.js";
+import { t as _t, formatDays as _formatDays, setTranslations, resolveEmoji } from "./i18n-enhanced.js";
+import { formatMoney as _formatMoney, currencySymbol as _currencySymbol, bytesToGb as _bytesToGb, progressBar as _progressBar } from "./modules/formatting/index.js";
 // 54-ФЗ-чек ЮКассы: prompt «нужен ли чек», ввод email, etc.
 import {
   storePendingReceipt,
@@ -527,13 +528,12 @@ function getSubUser(sub: unknown): Record<string, unknown> | null {
 }
 
 function bytesToGb(bytes: number): string {
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2);
+  return _bytesToGb(bytes);
 }
 
 /** Прогресс-бар из символов (0..1), длина barLen */
 function progressBar(pct: number, barLen: number): string {
-  const filled = Math.round(Math.max(0, Math.min(1, pct)) * barLen);
-  return "█".repeat(filled) + "░".repeat(barLen - filled);
+  return _progressBar(pct, barLen);
 }
 
 // подсказка под ссылкой подписки.
@@ -631,8 +631,7 @@ const RESET_MODE_LABELS: Record<string, string> = {
  * везде показывалось «₽» вместо «rub» / «RUB» / «руб». Mirrors keyboard.ts:currencySymbol.
  */
 function currencySymbol(currency: string): string {
-  const c = (currency || "").toUpperCase();
-  return c === "RUB" ? "₽" : c === "USD" ? "$" : c === "UAH" ? "₴" : c === "EUR" ? "€" : c;
+  return _currencySymbol(currency);
 }
 
 function formatTariffLine(tariff: TariffItem, fields: Required<BotTariffLineFields>): string {
@@ -733,32 +732,33 @@ function firstCharLengthUtf16(s: string): number {
   return cp != null && cp > 0xffff ? 2 : 1;
 }
 
-const DEFAULT_EMOJI_UNICODE: Record<string, string> = {
-  PACKAGE: "📦", TARIFFS: "📦", CARD: "💳", LINK: "🔗", PUZZLE: "👤", PROFILE: "👤",
-  TRIAL: "🎁", SERVERS: "🌐", CONNECT: "🌐",
-  CHART: "📊",
-  STATUS_ACTIVE: "🟡", STATUS_EXPIRED: "🔴", STATUS_INACTIVE: "🔴",
-  STATUS_LIMITED: "🟡", STATUS_DISABLED: "🔴",
-};
 const DEFAULT_CUSTOM_EMOJI_CHAR = "🙂";
 
+/** Resolve unicode fallback for a legacy emoji key using the centralized registry. */
+function getEmojiUnicode(
+  emojiKey: string,
+  botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null,
+): string {
+  return resolveEmoji(emojiKey, botEmojis).unicode;
+}
+
 const DEFAULT_MENU_EMOJI_KEY_BY_ID: Record<string, string> = {
-  tariffs: "PACKAGE",
-  proxy: "SERVERS",
-  my_proxy: "SERVERS",
-  singbox: "SERVERS",
-  my_singbox: "SERVERS",
-  profile: "PUZZLE",
-  devices: "DEVICES",
-  topup: "CARD",
-  referral: "LINK",
-  trial: "TRIAL",
-  vpn: "SERVERS",
-  cabinet: "SERVERS",
-  support: "NOTE",
-  tickets: "NOTE",
-  promocode: "STAR",
-  extra_options: "PACKAGE",
+  tariffs: "CONTENT_PACKAGE",
+  proxy: "CONTENT_LOCATION",
+  my_proxy: "CONTENT_LOCATION",
+  singbox: "CONTENT_LOCATION",
+  my_singbox: "CONTENT_LOCATION",
+  profile: "CONTENT_USER",
+  devices: "CONTENT_DEVICE",
+  topup: "PAY_CARD",
+  referral: "CONTENT_LINK",
+  trial: "ACTION_GIFT",
+  vpn: "CONTENT_LOCATION",
+  cabinet: "CONTENT_LOCATION",
+  support: "SYSTEM_TICKET",
+  tickets: "SYSTEM_TICKET",
+  promocode: "PAY_STAR",
+  extra_options: "CONTENT_PACKAGE",
 };
 
 function getMenuEmojiKey(
@@ -783,7 +783,7 @@ function titleWithEmoji(
     return { text: rest, entities: [] };
   }
   const entry = botEmojis?.[emojiKey];
-  const unicode = entry?.unicode?.trim() || DEFAULT_EMOJI_UNICODE[emojiKey] || "•";
+  const unicode = entry?.unicode?.trim() || getEmojiUnicode(emojiKey, botEmojis) || "•";
   const space = rest.startsWith("\n") ? "" : " ";
   const text = unicode + space + rest;
   const entities: CustomEmojiEntity[] = [];
@@ -821,7 +821,7 @@ function applyMarkdownAndEmoji(
         const key = rawText.slice(i + 2, end);
         if (/^[A-Z0-9_]+$/.test(key)) {
           const entry = botEmojis?.[key];
-          const fallbackUnicode = DEFAULT_EMOJI_UNICODE[key];
+          const fallbackUnicode = getEmojiUnicode(key, botEmojis);
           const unicode = entry?.unicode?.trim() || (entry?.tgEmojiId ? DEFAULT_CUSTOM_EMOJI_CHAR : "") || fallbackUnicode || "";
           if (unicode) {
             const off = out.length;
@@ -884,7 +884,7 @@ function applyCustomEmojiPlaceholders(
     const key = match[1]!;
     out += text.slice(lastIdx, match.index);
     const entry = botEmojis?.[key];
-    const fallbackUnicode = DEFAULT_EMOJI_UNICODE[key];
+    const fallbackUnicode = getEmojiUnicode(key, botEmojis);
     const unicode = entry?.unicode?.trim() || (entry?.tgEmojiId ? DEFAULT_CUSTOM_EMOJI_CHAR : "") || fallbackUnicode || "";
     if (unicode) {
       const offset = out.length;
@@ -907,7 +907,7 @@ function titleWithEmojiAndCustomEmojis(
   botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null
 ): { text: string; entities: CustomEmojiEntity[] } {
   const entry = botEmojis?.[emojiKey];
-  const unicode = entry?.unicode?.trim() || DEFAULT_EMOJI_UNICODE[emojiKey] || "•";
+  const unicode = entry?.unicode?.trim() || getEmojiUnicode(emojiKey, botEmojis) || "•";
   const space = rest.startsWith("\n") ? "" : " ";
   const leading = unicode + space;
   const { text: restText, entities: restEntities } = applyCustomEmojiPlaceholders(rest, botEmojis);
@@ -951,7 +951,7 @@ function parseSubInfo(item: {
   tariffDisplayName?: string | null;
   /** эмодзи-префикс из админки (Tariff.menuEmoji) — приоритетнее name-matching. */
   tariffMenuEmoji?: string | null;
-}): {
+}, botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null): {
   idx: number;
   typeEmoji: string;
   /** «🟢»/«🟡»/«🔴» — для текста (welcome). */
@@ -971,15 +971,15 @@ function parseSubInfo(item: {
   const inner = subData ? ((subData.response ?? subData.data ?? subData) as Record<string, unknown>) : null;
   const status = (inner?.status ?? inner?.userStatus ?? "ACTIVE") as string;
   const statusEmojiBig =
-    status === "ACTIVE" ? "🟢" :
-    status === "EXPIRED" ? "🔴" :
-    status === "LIMITED" ? "🟡" :
-    status === "DISABLED" ? "🔴" : "🟡";
+    status === "ACTIVE" ? getEmojiUnicode("STATUS_ACTIVE", botEmojis) :
+    status === "EXPIRED" ? getEmojiUnicode("STATUS_EXPIRED", botEmojis) :
+    status === "LIMITED" ? getEmojiUnicode("STATUS_LIMITED", botEmojis) :
+    status === "DISABLED" ? getEmojiUnicode("STATUS_DISABLED", botEmojis) : getEmojiUnicode("STATUS_LIMITED", botEmojis);
   const statusEmojiSmall =
-    status === "ACTIVE" ? "✅" :
-    status === "EXPIRED" ? "❌" :
-    status === "LIMITED" ? "🟡" :
-    status === "DISABLED" ? "❌" : "🟡";
+    status === "ACTIVE" ? getEmojiUnicode("STATUS_OK", botEmojis) :
+    status === "EXPIRED" ? getEmojiUnicode("STATUS_ERROR", botEmojis) :
+    status === "LIMITED" ? getEmojiUnicode("STATUS_LIMITED", botEmojis) :
+    status === "DISABLED" ? getEmojiUnicode("STATUS_ERROR", botEmojis) : getEmojiUnicode("STATUS_LIMITED", botEmojis);
   // эмодзи зависит от ТАРИФА, не от типа подписки (root/secondary).
   // Приоритет:
   //   1. tariffMenuEmoji — настраиваемое поле Tariff.menuEmoji из админки (если задано)
@@ -1053,8 +1053,8 @@ function formatSubLine(item: {
   /** T16 (12.05.2026) — название тарифа и кастомный эмодзи для главного меню. */
   tariffDisplayName?: string | null;
   tariffMenuEmoji?: string | null;
-}): string {
-  const { idx, typeEmoji, statusEmojiBig, daysStr, dateStr, trafficSuffix } = parseSubInfo(item);
+}, botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null): string {
+  const { idx, typeEmoji, statusEmojiBig, daysStr, dateStr, trafficSuffix } = parseSubInfo(item, botEmojis);
   return `${statusEmojiBig} ${typeEmoji} Подписка #${idx} — **${daysStr}** до ${dateStr}${trafficSuffix}`;
 }
 
@@ -1136,7 +1136,7 @@ function buildMainMenuText(opts: {
         return (a.subscriptionIndex ?? 0) - (b.subscriptionIndex ?? 0);
       });
       for (const item of sorted) {
-        pushRaw(formatSubLine(item));
+        pushRaw(formatSubLine(item, botEmojis));
       }
     }
   }
@@ -1247,6 +1247,74 @@ function buildMainMenuText(opts: {
   return { text, entities };
 }
 
+/**
+ * Единый helper для построения payload главного меню.
+ * Используется в /start, welcome:continue и menu:main — убирает дублирование
+ * логики запроса данных + buildMainMenuText + mainMenu + admin button.
+ */
+async function renderMainMenu(
+  token: string,
+  userId: number,
+  config: ConfigSnapshot | null,
+): Promise<{
+  text: string;
+  entities: CustomEmojiEntity[];
+  markup: InlineMarkup;
+  config: ConfigSnapshot | null;
+}> {
+  const [client, subRes, proxyRes, singboxRes, allSubsRes] = await Promise.all([
+    api.getMe(token),
+    api.getSubscription(token).catch(() => ({ subscription: null })),
+    api.getPublicProxyTariffs().catch(() => ({ items: [] })),
+    api.getPublicSingboxTariffs().catch(() => ({ items: [] })),
+    api.getAllSubscriptions(token).catch(() => ({ items: [] })),
+  ]);
+  if (client?.preferredLang) setUserLang(userId, client.preferredLang);
+  const vpnUrl = getSubscriptionUrl(subRes.subscription);
+  const trialAvail = await api.getAvailableTrials(token).catch(() => ({ items: [], hasAnyEnabled: false }));
+  const showTrial = trialAvail.hasAnyEnabled
+    ? trialAvail.items.length > 0
+    : Boolean(config?.trialEnabled && !client?.trialUsed);
+  const showProxy = proxyRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
+  const showSingbox = singboxRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
+  const name = config?.serviceName?.trim() || "Кабинет";
+  const { text, entities } = buildMainMenuText({
+    serviceName: name,
+    balance: client?.balance ?? 0,
+    currency: client?.preferredCurrency ?? config?.defaultCurrency ?? "usd",
+    subscription: subRes.subscription,
+    tariffDisplayName: (subRes as { tariffDisplayName?: string | null }).tariffDisplayName ?? null,
+    menuTexts: config?.botMenuTexts ?? config?.resolvedBotMenuTexts ?? null,
+    menuLineVisibility: config?.botMenuLineVisibility ?? null,
+    menuTextCustomEmojiIds: config?.menuTextCustomEmojiIds ?? null,
+    botEmojis: config?.botEmojis ?? null,
+    infoBlock: config?.botInfoBlock ?? null,
+    allSubs: allSubsRes,
+  });
+  const hasVideoInstructions = config?.videoInstructionsEnabled && (config?.videoInstructions?.length ?? 0) > 0;
+  const hasSupportLinks = !!(config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink || hasVideoInstructions);
+  const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
+  const markup = mainMenu({
+    showTrial,
+    showVpn: Boolean(vpnUrl) || (allSubsRes.items?.length ?? 0) > 0,
+    showProxy,
+    showSingbox,
+    showGift: config?.giftSubscriptionsEnabled === true,
+    appUrl,
+    botButtons: config?.botButtons ?? null,
+    botBackLabel: config?.botBackLabel ?? null,
+    hasSupportLinks,
+    showTickets: config?.ticketsEnabled === true,
+    showExtraOptions: config?.sellOptionsEnabled === true && (config?.sellOptions?.length ?? 0) > 0,
+    buttonsPerRow: config?.botButtonsPerRow ?? 1,
+    remnaSubscriptionUrl: config?.useRemnaSubscriptionPage ? vpnUrl : null,
+  });
+  if (config?.botAdminTelegramIds?.includes(String(userId))) {
+    markup.inline_keyboard.push([{ text: "⚙️ Панель админа", callback_data: "admin:menu" }]);
+  }
+  return { text, entities, markup, config };
+}
+
 const TELEGRAM_CAPTION_MAX = 1024;
 
 /** Логотип из настроек: data URL или URL → источник для sendPhoto/sendAnimation и признак GIF */
@@ -1341,9 +1409,7 @@ function buildHelpScreen(opts: {
 }
 
 function formatMoney(amount: number, currency: string): string {
-  const c = currency.toUpperCase();
-  const sym = c === "RUB" ? "₽" : c === "USD" ? "$" : "₴";
-  return `${amount} ${sym}`;
+  return _formatMoney(amount, currency.toUpperCase());
 }
 
 /** Рассчитать цену со скидкой */
@@ -1834,10 +1900,8 @@ composer.command("subscriptions", async (ctx) => {
     const cfg = await api.getPublicConfig().catch(() => null);
     const bodyLines = [`📋 Мои подписки (**${sorted.length}**)`, ""];
     const buttonItems = sorted.map((it) => {
-      const info = parseSubInfo(it);
+      const info = parseSubInfo(it, cfg?.botEmojis);
       const trialBodyMark = it.trialId ? " 🎁" : "";
-      // без названия тарифа в текстовой строке —
-      // для истёкших «❌ истекла», для активных «N дн. до DD.MM.YYYY [+трафик]».
       if (info.isExpired) {
         bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — ❌ истекла`);
       } else {
@@ -2149,61 +2213,12 @@ composer.on("callback_query:data", async (ctx) => {
     try {
       // Помечаем что онбординг пройден (чтобы при showOnce=true приветствие больше не показывалось)
       await api.completeOnboarding(token).catch(() => {});
-      const config = await api.getPublicConfig();
-      if (config?.translations) setTranslations(config.translations);
-      const me = await api.getMe(token);
-      const [subRes, proxyRes, singboxRes, allSubsRes] = await Promise.all([
-        api.getSubscription(token).catch(() => ({ subscription: null })),
-        api.getPublicProxyTariffs().catch(() => ({ items: [] })),
-        api.getPublicSingboxTariffs().catch(() => ({ items: [] })),
-        // для блок подписок в welcome.
-        api.getAllSubscriptions(token).catch(() => ({ items: [] })),
-      ]);
-      const vpnUrl = getSubscriptionUrl(subRes.subscription);
-      // T15: новый/legacy flow.
-      const trialAvail = await api.getAvailableTrials(token).catch(() => ({ items: [], hasAnyEnabled: false }));
-      const showTrial = trialAvail.hasAnyEnabled
-        ? trialAvail.items.length > 0
-        : Boolean(config?.trialEnabled && !me.trialUsed);
-      const showProxy = proxyRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
-      const showSingbox = singboxRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
-      const appUrl = config?.publicAppUrl?.replace(/\/$/, "") ?? null;
-      const { text, entities } = buildMainMenuText({
-        serviceName: config?.serviceName?.trim() || "Кабинет",
-        balance: me.balance ?? 0,
-        currency: me.preferredCurrency ?? config?.defaultCurrency ?? "usd",
-        subscription: subRes.subscription,
-        tariffDisplayName: (subRes as { tariffDisplayName?: string | null }).tariffDisplayName ?? null,
-        menuTexts: config?.botMenuTexts ?? config?.resolvedBotMenuTexts ?? null,
-        menuLineVisibility: config?.botMenuLineVisibility ?? null,
-        menuTextCustomEmojiIds: config?.menuTextCustomEmojiIds ?? null,
-        botEmojis: config?.botEmojis ?? null,
-        infoBlock: config?.botInfoBlock ?? null,
-        allSubs: allSubsRes,
-      });
-      const hasVideoInstructions = config?.videoInstructionsEnabled && (config?.videoInstructions?.length ?? 0) > 0;
-      const hasSupportLinks = !!(config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink || hasVideoInstructions);
-      const markup = mainMenu({
-        showTrial,
-        // T-fix (11.05.2026): кнопка vpn доступна если есть ЛЮБАЯ подписка (включая secondary/триал).
-        showVpn: Boolean(vpnUrl) || (allSubsRes.items?.length ?? 0) > 0,
-        showProxy,
-        showSingbox,
-        showGift: config?.giftSubscriptionsEnabled === true,
-        appUrl,
-        botButtons: config?.botButtons ?? null,
-        botBackLabel: config?.botBackLabel ?? null,
-        hasSupportLinks,
-        showTickets: config?.ticketsEnabled === true,
-        showExtraOptions: config?.sellOptionsEnabled === true && (config?.sellOptions?.length ?? 0) > 0,
-        buttonsPerRow: config?.botButtonsPerRow ?? 1,
-        remnaSubscriptionUrl: config?.useRemnaSubscriptionPage ? vpnUrl : null,
-      });
-      const isBotAdmin = config?.botAdminTelegramIds?.includes(String(userId)) ?? false;
-      if (isBotAdmin) markup.inline_keyboard.push([{ text: "⚙️ Панель админа", callback_data: "admin:menu" }]);
+      const cfg = await api.getPublicConfig();
+      if (cfg?.translations) setTranslations(cfg.translations);
+      const { text, entities, markup, config: mainCfg } = await renderMainMenu(token, userId, cfg);
       // Нельзя editMessageContent у photo — отправляем новое сообщение и удаляем старое
       const cbMsg = ctx.callbackQuery?.message;
-      const media = logoToMediaSource(config?.logoBot);
+      const media = logoToMediaSource(mainCfg?.logoBot);
       if (media) {
         const caption = text.length > TELEGRAM_CAPTION_MAX ? text.slice(0, TELEGRAM_CAPTION_MAX - 3) + "..." : text;
         const captionEntities = text.length > TELEGRAM_CAPTION_MAX && entities.length ? entities.filter((e) => e.offset + e.length <= TELEGRAM_CAPTION_MAX - 3) : entities;
@@ -2790,66 +2805,14 @@ composer.on("callback_query:data", async (ctx) => {
     if (data === "menu:main") {
       // defensive cleanup — выходя в главное меню сбрасываем addsub-флаг.
       addsubPending.delete(userId);
-      const [client, subRes, proxyRes, singboxRes, allSubsRes] = await Promise.all([
-        api.getMe(token),
-        api.getSubscription(token).catch(() => ({ subscription: null })),
-        api.getPublicProxyTariffs().catch(() => ({ items: [] })),
-        api.getPublicSingboxTariffs().catch(() => ({ items: [] })),
-        // для блок подписок в welcome (нагрузка + список подписок).
-        api.getAllSubscriptions(token).catch(() => ({ items: [] })),
-      ]);
-      if (client?.preferredLang) setUserLang(userId, client.preferredLang);
-      const vpnUrl = getSubscriptionUrl(subRes.subscription);
-      // если в админке настроены trials → используем их (скрываем
-      // кнопку когда юзер всё взял); иначе fallback на legacy single-trial.
-      const trialAvail = await api.getAvailableTrials(token).catch(() => ({ items: [], hasAnyEnabled: false }));
-      const showTrial = trialAvail.hasAnyEnabled
-        ? trialAvail.items.length > 0
-        : Boolean(config?.trialEnabled && !client?.trialUsed);
-      const showProxy = proxyRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
-      const showSingbox = singboxRes.items?.some((c: { tariffs: unknown[] }) => c.tariffs?.length > 0) ?? false;
-      const name = config?.serviceName?.trim() || "Кабинет";
-      const { text, entities } = buildMainMenuText({
-        serviceName: name,
-        balance: client?.balance ?? 0,
-        currency: client?.preferredCurrency ?? config?.defaultCurrency ?? "usd",
-        subscription: subRes.subscription,
-        tariffDisplayName: (subRes as { tariffDisplayName?: string | null }).tariffDisplayName ?? null,
-        menuTexts: config?.botMenuTexts ?? config?.resolvedBotMenuTexts ?? null,
-        menuLineVisibility: config?.botMenuLineVisibility ?? null,
-        menuTextCustomEmojiIds: config?.menuTextCustomEmojiIds ?? null,
-        botEmojis: config?.botEmojis ?? null,
-        infoBlock: config?.botInfoBlock ?? null,
-        allSubs: allSubsRes,
-      });
-      const hasVideoInstructionsCb = config?.videoInstructionsEnabled && (config?.videoInstructions?.length ?? 0) > 0;
-      const hasSupportLinks = !!(config?.supportLink || config?.agreementLink || config?.offerLink || config?.instructionsLink || hasVideoInstructionsCb);
-      const backMarkup = mainMenu({
-        showTrial,
-        // T-fix (11.05.2026): кнопка vpn доступна если есть ЛЮБАЯ подписка (включая secondary/триал).
-        showVpn: Boolean(vpnUrl) || (allSubsRes.items?.length ?? 0) > 0,
-        showProxy,
-        showSingbox,
-        showGift: config?.giftSubscriptionsEnabled === true,
-        appUrl,
-        botButtons: config?.botButtons ?? null,
-        botBackLabel: config?.botBackLabel ?? null,
-        hasSupportLinks,
-        showTickets: config?.ticketsEnabled === true,
-        showExtraOptions: config?.sellOptionsEnabled === true && (config?.sellOptions?.length ?? 0) > 0,
-        buttonsPerRow: config?.botButtonsPerRow ?? 1,
-        remnaSubscriptionUrl: config?.useRemnaSubscriptionPage ? vpnUrl : null,
-      });
-      if (config?.botAdminTelegramIds?.includes(String(userId))) {
-        backMarkup.inline_keyboard.push([{ text: "⚙️ Панель админа", callback_data: "admin:menu" }]);
-      }
+      const { text, entities, markup: backMarkup, config: cfg } = await renderMainMenu(token, userId, config);
 
       // If current message is text-only (no photo/animation) but logo is configured,
       // delete the text message and re-send the main menu with the logo image.
       const cbMsg = ctx.callbackQuery?.message;
       const cbHasPhoto = cbMsg && typeof cbMsg === "object" && "photo" in cbMsg && Array.isArray((cbMsg as { photo: unknown[] }).photo) && (cbMsg as { photo: unknown[] }).photo.length > 0;
       const cbHasAnimation = cbMsg && typeof cbMsg === "object" && "animation" in cbMsg && (cbMsg as { animation: unknown }).animation != null;
-      const media = logoToMediaSource(config?.logoBot);
+      const media = logoToMediaSource(cfg?.logoBot);
       if (!cbHasPhoto && !cbHasAnimation && media && ctx.chat?.id) {
         await ctx.deleteMessage().catch(() => {});
         const caption = text.length > TELEGRAM_CAPTION_MAX ? text.slice(0, TELEGRAM_CAPTION_MAX - 3) + "..." : text;
@@ -3073,7 +3036,7 @@ composer.on("callback_query:data", async (ctx) => {
       const tariffsEmojiKey = getMenuEmojiKey(config, "tariffs");
       const tariffsEmojiEntry = tariffsEmojiKey ? config?.botEmojis?.[tariffsEmojiKey] : undefined;
       const tariffsEmojiUnicode = tariffsEmojiKey && !tariffsEmojiEntry?.tgEmojiId
-        ? (tariffsEmojiEntry?.unicode?.trim() || DEFAULT_EMOJI_UNICODE[tariffsEmojiKey])
+        ? (tariffsEmojiEntry?.unicode?.trim() || getEmojiUnicode(tariffsEmojiKey, config?.botEmojis))
         : undefined;
       const tariffsEmojiIds = innerEmojiIds && tariffsEmojiEntry?.tgEmojiId
         ? { ...innerEmojiIds, tariff: tariffsEmojiEntry.tgEmojiId }
@@ -3111,7 +3074,7 @@ composer.on("callback_query:data", async (ctx) => {
       const tariffsEmojiKey = getMenuEmojiKey(config, "tariffs");
       const tariffsEmojiEntry = tariffsEmojiKey ? config?.botEmojis?.[tariffsEmojiKey] : undefined;
       const tariffsEmojiUnicode = tariffsEmojiKey && !tariffsEmojiEntry?.tgEmojiId
-        ? (tariffsEmojiEntry?.unicode?.trim() || DEFAULT_EMOJI_UNICODE[tariffsEmojiKey])
+        ? (tariffsEmojiEntry?.unicode?.trim() || getEmojiUnicode(tariffsEmojiKey, config?.botEmojis))
         : undefined;
       const tariffsEmojiIds = innerEmojiIds && tariffsEmojiEntry?.tgEmojiId
         ? { ...innerEmojiIds, tariff: tariffsEmojiEntry.tgEmojiId }
@@ -5195,7 +5158,7 @@ composer.on("callback_query:data", async (ctx) => {
         const bodyLines: string[] = ["🔌 Выберите подписку для продления:", ""];
         const rows: { text: string; callback_data: string }[][] = [];
         for (const s of sorted) {
-          const info = parseSubInfo(s);
+          const info = parseSubInfo(s, config?.botEmojis);
           const idx = s.subscriptionIndex ?? 0;
           // primary slot = «Главная», остальные = «#N»
           const typeText = idx === 0 ? "🌟 Главная" : `Подписка #${idx}`;
@@ -6301,7 +6264,7 @@ composer.on("callback_query:data", async (ctx) => {
         ];
         const rows: { text: string; callback_data: string }[][] = [];
         for (const s of sorted) {
-          const info = parseSubInfo(s);
+          const info = parseSubInfo(s, config?.botEmojis);
           const idx = s.subscriptionIndex ?? 0;
           const tariff = (s.tariffDisplayName || "—").slice(0, 30);
           const trialMark = s.trialId ? " 🎁" : "";
@@ -6352,7 +6315,7 @@ composer.on("callback_query:data", async (ctx) => {
         // Дни жирные (через **markdown** + applyMarkdownAndEmoji).
         const bodyLines = [`📋 Мои подписки (**${sorted.length}**)`, ""];
         const buttonItems = sorted.map((it) => {
-          const info = parseSubInfo(it);
+          const info = parseSubInfo(it, config?.botEmojis);
           // T15.4: маркер 🎁 для триал-подписок в текстовой строке (под лимит callback_data
           // в кнопках уже не влезает, поэтому только в body).
           const trialBodyMark = it.trialId ? " 🎁" : "";
