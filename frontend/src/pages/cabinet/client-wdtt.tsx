@@ -534,7 +534,7 @@ export function ClientWdttPage() {
                     OlcRTC
                   </h1>
                   <p className="mt-3 text-[16px] text-muted-foreground max-w-xl leading-relaxed">
-                    WireGuard-over-TURN VPN для Android. Безопасное и быстрое подключение через TURN-ретрансляторы.
+                    Маскирует сетевой трафик под разрешённые видеозвонки (WebRTC).
                   </p>
                 </div>
               </div>
