@@ -2,7 +2,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireClientAuth } from "../client/client.middleware.js";
-import { configureOlcRtcSlotForClient } from "./wdtt-slots-activation.service.js";
+import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient } from "./wdtt-slots-activation.service.js";
 
 type AuthRequest = express.Request & { clientId: string };
 
@@ -67,6 +67,13 @@ wdttClientRouter.post("/slots/:id/configure", asyncRoute(async (req, res) => {
   } catch (error) {
     return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось настроить подключение" });
   }
+}));
+
+// POST /api/client/olcrtc/slots/recover — creates a missing slot for an already paid purchase.
+wdttClientRouter.post("/slots/recover", asyncRoute(async (req, res) => {
+  const result = await recoverWdttSlotsForClient((req as AuthRequest).clientId);
+  if (!result.ok) return res.status(result.status).json({ message: result.error });
+  return res.json({ success: true, slotsCreated: result.slotsCreated });
 }));
 
 wdttClientRouter.get("/tariffs", asyncRoute(async (_req, res) => {

@@ -80,6 +80,7 @@ export function ClientWdttPage() {
   const [configRoomId, setConfigRoomId] = useState("");
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("tariffs");
 
   const isMobileOrMiniapp = useCabinetMiniapp();
@@ -144,6 +145,20 @@ export function ClientWdttPage() {
       setConfigError(error instanceof Error ? error.message : "Не удалось настроить подключение");
     } finally {
       setConfigLoading(false);
+    }
+  }
+
+  async function recoverPurchase() {
+    if (!token) return;
+    setRecoveryLoading(true);
+    try {
+      await api.recoverWdttSlots(token);
+      const response = await api.getWdttSlots(token);
+      setSlots(response.items ?? []);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Не удалось найти оплаченную покупку");
+    } finally {
+      setRecoveryLoading(false);
     }
   }
 
@@ -749,6 +764,9 @@ export function ClientWdttPage() {
                     <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
                       <Wifi className="h-12 w-12 opacity-20" />
                       <p>У вас пока нет активных подписок OlcRTC. Купите тариф во вкладке «Купить».</p>
+                      <Button variant="outline" onClick={recoverPurchase} disabled={recoveryLoading}>
+                        {recoveryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Проверить оплаченную покупку
+                      </Button>
                     </CardContent>
                   </Card>
                 ) : (

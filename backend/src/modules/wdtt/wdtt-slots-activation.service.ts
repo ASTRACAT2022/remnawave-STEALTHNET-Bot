@@ -10,6 +10,10 @@ export type CreateWdttSlotsResult =
   | { ok: true; slotsCreated: number; slotIds: string[] }
   | { ok: false; error: string; status: number };
 
+export type RecoverWdttSlotsResult =
+  | { ok: true; slotsCreated: number; slotIds: string[] }
+  | { ok: false; error: string; status: number };
+
 type OlcRtcLinkNode = {
   id: string;
   name: string;
@@ -195,4 +199,26 @@ export async function createWdttSlotsByPaymentId(paymentId: string): Promise<Cre
     where: { id: result.node.id }, data: { currentSlots: { increment: 1 } },
   })));
   return { ok: true, slotsCreated: created.length, slotIds: created.map((slot) => slot.id) };
+}
+
+/**
+ * A payment can be confirmed while a node is temporarily offline. Do not make
+ * the buyer pay again: this explicit recovery retries only PAID payments that
+ * still have no slot at all.
+ */
+export async function recoverWdttSlotsForClient(clientId: string): Promise<RecoverWdttSlotsResult> {
+  const payments = await prisma.payment.findMany({
+    where: { clientId, status: "PAID", wdttTariffId: { not: null }, wdttSlots: { none: {} } },
+    select: { id: true },
+    orderBy: { paidAt: "asc" },
+  });
+  if (!payments.length) return { ok: false, error: "Не найдено оплаченных OlcRTC-тарифов без доступа", status: 404 };
+
+  const slotIds: string[] = [];
+  for (const payment of payments) {
+    const result = await createWdttSlotsByPaymentId(payment.id);
+    if (!result.ok) return result;
+    slotIds.push(...result.slotIds);
+  }
+  return { ok: true, slotsCreated: slotIds.length, slotIds };
 }
