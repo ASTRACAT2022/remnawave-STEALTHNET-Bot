@@ -1,6 +1,8 @@
 import express, { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireClientAuth } from "../client/client.middleware.js";
+import { configureOlcRtcSlotForClient } from "./wdtt-slots-activation.service.js";
 
 type AuthRequest = express.Request & { clientId: string };
 
@@ -39,9 +41,32 @@ wdttClientRouter.get("/slots", asyncRoute(async (req, res) => {
       trafficLimitBytes: s.trafficLimitBytes?.toString() ?? null,
       trafficUsedBytes: s.trafficUsedBytes.toString(),
       status: s.status,
+      requiresConfiguration: s.status === "PENDING_CONFIG",
       createdAt: s.createdAt.toISOString(),
     })),
   });
+}));
+
+const configureSlotSchema = z.object({
+  provider: z.enum(["telemost", "wbstream"]),
+  roomId: z.string().trim().min(1, "Вставьте ссылку или ID комнаты").max(1000),
+});
+
+// POST /api/client/olcrtc/slots/:id/configure — client selects carrier and their room.
+wdttClientRouter.post("/slots/:id/configure", asyncRoute(async (req, res) => {
+  const body = configureSlotSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+  try {
+    const result = await configureOlcRtcSlotForClient({
+      clientId: (req as AuthRequest).clientId,
+      slotId: req.params.id,
+      provider: body.data.provider,
+      roomId: body.data.roomId,
+    });
+    return res.json({ success: true, wdttLink: result.link });
+  } catch (error) {
+    return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось настроить подключение" });
+  }
 }));
 
 wdttClientRouter.get("/tariffs", asyncRoute(async (_req, res) => {

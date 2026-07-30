@@ -764,6 +764,9 @@ model WdttNode {
   olcrtcRoomId       String    @default("") @map("olcrtc_room_id")
   olcrtcKey          String    @default("") @map("olcrtc_key")
   olcrtcPayload      String?   @map("olcrtc_payload")
+  olcrtcProvisionMode String   @default("STATIC") @map("olcrtc_provision_mode") // STATIC | PER_CLIENT
+  olcrtcProvisionerUrl String? @map("olcrtc_provisioner_url")
+  olcrtcProvisionerToken String? @map("olcrtc_provisioner_token")
   capacity           Int?
   currentSlots       Int       @default(0) @map("current_slots")
   createdAt          DateTime  @default(now()) @map("created_at")

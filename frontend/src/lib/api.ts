@@ -699,7 +699,7 @@ export const api = {
     return request("/admin/olcrtc/nodes", { token });
   },
 
-  async createWdttNode(token: string, data?: { name?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; capacity?: number | null }): Promise<CreateWdttNodeResponse> {
+  async createWdttNode(token: string, data?: { name?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT"; provisionerUrl?: string | null; provisionerToken?: string | null; capacity?: number | null }): Promise<CreateWdttNodeResponse> {
     return request("/admin/olcrtc/nodes", { method: "POST", body: JSON.stringify(data ?? {}), token });
   },
 
@@ -707,7 +707,7 @@ export const api = {
     return request(`/admin/olcrtc/nodes/${id}`, { token });
   },
 
-  async updateWdttNode(token: string, id: string, data: { name?: string; status?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; capacity?: number | null }): Promise<unknown> {
+  async updateWdttNode(token: string, id: string, data: { name?: string; status?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT"; provisionerUrl?: string | null; provisionerToken?: string | null; capacity?: number | null }): Promise<unknown> {
     return request(`/admin/olcrtc/nodes/${id}`, { method: "PATCH", body: JSON.stringify(data), token });
   },
 
@@ -772,6 +772,9 @@ export const api = {
   // ——— WDTT Client ———
   async getWdttSlots(token: string): Promise<{ items: WdttClientSlotItem[] }> {
     return request("/client/olcrtc/slots", { token });
+  },
+  async configureWdttSlot(token: string, id: string, data: { provider: "telemost" | "wbstream"; roomId: string }): Promise<{ success: boolean; wdttLink: string }> {
+    return request(`/client/olcrtc/slots/${id}/configure`, { method: "POST", body: JSON.stringify(data), token });
   },
   async getWdttClientTariffs(token: string): Promise<{ items: WdttClientCategoryItem[] }> {
     return request("/client/olcrtc/tariffs", { token });
@@ -4839,6 +4842,9 @@ export interface WdttNodeListItem {
   roomId: string;
   encryptionKey: string;
   payload: string | null;
+  provisionMode: "STATIC" | "PER_CLIENT";
+  provisionerUrl: string | null;
+  provisionerToken: string | null;
   dtlsPort: number;
   wgPort: number;
   tunPort: number;
@@ -4849,7 +4855,7 @@ export interface WdttNodeListItem {
 }
 
 export interface CreateWdttNodeResponse {
-  node: { id: string; name: string; status: string; provider: string; transport: string; roomId: string; encryptionKey: string; payload: string | null; capacity: number | null; createdAt: string };
+  node: { id: string; name: string; status: string; provider: string; transport: string; roomId: string; encryptionKey: string; payload: string | null; provisionMode: "STATIC" | "PER_CLIENT"; provisionerUrl: string | null; capacity: number | null; createdAt: string };
   instructions: string;
 }
 
@@ -4866,6 +4872,9 @@ export interface WdttNodeDetail {
   roomId: string;
   encryptionKey: string;
   payload: string | null;
+  provisionMode: "STATIC" | "PER_CLIENT";
+  provisionerUrl: string | null;
+  provisionerToken: string | null;
   dtlsPort: number;
   wgPort: number;
   tunPort: number;
@@ -4947,6 +4956,7 @@ export interface WdttClientSlotItem {
   trafficLimitBytes: string | null;
   trafficUsedBytes: string;
   status: string;
+  requiresConfiguration: boolean;
   createdAt: string;
 }
 

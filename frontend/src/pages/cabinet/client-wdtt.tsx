@@ -75,6 +75,11 @@ export function ClientWdttPage() {
   const [payError, setPayError] = useState<string | null>(null);
   const [readyUrl, setReadyUrl] = useState<{ url: string; provider: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [configSlot, setConfigSlot] = useState<WdttClientSlotItem | null>(null);
+  const [configProvider, setConfigProvider] = useState<"telemost" | "wbstream">("telemost");
+  const [configRoomId, setConfigRoomId] = useState("");
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("tariffs");
 
   const isMobileOrMiniapp = useCabinetMiniapp();
@@ -123,6 +128,23 @@ export function ClientWdttPage() {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  }
+
+  async function configureSlot() {
+    if (!token || !configSlot || !configRoomId.trim()) return;
+    setConfigLoading(true);
+    setConfigError(null);
+    try {
+      await api.configureWdttSlot(token, configSlot.id, { provider: configProvider, roomId: configRoomId.trim() });
+      const response = await api.getWdttSlots(token);
+      setSlots(response.items ?? []);
+      setConfigSlot(null);
+      setConfigRoomId("");
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "Не удалось настроить подключение");
+    } finally {
+      setConfigLoading(false);
+    }
   }
 
   async function payByBalance(tariff: WdttTariff) {
@@ -481,7 +503,8 @@ export function ClientWdttPage() {
   };
 
   const activeSlots = slots.filter((s) => s.status === "ACTIVE");
-  const expiredSlots = slots.filter((s) => s.status !== "ACTIVE");
+  const pendingSlots = slots.filter((s) => s.requiresConfiguration || s.status === "PENDING_CONFIG");
+  const expiredSlots = slots.filter((s) => s.status !== "ACTIVE" && s.status !== "PENDING_CONFIG");
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -775,6 +798,31 @@ export function ClientWdttPage() {
                       </div>
                     )}
 
+                    {pendingSlots.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3 px-1">Требуется настройка ({pendingSlots.length})</h3>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {pendingSlots.map((s) => (
+                            <Card key={s.id} className="rounded-3xl border border-amber-500/30 bg-card/40 backdrop-blur-xl shadow-lg overflow-hidden">
+                              <CardContent className="p-5 space-y-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="p-2 bg-amber-500/20 rounded-xl text-amber-500"><Wifi className="h-5 w-5" /></div>
+                                  <div>
+                                    <h3 className="font-semibold text-foreground">Настройте подключение</h3>
+                                    <p className="text-xs text-muted-foreground mt-1">Выберите Telemost или WBStream и вставьте свою ссылку комнаты.</p>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground">Тариф действует до {formatDate(s.expiresAt)}.</p>
+                                <Button className="w-full rounded-xl" onClick={() => { setConfigSlot(s); setConfigError(null); setConfigRoomId(""); setConfigProvider("telemost"); }}>
+                                  Настроить
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {expiredSlots.length > 0 && (
                       <div>
                         <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3 px-1">История ({expiredSlots.length})</h3>
@@ -828,6 +876,34 @@ export function ClientWdttPage() {
           </DialogContent>
         </Dialog>
       )}
+      <Dialog open={!!configSlot} onOpenChange={(open) => { if (!open && !configLoading) setConfigSlot(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Настроить OlcRTC</DialogTitle>
+            <DialogDescription>Выберите сервис видеозвонков и вставьте ссылку комнаты. Будет создан отдельный сервер для этой подписки.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Сервис</label>
+              <select value={configProvider} onChange={(e) => setConfigProvider(e.target.value as "telemost" | "wbstream")} className="mt-1 flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm">
+                <option value="telemost">Яндекс Телемост</option>
+                <option value="wbstream">WBStream</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Ссылка или ID комнаты</label>
+              <input value={configRoomId} onChange={(e) => setConfigRoomId(e.target.value)} className="mt-1 flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm" placeholder={configProvider === "telemost" ? "https://telemost.yandex.ru/j/…" : "ID комнаты WBStream"} />
+            </div>
+            {configError && <p className="text-sm text-destructive">{configError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfigSlot(null)} disabled={configLoading}>Отмена</Button>
+            <Button onClick={configureSlot} disabled={configLoading || !configRoomId.trim()}>
+              {configLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Создать ссылку
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

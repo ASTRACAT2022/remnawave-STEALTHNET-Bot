@@ -743,13 +743,21 @@ export async function notifyWdttSlotsCreated(clientId: string, slotIds: string[]
   if (!client?.telegramId || slotIds.length === 0) return;
   const slots = await prisma.wdttSlot.findMany({
     where: { id: { in: slotIds } },
-    select: { wdttLink: true, node: { select: { publicHost: true } } },
+    select: { wdttLink: true, status: true, node: { select: { publicHost: true } } },
     orderBy: { createdAt: "asc" },
   });
   const name = tariffName?.trim() || "OlcRTC";
-  let text = `✅ <b>Подписка OlcRTC «${escapeHtml(name)}»</b> оплачена.\n\nСсылка для подключения:\n\n`;
-  for (const s of slots) text += `<code>${s.wdttLink}</code>\n\n`;
-  text += "Скопируйте ссылку и импортируйте её в совместимое приложение OlcRTC.";
+  const pending = slots.filter((slot) => slot.status === "PENDING_CONFIG");
+  const ready = slots.filter((slot) => slot.status === "ACTIVE" && slot.wdttLink);
+  let text = `✅ <b>Подписка OlcRTC «${escapeHtml(name)}»</b> оплачена.\n\n`;
+  if (ready.length) {
+    text += "Ссылка для подключения:\n\n";
+    for (const s of ready) text += `<code>${s.wdttLink}</code>\n\n`;
+    text += "Скопируйте ссылку и импортируйте её в совместимое приложение OlcRTC.";
+  }
+  if (pending.length) {
+    text += `${ready.length ? "\n\n" : ""}Откройте кабинет → OlcRTC → «Требуется настройка», выберите Telemost или WBStream и вставьте свою ссылку комнаты. После этого появится личная ссылка <code>olcrtc://</code>.`;
+  }
   const cfg = await getSystemConfig();
   await sendTelegramToUser(client.telegramId, text, null, backToMenuMarkup(cfg.botBackLabel), { clientIdForBotToken: client.id });
 }

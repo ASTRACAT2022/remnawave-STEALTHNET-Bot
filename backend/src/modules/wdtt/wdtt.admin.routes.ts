@@ -7,6 +7,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, requireAdminSection } from "../auth/middleware.js";
+import { deprovisionOlcRtcSlot } from "./wdtt-slots-activation.service.js";
 
 export const wdttAdminRouter = Router();
 wdttAdminRouter.use(requireAuth);
@@ -22,6 +23,7 @@ function asyncRoute(
 
 const providers = ["jitsi", "telemost", "wbstream"] as const;
 const transports = ["datachannel", "vp8channel", "seichannel", "videochannel"] as const;
+const provisionModes = ["STATIC", "PER_CLIENT"] as const;
 
 function isOlcRtcKey(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value.trim());
@@ -50,6 +52,9 @@ wdttAdminRouter.get("/nodes", asyncRoute(async (_req, res) => {
       roomId: n.olcrtcRoomId,
       encryptionKey: n.olcrtcKey,
       payload: n.olcrtcPayload,
+      provisionMode: n.olcrtcProvisionMode,
+      provisionerUrl: n.olcrtcProvisionerUrl,
+      provisionerToken: n.olcrtcProvisionerToken,
       dtlsPort: n.dtlsPort,
       wgPort: n.wgPort,
       tunPort: n.tunPort,
@@ -66,10 +71,21 @@ const createWdttNodeSchema = z.object({
   name: z.string().min(1, "Укажите название ноды").max(200).transform((s) => s.trim()),
   provider: z.enum(providers),
   transport: z.enum(transports),
-  roomId: z.string().min(1, "Укажите ID комнаты"),
-  encryptionKey: z.string().refine(isOlcRtcKey, "Ключ должен содержать 64 шестнадцатеричных символа"),
+  roomId: z.string().optional().default(""),
+  encryptionKey: z.string().optional().default(""),
   payload: z.string().max(1000).optional().nullable(),
+  provisionMode: z.enum(provisionModes).default("STATIC"),
+  provisionerUrl: z.string().url("Укажите URL provisioner-сервиса").optional().nullable(),
+  provisionerToken: z.string().min(32, "Токен provisioner должен содержать не менее 32 символов").optional().nullable(),
   capacity: z.number().int().min(1).nullable().optional(),
+}).superRefine((value, context) => {
+  if (value.provisionMode === "STATIC") {
+    if (!value.roomId.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["roomId"], message: "Укажите ID комнаты" });
+    if (!isOlcRtcKey(value.encryptionKey)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["encryptionKey"], message: "Ключ должен содержать 64 шестнадцатеричных символа" });
+  } else {
+    if (!value.provisionerUrl?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerUrl"], message: "Укажите URL provisioner-сервиса" });
+    if (!value.provisionerToken?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerToken"], message: "Укажите токен provisioner-сервиса" });
+  }
 });
 
 wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
@@ -82,14 +98,17 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
     data: {
       name: body.data.name,
       // Required legacy columns. Runtime code uses the explicit olcrtc_* fields below.
-      apiUrl: body.data.roomId.trim(),
-      apiKey: body.data.encryptionKey.trim(),
+      apiUrl: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerUrl!.trim() : body.data.roomId.trim(),
+      apiKey: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : body.data.encryptionKey.trim(),
       publicHost: null,
       olcrtcProvider: body.data.provider,
       olcrtcTransport: body.data.transport,
       olcrtcRoomId: body.data.roomId.trim(),
       olcrtcKey: body.data.encryptionKey.trim(),
       olcrtcPayload: body.data.payload?.trim() || null,
+      olcrtcProvisionMode: body.data.provisionMode,
+      olcrtcProvisionerUrl: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerUrl!.trim() : null,
+      olcrtcProvisionerToken: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : null,
       status: "OFFLINE",
       capacity: body.data.capacity ?? null,
     },
@@ -105,10 +124,14 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
       roomId: node.olcrtcRoomId,
       encryptionKey: node.olcrtcKey,
       payload: node.olcrtcPayload,
+      provisionMode: node.olcrtcProvisionMode,
+      provisionerUrl: node.olcrtcProvisionerUrl,
       capacity: node.capacity,
       createdAt: node.createdAt.toISOString(),
     },
-    instructions: "Нода добавлена. BillingStyle будет выдавать собственные ссылки olcrtc:// с этими параметрами.",
+    instructions: body.data.provisionMode === "PER_CLIENT"
+      ? "Нода добавлена. После оплаты клиент сам выберет Telemost/WBStream и получит отдельную ссылку olcrtc://."
+      : "Нода добавлена. BillingStyle будет выдавать собственные ссылки olcrtc:// с этими параметрами.",
   });
 }));
 
@@ -140,6 +163,9 @@ wdttAdminRouter.get("/nodes/:id", asyncRoute(async (req, res) => {
     roomId: node.olcrtcRoomId,
     encryptionKey: node.olcrtcKey,
     payload: node.olcrtcPayload,
+    provisionMode: node.olcrtcProvisionMode,
+    provisionerUrl: node.olcrtcProvisionerUrl,
+    provisionerToken: node.olcrtcProvisionerToken,
     dtlsPort: node.dtlsPort,
     wgPort: node.wgPort,
     tunPort: node.tunPort,
@@ -171,6 +197,9 @@ const updateWdttNodeSchema = z.object({
   roomId: z.string().min(1).optional(),
   encryptionKey: z.string().refine(isOlcRtcKey, "Ключ должен содержать 64 шестнадцатеричных символа").optional(),
   payload: z.string().max(1000).nullable().optional(),
+  provisionMode: z.enum(provisionModes).optional(),
+  provisionerUrl: z.string().url().nullable().optional(),
+  provisionerToken: z.string().min(32).nullable().optional(),
   capacity: z.number().int().min(1).nullable().optional(),
 });
 
@@ -193,6 +222,9 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
       ...(body.data.roomId !== undefined && { olcrtcRoomId: body.data.roomId.trim(), apiUrl: body.data.roomId.trim() }),
       ...(body.data.encryptionKey !== undefined && { olcrtcKey: body.data.encryptionKey.trim(), apiKey: body.data.encryptionKey.trim() }),
       ...(body.data.payload !== undefined && { olcrtcPayload: body.data.payload?.trim() || null }),
+      ...(body.data.provisionMode !== undefined && { olcrtcProvisionMode: body.data.provisionMode }),
+      ...(body.data.provisionerUrl !== undefined && { olcrtcProvisionerUrl: body.data.provisionerUrl?.trim() || null, apiUrl: body.data.provisionerUrl?.trim() || node.apiUrl }),
+      ...(body.data.provisionerToken !== undefined && { olcrtcProvisionerToken: body.data.provisionerToken?.trim() || null, apiKey: body.data.provisionerToken?.trim() || node.apiKey }),
       ...(body.data.capacity !== undefined && { capacity: body.data.capacity }),
     },
   });
@@ -205,6 +237,8 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
     roomId: updated.olcrtcRoomId,
     encryptionKey: updated.olcrtcKey,
     payload: updated.olcrtcPayload,
+    provisionMode: updated.olcrtcProvisionMode,
+    provisionerUrl: updated.olcrtcProvisionerUrl,
     capacity: updated.capacity,
     subscriptionBaseUrl: updated.publicHost,
     updatedAt: updated.updatedAt.toISOString(),
@@ -214,8 +248,21 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
 // DELETE /api/admin/olcrtc/nodes/:id — удалить ноду
 wdttAdminRouter.delete("/nodes/:id", asyncRoute(async (req, res) => {
   const id = req.params.id;
-  const node = await prisma.wdttNode.findUnique({ where: { id } });
+  const node = await prisma.wdttNode.findUnique({
+    where: { id },
+    include: {
+      slots: {
+        where: { status: { in: ["ACTIVE", "PENDING_CONFIG"] } },
+        select: { id: true, status: true },
+      },
+    },
+  });
   if (!node) return res.status(404).json({ message: "Node not found" });
+  for (const slot of node.slots) {
+    if (!await deprovisionOlcRtcSlot({ id: slot.id, status: slot.status, node })) {
+      return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; нода не удалена" });
+    }
+  }
   await prisma.wdttNode.delete({ where: { id } });
   return res.status(204).send();
 }));
@@ -226,11 +273,27 @@ wdttAdminRouter.post("/nodes/:id/test", asyncRoute(async (req, res) => {
   const node = await prisma.wdttNode.findUnique({ where: { id } });
   if (!node) return res.status(404).json({ message: "Node not found" });
 
-  if (!node.olcrtcRoomId.trim() || !isOlcRtcKey(node.olcrtcKey)) {
+  if (node.olcrtcProvisionMode === "PER_CLIENT") {
+    if (!node.olcrtcProvisionerUrl || !node.olcrtcProvisionerToken) {
+      return res.status(400).json({ success: false, error: "Заполните URL и токен provisioner-сервиса" });
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const health = await fetch(`${node.olcrtcProvisionerUrl.replace(/\/+$/, "")}/healthz`, {
+        headers: { Authorization: `Bearer ${node.olcrtcProvisionerToken}` }, signal: controller.signal,
+      });
+      if (!health.ok) return res.status(502).json({ success: false, error: `Provisioner вернул HTTP ${health.status}` });
+    } catch {
+      return res.status(502).json({ success: false, error: "Provisioner недоступен" });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } else if (!node.olcrtcRoomId.trim() || !isOlcRtcKey(node.olcrtcKey)) {
     return res.status(400).json({ success: false, error: "Заполните room ID и 64-символьный ключ OlcRTC" });
   }
   await prisma.wdttNode.update({ where: { id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
-  return res.json({ success: true, nodeStatus: "ONLINE", data: { provider: node.olcrtcProvider, transport: node.olcrtcTransport } });
+  return res.json({ success: true, nodeStatus: "ONLINE", data: { provider: node.olcrtcProvider, transport: node.olcrtcTransport, provisionMode: node.olcrtcProvisionMode } });
 }));
 
 // ——— WDTT Категории ———
@@ -492,6 +555,21 @@ wdttAdminRouter.patch("/slots/:id", asyncRoute(async (req, res) => {
   if (!body.success) return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
   const slot = await prisma.wdttSlot.findUnique({ where: { id } });
   if (!slot) return res.status(404).json({ message: "Slot not found" });
+  if (body.data.status && ["EXPIRED", "REVOKED"].includes(body.data.status) && (slot.status === "ACTIVE" || slot.status === "PENDING_CONFIG")) {
+    const fullSlot = await prisma.wdttSlot.findUnique({
+      where: { id },
+      include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+    });
+    if (fullSlot && !await deprovisionOlcRtcSlot(fullSlot)) {
+      return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; повторите операцию" });
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const value = await tx.wdttSlot.update({ where: { id }, data: { status: body.data.status, revokedAt: new Date(), revokeReason: "manual" } });
+      await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: { decrement: 1 } } });
+      return value;
+    });
+    return res.json({ id: updated.id, status: updated.status, expiresAt: updated.expiresAt.toISOString() });
+  }
   const data: Record<string, unknown> = {};
   if (body.data.status !== undefined) data.status = body.data.status;
   if (body.data.expiresAt !== undefined) data.expiresAt = new Date(body.data.expiresAt);
@@ -511,6 +589,9 @@ wdttAdminRouter.delete("/slots/:id", asyncRoute(async (req, res) => {
     include: { node: true },
   });
   if (!slot) return res.status(404).json({ message: "Slot not found" });
+  if (!await deprovisionOlcRtcSlot(slot)) {
+    return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; повторите операцию" });
+  }
 
   // Уменьшаем currentSlots на ноде
   await prisma.wdttNode.update({
@@ -530,6 +611,12 @@ wdttAdminRouter.post("/slots/:id/revoke", asyncRoute(async (req, res) => {
     include: { node: true },
   });
   if (!slot) return res.status(404).json({ message: "Slot not found" });
+  if (slot.status !== "ACTIVE" && slot.status !== "PENDING_CONFIG") {
+    return res.status(409).json({ message: "Доступ уже отозван или истёк" });
+  }
+  if (!await deprovisionOlcRtcSlot(slot)) {
+    return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; повторите операцию" });
+  }
 
   // Обновляем статус слота
   await prisma.wdttSlot.update({

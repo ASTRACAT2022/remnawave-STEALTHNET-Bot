@@ -1,5 +1,6 @@
 services:
   olcrtc-node:
+    image: ${OLCRTC_IMAGE:-astracat/olcrtc-node:latest}
     build:
       context: .
       args:
@@ -12,3 +13,19 @@ services:
     # OlcRTC uses WebRTC/ICE. Host networking avoids Docker NAT changing its
     # network candidates. This compose module is intended for Linux VPS hosts.
     network_mode: host
+    profiles: ["standalone"]
+
+  provisioner:
+    build:
+      context: ./provisioner
+    image: ${OLCRTC_PROVISIONER_IMAGE:-astracat/olcrtc-provisioner:latest}
+    container_name: olcrtc-provisioner
+    restart: unless-stopped
+    env_file:
+      - ${OLCRTC_ENV_FILE:-.env}
+    environment:
+      OLCRTC_IMAGE: ${OLCRTC_IMAGE:-astracat/olcrtc-node:latest}
+      OLCRTC_PROVISIONER_LISTEN: ${OLCRTC_PROVISIONER_LISTEN:-127.0.0.1:9500}
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

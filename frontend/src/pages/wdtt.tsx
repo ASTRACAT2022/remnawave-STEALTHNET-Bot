@@ -185,7 +185,9 @@ function NodesTab({ token }: { token: string }) {
                   <div>
                     <div className="font-medium">{n.name || "Без имени"}</div>
                     <div className="text-xs text-muted-foreground">
-                      {n.provider} · {n.transport} · {n.roomId}
+                      {n.provisionMode === "PER_CLIENT"
+                        ? `Персональные контейнеры · ${n.provisionerUrl || "provisioner не задан"}`
+                        : `${n.provider} · ${n.transport} · ${n.roomId}`}
                     </div>
                   </div>
                 </div>
@@ -250,6 +252,9 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
   const [roomId, setRoomId] = useState("");
   const [encryptionKey, setEncryptionKey] = useState("");
   const [payload, setPayload] = useState("");
+  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT">("PER_CLIENT");
+  const [provisionerUrl, setProvisionerUrl] = useState("");
+  const [provisionerToken, setProvisionerToken] = useState("");
   const [capacity, setCapacity] = useState("");
   const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<CreateWdttNodeResponse | null>(null);
@@ -264,6 +269,9 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
         roomId,
         encryptionKey,
         payload: payload || null,
+        provisionMode,
+        provisionerUrl: provisionerUrl || null,
+        provisionerToken: provisionerToken || null,
         capacity: capacity ? parseInt(capacity) : null,
       });
       setResult(r);
@@ -280,7 +288,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
           <DialogHeader><DialogTitle>Нода добавлена</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <div><Label>Название</Label><div className="font-medium">{result.node.name}</div></div>
-            <div><Label>Параметры ссылки</Label><div className="font-mono text-xs">{result.node.provider} · {result.node.transport} · {result.node.roomId}</div></div>
+            <div><Label>Режим</Label><div className="font-mono text-xs">{result.node.provisionMode === "PER_CLIENT" ? "Персональные контейнеры" : `${result.node.provider} · ${result.node.transport} · ${result.node.roomId}`}</div></div>
             <p className="text-muted-foreground">{result.instructions}</p>
           </div>
           <DialogFooter>
@@ -297,17 +305,28 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
         <DialogHeader><DialogTitle>Добавить OlcRTC-ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Моя нода" /></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
+          {provisionMode === "PER_CLIENT" ? (
+            <>
+              <div><Label>URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} placeholder="http://10.0.0.10:9500" /></div>
+              <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="OLCRTC_PROVISIONER_TOKEN" /></div>
+              <p className="text-xs text-muted-foreground">После оплаты клиент выбирает Telemost/WBStream и вставляет свою ссылку комнаты. Для него создаётся отдельный контейнер, который будет удалён после окончания тарифа.</p>
+            </>
+          ) : (
+            <>
           <div className="grid grid-cols-2 gap-3"><div><Label>Провайдер</Label><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="jitsi">Jitsi</option><option value="telemost">Telemost</option><option value="wbstream">WBStream</option></select></div><div><Label>Транспорт</Label><select value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="datachannel">datachannel</option><option value="vp8channel">vp8channel</option><option value="seichannel">seichannel</option><option value="videochannel">videochannel</option></select></div></div>
           <div><Label>Room ID</Label><Input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="https://meet.example.org/room" /></div>
           <div><Label>Ключ шифрования</Label><Input value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} placeholder="64 символа hex" /></div>
           <div><Label>Параметры транспорта (необязательно)</Label><Input value={payload} onChange={(e) => setPayload(e.target.value)} placeholder="vp8-fps=60&vp8-batch=64" /></div>
           <p className="text-xs text-muted-foreground">После оплаты BillingStyle создаёт и выдаёт ссылку <code>olcrtc://…</code> с этими параметрами.</p>
           <p className="text-xs text-amber-600 dark:text-amber-400">Одинаковые Room ID и ключ получает каждый покупатель этой ноды. Отзыв подписки в BillingStyle не отключает уже импортированную ссылку на сервере.</p>
+            </>
+          )}
           <div><Label>Вместимость (пусто = без лимита)</Label><Input type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="100" /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Отмена</Button>
-          <Button onClick={handleCreate} disabled={creating || !name || !roomId || !/^[a-f0-9]{64}$/i.test(encryptionKey)}>
+          <Button onClick={handleCreate} disabled={creating || !name || (provisionMode === "PER_CLIENT" ? (!provisionerUrl || provisionerToken.length < 32) : (!roomId || !/^[a-f0-9]{64}$/i.test(encryptionKey)))}>
             {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Создать
           </Button>
@@ -325,6 +344,9 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
   const [roomId, setRoomId] = useState("");
   const [encryptionKey, setEncryptionKey] = useState("");
   const [payload, setPayload] = useState("");
+  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT">("STATIC");
+  const [provisionerUrl, setProvisionerUrl] = useState("");
+  const [provisionerToken, setProvisionerToken] = useState("");
   const [capacity, setCapacity] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -337,6 +359,9 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
       setRoomId(node.roomId);
       setEncryptionKey(node.encryptionKey);
       setPayload(node.payload ?? "");
+      setProvisionMode(node.provisionMode);
+      setProvisionerUrl(node.provisionerUrl ?? "");
+      setProvisionerToken(node.provisionerToken ?? "");
       setCapacity(node.capacity != null ? String(node.capacity) : "");
     }
   }, [node]);
@@ -353,6 +378,9 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
         roomId,
         encryptionKey,
         payload: payload.trim() || null,
+        provisionMode,
+        provisionerUrl: provisionMode === "PER_CLIENT" ? provisionerUrl || null : null,
+        provisionerToken: provisionMode === "PER_CLIENT" ? provisionerToken || null : null,
         capacity: capacity ? parseInt(capacity) : null,
       });
       onSaved();
@@ -368,10 +396,21 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
         <DialogHeader><DialogTitle>Редактировать ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
+          {provisionMode === "PER_CLIENT" ? (
+            <>
+              <div><Label>URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} /></div>
+              <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="Заполните для нового токена" /></div>
+              <p className="text-xs text-muted-foreground">После сохранения нажмите «Тест», затем переведите ноду в ONLINE.</p>
+            </>
+          ) : (
+            <>
           <div className="grid grid-cols-2 gap-3"><div><Label>Провайдер</Label><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="jitsi">Jitsi</option><option value="telemost">Telemost</option><option value="wbstream">WBStream</option></select></div><div><Label>Транспорт</Label><select value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="datachannel">datachannel</option><option value="vp8channel">vp8channel</option><option value="seichannel">seichannel</option><option value="videochannel">videochannel</option></select></div></div>
           <div><Label>Room ID</Label><Input value={roomId} onChange={(e) => setRoomId(e.target.value)} /></div>
           <div><Label>Ключ шифрования</Label><Input value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} /></div>
           <div><Label>Параметры транспорта</Label><Input value={payload} onChange={(e) => setPayload(e.target.value)} /></div>
+            </>
+          )}
           <div><Label>Статус</Label>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm">
               <option value="ONLINE">ONLINE</option>
