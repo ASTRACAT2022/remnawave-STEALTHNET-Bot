@@ -60,7 +60,8 @@ function isValidNode(node: OlcRtcLinkNode): boolean {
 }
 
 function provisionerUrl(base: string, path: string): string {
-  return `${base.replace(/\/+$/, "")}${path}`;
+  const normalized = /^https?:\/\//i.test(base) ? base : `http://${base}`;
+  return `${normalized.replace(/\/+$/, "")}${path}`;
 }
 
 async function provisionerRequest(node: PersonalSlot["node"], path: string, init: RequestInit): Promise<Response> {

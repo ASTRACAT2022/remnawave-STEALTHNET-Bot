@@ -308,7 +308,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
           <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
-              <div><Label>URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} placeholder="http://10.0.0.10:9500" /></div>
+              <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} placeholder="10.0.0.10:9500 или http://10.0.0.10:9500" /></div>
               <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="OLCRTC_PROVISIONER_TOKEN" /></div>
               <p className="text-xs text-muted-foreground">После оплаты клиент выбирает Telemost/WBStream и вставляет свою ссылку комнаты. Для него создаётся отдельный контейнер, который будет удалён после окончания тарифа.</p>
             </>
@@ -399,7 +399,7 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
           <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
-              <div><Label>URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} /></div>
+              <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} /></div>
               <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="Заполните для нового токена" /></div>
               <p className="text-xs text-muted-foreground">После сохранения нажмите «Тест», затем переведите ноду в ONLINE.</p>
             </>

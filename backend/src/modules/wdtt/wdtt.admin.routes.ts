@@ -29,6 +29,20 @@ function isOlcRtcKey(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value.trim());
 }
 
+/** Accept a full URL or the convenient IP:port form used in the panel. */
+function normalizeProvisionerUrl(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
 // ——— OlcRTC link nodes ———
 
 // GET /api/admin/olcrtc/nodes — список нод
@@ -75,7 +89,7 @@ const createWdttNodeSchema = z.object({
   encryptionKey: z.string().optional().default(""),
   payload: z.string().max(1000).optional().nullable(),
   provisionMode: z.enum(provisionModes).default("STATIC"),
-  provisionerUrl: z.string().url("Укажите URL provisioner-сервиса").optional().nullable(),
+  provisionerUrl: z.string().max(500).optional().nullable(),
   provisionerToken: z.string().min(32, "Токен provisioner должен содержать не менее 32 символов").optional().nullable(),
   capacity: z.number().int().min(1).nullable().optional(),
 }).superRefine((value, context) => {
@@ -83,7 +97,7 @@ const createWdttNodeSchema = z.object({
     if (!value.roomId.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["roomId"], message: "Укажите ID комнаты" });
     if (!isOlcRtcKey(value.encryptionKey)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["encryptionKey"], message: "Ключ должен содержать 64 шестнадцатеричных символа" });
   } else {
-    if (!value.provisionerUrl?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerUrl"], message: "Укажите URL provisioner-сервиса" });
+    if (!value.provisionerUrl?.trim() || !normalizeProvisionerUrl(value.provisionerUrl)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerUrl"], message: "Укажите IP:порт или URL provisioner-сервиса" });
     if (!value.provisionerToken?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerToken"], message: "Укажите токен provisioner-сервиса" });
   }
 });
@@ -98,7 +112,7 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
     data: {
       name: body.data.name,
       // Required legacy columns. Runtime code uses the explicit olcrtc_* fields below.
-      apiUrl: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerUrl!.trim() : body.data.roomId.trim(),
+      apiUrl: body.data.provisionMode === "PER_CLIENT" ? normalizeProvisionerUrl(body.data.provisionerUrl!)! : body.data.roomId.trim(),
       apiKey: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : body.data.encryptionKey.trim(),
       publicHost: null,
       olcrtcProvider: body.data.provider,
@@ -107,7 +121,7 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
       olcrtcKey: body.data.encryptionKey.trim(),
       olcrtcPayload: body.data.payload?.trim() || null,
       olcrtcProvisionMode: body.data.provisionMode,
-      olcrtcProvisionerUrl: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerUrl!.trim() : null,
+      olcrtcProvisionerUrl: body.data.provisionMode === "PER_CLIENT" ? normalizeProvisionerUrl(body.data.provisionerUrl!)! : null,
       olcrtcProvisionerToken: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : null,
       status: "OFFLINE",
       capacity: body.data.capacity ?? null,
@@ -198,7 +212,7 @@ const updateWdttNodeSchema = z.object({
   encryptionKey: z.string().refine(isOlcRtcKey, "Ключ должен содержать 64 шестнадцатеричных символа").optional(),
   payload: z.string().max(1000).nullable().optional(),
   provisionMode: z.enum(provisionModes).optional(),
-  provisionerUrl: z.string().url().nullable().optional(),
+  provisionerUrl: z.string().max(500).nullable().optional(),
   provisionerToken: z.string().min(32).nullable().optional(),
   capacity: z.number().int().min(1).nullable().optional(),
 });
@@ -211,6 +225,9 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
   }
   const node = await prisma.wdttNode.findUnique({ where: { id } });
   if (!node) return res.status(404).json({ message: "Node not found" });
+  if (body.data.provisionerUrl && !normalizeProvisionerUrl(body.data.provisionerUrl)) {
+    return res.status(400).json({ message: "Invalid input", errors: { fieldErrors: { provisionerUrl: ["Укажите IP:порт или URL provisioner-сервиса"] }, formErrors: [] } });
+  }
 
   const updated = await prisma.wdttNode.update({
     where: { id },
@@ -223,7 +240,7 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
       ...(body.data.encryptionKey !== undefined && { olcrtcKey: body.data.encryptionKey.trim(), apiKey: body.data.encryptionKey.trim() }),
       ...(body.data.payload !== undefined && { olcrtcPayload: body.data.payload?.trim() || null }),
       ...(body.data.provisionMode !== undefined && { olcrtcProvisionMode: body.data.provisionMode }),
-      ...(body.data.provisionerUrl !== undefined && { olcrtcProvisionerUrl: body.data.provisionerUrl?.trim() || null, apiUrl: body.data.provisionerUrl?.trim() || node.apiUrl }),
+      ...(body.data.provisionerUrl !== undefined && { olcrtcProvisionerUrl: body.data.provisionerUrl ? normalizeProvisionerUrl(body.data.provisionerUrl) : null, apiUrl: body.data.provisionerUrl ? normalizeProvisionerUrl(body.data.provisionerUrl)! : node.apiUrl }),
       ...(body.data.provisionerToken !== undefined && { olcrtcProvisionerToken: body.data.provisionerToken?.trim() || null, apiKey: body.data.provisionerToken?.trim() || node.apiKey }),
       ...(body.data.capacity !== undefined && { capacity: body.data.capacity }),
     },
