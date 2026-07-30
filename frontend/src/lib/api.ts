@@ -776,6 +776,9 @@ export const api = {
   async configureWdttSlot(token: string, id: string, data: { provider: "telemost" | "wbstream"; roomId: string }): Promise<{ success: boolean; wdttLink: string }> {
     return request(`/client/olcrtc/slots/${id}/configure`, { method: "POST", body: JSON.stringify(data), token });
   },
+  async reissueWdttSlot(token: string, id: string): Promise<{ success: boolean }> {
+    return request(`/client/olcrtc/slots/${id}/reissue`, { method: "POST", token });
+  },
   async recoverWdttSlots(token: string): Promise<{ success: boolean; slotsCreated: number }> {
     return request("/client/olcrtc/slots/recover", { method: "POST", token });
   },

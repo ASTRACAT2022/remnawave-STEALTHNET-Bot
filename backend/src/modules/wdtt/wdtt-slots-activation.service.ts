@@ -35,6 +35,8 @@ type PersonalSlot = {
   node: Pick<OlcRtcLinkNode, "olcrtcProvisionMode" | "olcrtcProvisionerUrl" | "olcrtcProvisionerToken">;
 };
 
+const PERSONAL_VP8_PAYLOAD = "vp8-fps=30&vp8-batch=64";
+
 function accessCode(): string {
   return `olc-${randomBytes(12).toString("hex")}`;
 }
@@ -130,7 +132,7 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
     olcrtcTransport: "vp8channel",
     olcrtcRoomId: roomId,
     olcrtcKey: key,
-    olcrtcPayload: "vp8-fps=25&vp8-batch=1",
+    olcrtcPayload: PERSONAL_VP8_PAYLOAD,
   });
   try {
     await prisma.wdttSlot.update({ where: { id: slot.id }, data: { status: "ACTIVE", vkHash: "olcrtc", wdttLink: link } });
@@ -139,6 +141,24 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
     throw error;
   }
   return { link };
+}
+
+/** Stops the old personal server and returns its paid slot to the setup step. */
+export async function reissueOlcRtcSlotForClient(input: { clientId: string; slotId: string }): Promise<void> {
+  const slot = await prisma.wdttSlot.findFirst({
+    where: { id: input.slotId, clientId: input.clientId },
+    include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+  });
+  if (!slot) throw new Error("Подписка не найдена");
+  if (slot.status !== "ACTIVE") throw new Error("Перевыпустить можно только активную подписку");
+  if (slot.expiresAt <= new Date()) throw new Error("Срок действия подписки уже закончился");
+  if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Перевыпуск доступен только для личных OlcRTC-серверов");
+  if (!await deprovisionOlcRtcSlot(slot)) throw new Error("Не удалось остановить старый личный сервер; повторите попытку");
+
+  await prisma.wdttSlot.update({
+    where: { id: slot.id },
+    data: { status: "PENDING_CONFIG", vkHash: "olcrtc-pending", wdttLink: "" },
+  });
 }
 
 export async function createWdttSlotsByPaymentId(paymentId: string): Promise<CreateWdttSlotsResult> {

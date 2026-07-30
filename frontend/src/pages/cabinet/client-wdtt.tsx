@@ -81,6 +81,7 @@ export function ClientWdttPage() {
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [reissuingSlotId, setReissuingSlotId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("tariffs");
 
   const isMobileOrMiniapp = useCabinetMiniapp();
@@ -159,6 +160,20 @@ export function ClientWdttPage() {
       alert(error instanceof Error ? error.message : "Не удалось найти оплаченную покупку");
     } finally {
       setRecoveryLoading(false);
+    }
+  }
+
+  async function reissueSlot(slot: WdttClientSlotItem) {
+    if (!token || !confirm("Старая ссылка перестанет работать. Перевыпустить подключение с быстрыми настройками?")) return;
+    setReissuingSlotId(slot.id);
+    try {
+      await api.reissueWdttSlot(token, slot.id);
+      const response = await api.getWdttSlots(token);
+      setSlots(response.items ?? []);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Не удалось перевыпустить ссылку");
+    } finally {
+      setReissuingSlotId(null);
     }
   }
 
@@ -813,6 +828,9 @@ export function ClientWdttPage() {
                                       {copiedId === s.id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                                     </Button>
                                   </div>
+                                  <Button variant="outline" size="sm" className="w-full" disabled={reissuingSlotId === s.id} onClick={() => reissueSlot(s)}>
+                                    {reissuingSlotId === s.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Перевыпустить быстрее
+                                  </Button>
                                 </div>
                               </CardContent>
                             </Card>

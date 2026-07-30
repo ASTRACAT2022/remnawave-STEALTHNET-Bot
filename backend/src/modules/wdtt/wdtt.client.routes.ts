@@ -2,7 +2,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireClientAuth } from "../client/client.middleware.js";
-import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient } from "./wdtt-slots-activation.service.js";
+import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient, reissueOlcRtcSlotForClient } from "./wdtt-slots-activation.service.js";
 
 type AuthRequest = express.Request & { clientId: string };
 
@@ -66,6 +66,16 @@ wdttClientRouter.post("/slots/:id/configure", asyncRoute(async (req, res) => {
     return res.json({ success: true, wdttLink: result.link });
   } catch (error) {
     return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось настроить подключение" });
+  }
+}));
+
+// POST /api/client/olcrtc/slots/:id/reissue — rotates a personal server and link.
+wdttClientRouter.post("/slots/:id/reissue", asyncRoute(async (req, res) => {
+  try {
+    await reissueOlcRtcSlotForClient({ clientId: (req as AuthRequest).clientId, slotId: req.params.id });
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось перевыпустить ссылку" });
   }
 }));
 

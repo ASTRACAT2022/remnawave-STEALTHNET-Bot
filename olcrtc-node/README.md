@@ -44,7 +44,7 @@ Click **Test**; it marks a reachable provisioner as ONLINE. Create an enabled
 tariff and assign this node. After payment, the buyer opens **Cabinet →
 OlcRTC → Configure**, selects **Telemost** or **WBStream**, and inserts their
 own room URL/ID. The system issues a personal `vp8channel` configuration with
-`vp8-fps=25&vp8-batch=1`.
+`vp8-fps=30&vp8-batch=64`.
 
 ## Shared static link (legacy mode)
 
@@ -66,7 +66,7 @@ transport payload identical on the server and client.
 The default is `vp8channel` with this BillingStyle payload:
 
 ```text
-vp8-fps=25&vp8-batch=1
+vp8-fps=30&vp8-batch=64
 ```
 
 In BillingStyle open **Admin → OlcRTC → Nodes**, select **Shared static link**
@@ -78,7 +78,7 @@ and use:
 | Transport | `vp8channel` | `vp8channel` |
 | Room ID | `OLCRTC_ROOM_ID` | `OLCRTC_ROOM_ID` |
 | Encryption key | `OLCRTC_KEY` | `OLCRTC_KEY` |
-| Payload | `vp8-fps=25&vp8-batch=1` | `vp8-fps=25&vp8-batch=1` |
+| Payload | `vp8-fps=30&vp8-batch=64` | `vp8-fps=30&vp8-batch=64` |
 
 Do not use `datachannel` with Telemost. WBStream `datachannel` requires a
 token with moderator rights; guest mode should use `vp8channel`, `seichannel`,
