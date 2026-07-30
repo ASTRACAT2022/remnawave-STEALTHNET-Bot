@@ -62,7 +62,9 @@ export default defineConfig(({ mode }) => {
                     /^\/assets\/.*\.(png|jpg|jpeg|svg|webp|ico)$/,
                 ],
                 maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-                skipWaiting: false, // ждём подтверждения от пользователя на обновление
+                // Новая сборка должна сразу заменить старый worker. Это важно
+                // для одноразового сброса устаревшего кэша кабинета.
+                skipWaiting: true,
                 clientsClaim: true,
                 cleanupOutdatedCaches: true,
                 runtimeCaching: [
