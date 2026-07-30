@@ -1,0 +1,41 @@
+mode: srv
+auth:
+  provider: "${OLCRTC_PROVIDER}"
+  token: "${OLCRTC_WBSTREAM_TOKEN}"
+room:
+  id: "${OLCRTC_ROOM_ID}"
+crypto:
+  key: "${OLCRTC_KEY}"
+net:
+  transport: "${OLCRTC_TRANSPORT}"
+  dns: "${OLCRTC_DNS}"
+liveness:
+  interval: 10s
+  timeout: 5s
+  failures: 3
+socks:
+  proxy_addr: "${OLCRTC_UPSTREAM_SOCKS_HOST}"
+  proxy_port: ${OLCRTC_UPSTREAM_SOCKS_PORT}
+  proxy_user: "${OLCRTC_UPSTREAM_SOCKS_USER}"
+  proxy_pass: "${OLCRTC_UPSTREAM_SOCKS_PASS}"
+vp8:
+  fps: ${OLCRTC_VP8_FPS}
+  batch_size: ${OLCRTC_VP8_BATCH_SIZE}
+sei:
+  fps: ${OLCRTC_SEI_FPS}
+  batch_size: ${OLCRTC_SEI_BATCH_SIZE}
+  fragment_size: ${OLCRTC_SEI_FRAGMENT_SIZE}
+  ack_timeout_ms: ${OLCRTC_SEI_ACK_TIMEOUT_MS}
+video:
+  width: ${OLCRTC_VIDEO_WIDTH}
+  height: ${OLCRTC_VIDEO_HEIGHT}
+  fps: ${OLCRTC_VIDEO_FPS}
+  bitrate: "${OLCRTC_VIDEO_BITRATE}"
+  hw: "${OLCRTC_VIDEO_HW}"
+  codec: "${OLCRTC_VIDEO_CODEC}"
+  qr_size: ${OLCRTC_VIDEO_QR_SIZE}
+  qr_recovery: "${OLCRTC_VIDEO_QR_RECOVERY}"
+  tile_module: ${OLCRTC_VIDEO_TILE_MODULE}
+  tile_rs: ${OLCRTC_VIDEO_TILE_RS}
+data: /app/data
+debug: ${OLCRTC_DEBUG}

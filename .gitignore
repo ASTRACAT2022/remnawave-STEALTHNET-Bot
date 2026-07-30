@@ -7,5 +7,7 @@ frontend/dist/
 backend/.env
 bot/.env
 frontend/.env.local
+olcrtc-node/.env
+olcrtc-node/.env.local
 .codex-*
 **/.codex-*

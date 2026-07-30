@@ -1,0 +1,14 @@
+services:
+  olcrtc-node:
+    build:
+      context: .
+      args:
+        # Use a tag or a commit SHA in production after testing it.
+        OLCRTC_REF: ${OLCRTC_REF:-master}
+    container_name: olcrtc-node
+    restart: unless-stopped
+    env_file:
+      - ${OLCRTC_ENV_FILE:-.env}
+    # OlcRTC uses WebRTC/ICE. Host networking avoids Docker NAT changing its
+    # network candidates. This compose module is intended for Linux VPS hosts.
+    network_mode: host
