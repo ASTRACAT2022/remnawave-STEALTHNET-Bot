@@ -759,7 +759,7 @@ export function ClientWdttPage() {
                   <div className="flex items-center justify-center py-16">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                   </div>
-                ) : activeSlots.length === 0 && expiredSlots.length === 0 ? (
+                ) : activeSlots.length === 0 && pendingSlots.length === 0 && expiredSlots.length === 0 ? (
                   <Card className="rounded-3xl border border-border/50 bg-card/40 backdrop-blur-xl shadow-sm">
                     <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
                       <Wifi className="h-12 w-12 opacity-20" />
