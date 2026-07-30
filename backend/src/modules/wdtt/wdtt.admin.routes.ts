@@ -1,9 +1,8 @@
 /**
- * WDTT (Warp/WireGuard) Admin Routes
- * Управление нодами, категориями, тарифами и слотами WDTT
+ * OlcRTC direct-link administration. The filename and Prisma model names are
+ * legacy-only; OlcRTC links are issued locally without a Manager HTTP API.
  */
 
-import { randomBytes } from "crypto";
 import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
@@ -21,14 +20,16 @@ function asyncRoute(
   };
 }
 
-/** Генерирует уникальный API ключ для ноды (32 байта hex = 64 символа). */
-function generateApiKey(): string {
-  return randomBytes(32).toString("hex");
+const providers = ["jitsi", "telemost", "wbstream"] as const;
+const transports = ["datachannel", "vp8channel", "seichannel", "videochannel"] as const;
+
+function isOlcRtcKey(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value.trim());
 }
 
-// ——— WDTT Ноды ———
+// ——— OlcRTC link nodes ———
 
-// GET /api/admin/wdtt/nodes — список нод
+// GET /api/admin/olcrtc/nodes — список нод
 wdttAdminRouter.get("/nodes", asyncRoute(async (_req, res) => {
   const nodes = await prisma.wdttNode.findMany({
     orderBy: { createdAt: "desc" },
@@ -44,6 +45,11 @@ wdttAdminRouter.get("/nodes", asyncRoute(async (_req, res) => {
       lastSeenAt: n.lastSeenAt?.toISOString() ?? null,
       publicHost: n.publicHost,
       apiUrl: n.apiUrl,
+      provider: n.olcrtcProvider,
+      transport: n.olcrtcTransport,
+      roomId: n.olcrtcRoomId,
+      encryptionKey: n.olcrtcKey,
+      payload: n.olcrtcPayload,
       dtlsPort: n.dtlsPort,
       wgPort: n.wgPort,
       tunPort: n.tunPort,
@@ -55,14 +61,14 @@ wdttAdminRouter.get("/nodes", asyncRoute(async (_req, res) => {
   });
 }));
 
-// POST /api/admin/wdtt/nodes — создать ноду
+// POST /api/admin/olcrtc/nodes — создать ноду
 const createWdttNodeSchema = z.object({
   name: z.string().min(1, "Укажите название ноды").max(200).transform((s) => s.trim()),
-  apiUrl: z.string().min(1, "Укажите URL API ноды").url("Неверный формат URL"),
-  apiKey: z.string().min(16, "API ключ должен быть минимум 16 символов").optional(),
-  dtlsPort: z.number().int().min(1).max(65535).optional(),
-  wgPort: z.number().int().min(1).max(65535).optional(),
-  tunPort: z.number().int().min(1).max(65535).optional(),
+  provider: z.enum(providers),
+  transport: z.enum(transports),
+  roomId: z.string().min(1, "Укажите ID комнаты"),
+  encryptionKey: z.string().refine(isOlcRtcKey, "Ключ должен содержать 64 шестнадцатеричных символа"),
+  payload: z.string().max(1000).optional().nullable(),
   capacity: z.number().int().min(1).nullable().optional(),
 });
 
@@ -72,16 +78,19 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
     return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
   }
 
-  const apiKey = body.data.apiKey ?? generateApiKey();
   const node = await prisma.wdttNode.create({
     data: {
       name: body.data.name,
-      apiUrl: body.data.apiUrl,
-      apiKey,
+      // Required legacy columns. Runtime code uses the explicit olcrtc_* fields below.
+      apiUrl: body.data.roomId.trim(),
+      apiKey: body.data.encryptionKey.trim(),
+      publicHost: null,
+      olcrtcProvider: body.data.provider,
+      olcrtcTransport: body.data.transport,
+      olcrtcRoomId: body.data.roomId.trim(),
+      olcrtcKey: body.data.encryptionKey.trim(),
+      olcrtcPayload: body.data.payload?.trim() || null,
       status: "OFFLINE",
-      dtlsPort: body.data.dtlsPort ?? 56000,
-      wgPort: body.data.wgPort ?? 56001,
-      tunPort: body.data.tunPort ?? 9000,
       capacity: body.data.capacity ?? null,
     },
   });
@@ -91,19 +100,19 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
       id: node.id,
       name: node.name,
       status: node.status,
-      apiUrl: node.apiUrl,
-      apiKey: node.apiKey,
-      dtlsPort: node.dtlsPort,
-      wgPort: node.wgPort,
-      tunPort: node.tunPort,
+      provider: node.olcrtcProvider,
+      transport: node.olcrtcTransport,
+      roomId: node.olcrtcRoomId,
+      encryptionKey: node.olcrtcKey,
+      payload: node.olcrtcPayload,
       capacity: node.capacity,
       createdAt: node.createdAt.toISOString(),
     },
-    instructions: `Нода добавлена. API ключ: ${apiKey}\n\nУстановите на сервере proxy-turn-vk-android-main и укажите этот API ключ в конфигурации.`,
+    instructions: "Нода добавлена. BillingStyle будет выдавать собственные ссылки olcrtc:// с этими параметрами.",
   });
 }));
 
-// GET /api/admin/wdtt/nodes/:id — одна нода со слотами
+// GET /api/admin/olcrtc/nodes/:id — одна нода с подписками
 wdttAdminRouter.get("/nodes/:id", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const node = await prisma.wdttNode.findUnique({
@@ -126,6 +135,11 @@ wdttAdminRouter.get("/nodes/:id", asyncRoute(async (req, res) => {
     publicHost: node.publicHost,
     apiUrl: node.apiUrl,
     apiKey: node.apiKey,
+    provider: node.olcrtcProvider,
+    transport: node.olcrtcTransport,
+    roomId: node.olcrtcRoomId,
+    encryptionKey: node.olcrtcKey,
+    payload: node.olcrtcPayload,
     dtlsPort: node.dtlsPort,
     wgPort: node.wgPort,
     tunPort: node.tunPort,
@@ -148,15 +162,16 @@ wdttAdminRouter.get("/nodes/:id", asyncRoute(async (req, res) => {
   });
 }));
 
-// PATCH /api/admin/wdtt/nodes/:id — обновить ноду
+// PATCH /api/admin/olcrtc/nodes/:id — обновить ноду
 const updateWdttNodeSchema = z.object({
   name: z.string().max(200).optional(),
   status: z.enum(["ONLINE", "OFFLINE", "DISABLED"]).optional(),
-  apiUrl: z.string().url().optional(),
+  provider: z.enum(providers).optional(),
+  transport: z.enum(transports).optional(),
+  roomId: z.string().min(1).optional(),
+  encryptionKey: z.string().refine(isOlcRtcKey, "Ключ должен содержать 64 шестнадцатеричных символа").optional(),
+  payload: z.string().max(1000).nullable().optional(),
   capacity: z.number().int().min(1).nullable().optional(),
-  dtlsPort: z.number().int().min(1).max(65535).optional(),
-  wgPort: z.number().int().min(1).max(65535).optional(),
-  tunPort: z.number().int().min(1).max(65535).optional(),
 });
 
 wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
@@ -173,27 +188,30 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
     data: {
       ...(body.data.name !== undefined && { name: body.data.name }),
       ...(body.data.status !== undefined && { status: body.data.status }),
-      ...(body.data.apiUrl !== undefined && { apiUrl: body.data.apiUrl }),
+      ...(body.data.provider !== undefined && { olcrtcProvider: body.data.provider }),
+      ...(body.data.transport !== undefined && { olcrtcTransport: body.data.transport }),
+      ...(body.data.roomId !== undefined && { olcrtcRoomId: body.data.roomId.trim(), apiUrl: body.data.roomId.trim() }),
+      ...(body.data.encryptionKey !== undefined && { olcrtcKey: body.data.encryptionKey.trim(), apiKey: body.data.encryptionKey.trim() }),
+      ...(body.data.payload !== undefined && { olcrtcPayload: body.data.payload?.trim() || null }),
       ...(body.data.capacity !== undefined && { capacity: body.data.capacity }),
-      ...(body.data.dtlsPort !== undefined && { dtlsPort: body.data.dtlsPort }),
-      ...(body.data.wgPort !== undefined && { wgPort: body.data.wgPort }),
-      ...(body.data.tunPort !== undefined && { tunPort: body.data.tunPort }),
     },
   });
   return res.json({
     id: updated.id,
     name: updated.name,
     status: updated.status,
-    apiUrl: updated.apiUrl,
+    provider: updated.olcrtcProvider,
+    transport: updated.olcrtcTransport,
+    roomId: updated.olcrtcRoomId,
+    encryptionKey: updated.olcrtcKey,
+    payload: updated.olcrtcPayload,
     capacity: updated.capacity,
-    dtlsPort: updated.dtlsPort,
-    wgPort: updated.wgPort,
-    tunPort: updated.tunPort,
+    subscriptionBaseUrl: updated.publicHost,
     updatedAt: updated.updatedAt.toISOString(),
   });
 }));
 
-// DELETE /api/admin/wdtt/nodes/:id — удалить ноду
+// DELETE /api/admin/olcrtc/nodes/:id — удалить ноду
 wdttAdminRouter.delete("/nodes/:id", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const node = await prisma.wdttNode.findUnique({ where: { id } });
@@ -202,31 +220,17 @@ wdttAdminRouter.delete("/nodes/:id", asyncRoute(async (req, res) => {
   return res.status(204).send();
 }));
 
-// POST /api/admin/wdtt/nodes/:id/test — тест связи с нодой
+// POST /api/admin/olcrtc/nodes/:id/test — тест связи с нодой
 wdttAdminRouter.post("/nodes/:id/test", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const node = await prisma.wdttNode.findUnique({ where: { id } });
   if (!node) return res.status(404).json({ message: "Node not found" });
 
-  try {
-    const response = await fetch(`${node.apiUrl}/api/health`, {
-      headers: { "X-API-Key": node.apiKey },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (response.ok) {
-      const data = await response.json();
-      // Обновляем статус ноды
-      await prisma.wdttNode.update({
-        where: { id },
-        data: { status: "ONLINE", lastSeenAt: new Date() },
-      });
-      return res.json({ success: true, nodeStatus: "ONLINE", data });
-    }
-    return res.status(502).json({ success: false, error: `HTTP ${response.status}` });
-  } catch (err) {
-    const error = err instanceof Error ? err.message : "Unknown error";
-    return res.status(502).json({ success: false, error });
+  if (!node.olcrtcRoomId.trim() || !isOlcRtcKey(node.olcrtcKey)) {
+    return res.status(400).json({ success: false, error: "Заполните room ID и 64-символьный ключ OlcRTC" });
   }
+  await prisma.wdttNode.update({ where: { id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
+  return res.json({ success: true, nodeStatus: "ONLINE", data: { provider: node.olcrtcProvider, transport: node.olcrtcTransport } });
 }));
 
 // ——— WDTT Категории ———
@@ -438,9 +442,9 @@ wdttAdminRouter.delete("/tariffs/:id", asyncRoute(async (req, res) => {
   return res.status(204).send();
 }));
 
-// ——— WDTT Слоты ———
+// ——— OlcRTC subscriptions ———
 
-// GET /api/admin/wdtt/slots — список всех слотов
+// GET /api/admin/olcrtc/slots — список всех подписок
 wdttAdminRouter.get("/slots", asyncRoute(async (_req, res) => {
   const slots = await prisma.wdttSlot.findMany({
     include: {
@@ -476,7 +480,7 @@ wdttAdminRouter.get("/slots", asyncRoute(async (_req, res) => {
   });
 }));
 
-// PATCH /api/admin/wdtt/slots/:id — изменить слот
+// PATCH /api/admin/olcrtc/slots/:id — изменить подписку
 const updateWdttSlotSchema = z.object({
   status: z.enum(["ACTIVE", "EXPIRED", "REVOKED"]).optional(),
   expiresAt: z.string().optional(),
@@ -499,7 +503,7 @@ wdttAdminRouter.patch("/slots/:id", asyncRoute(async (req, res) => {
   });
 }));
 
-// DELETE /api/admin/wdtt/slots/:id — удалить слот (и отозвать доступ)
+// DELETE /api/admin/olcrtc/slots/:id — удалить подписку
 wdttAdminRouter.delete("/slots/:id", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const slot = await prisma.wdttSlot.findUnique({
@@ -507,17 +511,6 @@ wdttAdminRouter.delete("/slots/:id", asyncRoute(async (req, res) => {
     include: { node: true },
   });
   if (!slot) return res.status(404).json({ message: "Slot not found" });
-
-  // Удаляем ключ с ноды
-  try {
-    await fetch(`${slot.node.apiUrl}/api/keys/${slot.password}`, {
-      method: "DELETE",
-      headers: { "X-API-Key": slot.node.apiKey },
-      signal: AbortSignal.timeout(5000),
-    });
-  } catch {
-    // Продолжаем удаление из БД даже если нода недоступна
-  }
 
   // Уменьшаем currentSlots на ноде
   await prisma.wdttNode.update({
@@ -529,7 +522,7 @@ wdttAdminRouter.delete("/slots/:id", asyncRoute(async (req, res) => {
   return res.status(204).send();
 }));
 
-// POST /api/admin/wdtt/slots/:id/revoke — отозвать доступ вручную
+// POST /api/admin/olcrtc/slots/:id/revoke — отозвать доступ вручную
 wdttAdminRouter.post("/slots/:id/revoke", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const slot = await prisma.wdttSlot.findUnique({
@@ -537,17 +530,6 @@ wdttAdminRouter.post("/slots/:id/revoke", asyncRoute(async (req, res) => {
     include: { node: true },
   });
   if (!slot) return res.status(404).json({ message: "Slot not found" });
-
-  // Удаляем ключ с ноды
-  try {
-    await fetch(`${slot.node.apiUrl}/api/keys/${slot.password}`, {
-      method: "DELETE",
-      headers: { "X-API-Key": slot.node.apiKey },
-      signal: AbortSignal.timeout(5000),
-    });
-  } catch {
-    // Продолжаем даже если нода недоступна
-  }
 
   // Обновляем статус слота
   await prisma.wdttSlot.update({
@@ -564,7 +546,7 @@ wdttAdminRouter.post("/slots/:id/revoke", asyncRoute(async (req, res) => {
   return res.json({ success: true, message: "Доступ отозван" });
 }));
 
-// GET /api/admin/wdtt/slots/export — экспорт слотов в CSV
+// GET /api/admin/olcrtc/slots/export — экспорт подписок в CSV
 wdttAdminRouter.get("/slots/export", asyncRoute(async (req, res) => {
   const format = (req.query.format as string) || "csv";
   if (format !== "csv") {

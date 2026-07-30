@@ -746,8 +746,8 @@ model ProxyNode {
   @@map("proxy_nodes")
 }
 
-// ——— WDTT (Warp/WireGuard) ноды ———
-// Интеграция с proxy-turn-vk-android-main
+// ——— OlcRTC link nodes ———
+// Legacy table name is preserved to keep historical payment records intact.
 model WdttNode {
   id                 String    @id @default(cuid())
   name               String    @default("")
@@ -759,6 +759,11 @@ model WdttNode {
   dtlsPort           Int       @default(56000) @map("dtls_port")
   wgPort             Int       @default(56001) @map("wg_port")
   tunPort            Int       @default(9000)  @map("tun_port")
+  olcrtcProvider     String    @default("jitsi") @map("olcrtc_provider")
+  olcrtcTransport    String    @default("datachannel") @map("olcrtc_transport")
+  olcrtcRoomId       String    @default("") @map("olcrtc_room_id")
+  olcrtcKey          String    @default("") @map("olcrtc_key")
+  olcrtcPayload      String?   @map("olcrtc_payload")
   capacity           Int?
   currentSlots       Int       @default(0) @map("current_slots")
   createdAt          DateTime  @default(now()) @map("created_at")

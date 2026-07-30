@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 
 function formatBytes(s: string | null): string {
   if (!s) return "—";
@@ -93,8 +92,8 @@ export function WdttPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">WDTT / Warp-ноды</h1>
-          <p className="text-sm text-muted-foreground mt-1">Управление WDTT нодами, тарифами и доступами</p>
+          <h1 className="text-2xl font-bold tracking-tight">OlcRTC</h1>
+          <p className="text-sm text-muted-foreground mt-1">Управление нодами OlcRTC, тарифами и подписками</p>
         </div>
       </div>
 
@@ -102,7 +101,7 @@ export function WdttPage() {
         <TabsList>
           <TabsTrigger value="nodes"><Server className="h-4 w-4 mr-2" />Ноды</TabsTrigger>
           <TabsTrigger value="categories"><Layers className="h-4 w-4 mr-2" />Категории / Тарифы</TabsTrigger>
-          <TabsTrigger value="slots"><KeyRound className="h-4 w-4 mr-2" />Слоты</TabsTrigger>
+          <TabsTrigger value="slots"><KeyRound className="h-4 w-4 mr-2" />Подписки</TabsTrigger>
         </TabsList>
 
         <TabsContent value="nodes">
@@ -175,7 +174,7 @@ function NodesTab({ token }: { token: string }) {
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : nodes.length === 0 ? (
-        <Card className="p-8 text-center text-muted-foreground">Нет WDTT нод. Добавьте первую ноду.</Card>
+        <Card className="p-8 text-center text-muted-foreground">Нет OlcRTC-нод. Добавьте первую ноду.</Card>
       ) : (
         <div className="grid gap-4">
           {nodes.map((n) => (
@@ -186,7 +185,7 @@ function NodesTab({ token }: { token: string }) {
                   <div>
                     <div className="font-medium">{n.name || "Без имени"}</div>
                     <div className="text-xs text-muted-foreground">
-                      {n.publicHost || "—"} | DTLS:{n.dtlsPort} WG:{n.wgPort} TUN:{n.tunPort}
+                      {n.provider} · {n.transport} · {n.roomId}
                     </div>
                   </div>
                 </div>
@@ -246,11 +245,11 @@ function NodesTab({ token }: { token: string }) {
 
 function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; open: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
-  const [apiUrl, setApiUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [dtlsPort, setDtlsPort] = useState(56000);
-  const [wgPort, setWgPort] = useState(56001);
-  const [tunPort, setTunPort] = useState(9000);
+  const [provider, setProvider] = useState<"jitsi" | "telemost" | "wbstream">("jitsi");
+  const [transport, setTransport] = useState<"datachannel" | "vp8channel" | "seichannel" | "videochannel">("datachannel");
+  const [roomId, setRoomId] = useState("");
+  const [encryptionKey, setEncryptionKey] = useState("");
+  const [payload, setPayload] = useState("");
   const [capacity, setCapacity] = useState("");
   const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<CreateWdttNodeResponse | null>(null);
@@ -260,11 +259,11 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
     try {
       const r = await api.createWdttNode(token, {
         name,
-        apiUrl,
-        apiKey: apiKey || undefined,
-        dtlsPort,
-        wgPort,
-        tunPort,
+        provider,
+        transport,
+        roomId,
+        encryptionKey,
+        payload: payload || null,
         capacity: capacity ? parseInt(capacity) : null,
       });
       setResult(r);
@@ -281,8 +280,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
           <DialogHeader><DialogTitle>Нода добавлена</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <div><Label>Название</Label><div className="font-medium">{result.node.name}</div></div>
-            <div><Label>API URL</Label><div className="font-mono text-xs">{result.node.apiUrl}</div></div>
-            <div><Label>API Key</Label><Textarea readOnly rows={2} value={result.node.apiKey} className="text-xs font-mono" /></div>
+            <div><Label>Параметры ссылки</Label><div className="font-mono text-xs">{result.node.provider} · {result.node.transport} · {result.node.roomId}</div></div>
             <p className="text-muted-foreground">{result.instructions}</p>
           </div>
           <DialogFooter>
@@ -296,21 +294,20 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Добавить WDTT ноду</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Добавить OlcRTC-ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Моя нода" /></div>
-          <div><Label>API URL</Label><Input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="http://94.183.177.230:8080" /></div>
-          <div><Label>API Key (опционально, сгенерируется автоматически)</Label><Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Оставьте пустым для авто-генерации" /></div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>DTLS порт</Label><Input type="number" value={dtlsPort} onChange={(e) => setDtlsPort(parseInt(e.target.value) || 56000)} /></div>
-            <div><Label>WG порт</Label><Input type="number" value={wgPort} onChange={(e) => setWgPort(parseInt(e.target.value) || 56001)} /></div>
-            <div><Label>TUN порт</Label><Input type="number" value={tunPort} onChange={(e) => setTunPort(parseInt(e.target.value) || 9000)} /></div>
-          </div>
+          <div className="grid grid-cols-2 gap-3"><div><Label>Провайдер</Label><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="jitsi">Jitsi</option><option value="telemost">Telemost</option><option value="wbstream">WBStream</option></select></div><div><Label>Транспорт</Label><select value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="datachannel">datachannel</option><option value="vp8channel">vp8channel</option><option value="seichannel">seichannel</option><option value="videochannel">videochannel</option></select></div></div>
+          <div><Label>Room ID</Label><Input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="https://meet.example.org/room" /></div>
+          <div><Label>Ключ шифрования</Label><Input value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} placeholder="64 символа hex" /></div>
+          <div><Label>Параметры транспорта (необязательно)</Label><Input value={payload} onChange={(e) => setPayload(e.target.value)} placeholder="vp8-fps=60&vp8-batch=64" /></div>
+          <p className="text-xs text-muted-foreground">После оплаты BillingStyle создаёт и выдаёт ссылку <code>olcrtc://…</code> с этими параметрами.</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400">Одинаковые Room ID и ключ получает каждый покупатель этой ноды. Отзыв подписки в BillingStyle не отключает уже импортированную ссылку на сервере.</p>
           <div><Label>Вместимость (пусто = без лимита)</Label><Input type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="100" /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Отмена</Button>
-          <Button onClick={handleCreate} disabled={creating || !name || !apiUrl}>
+          <Button onClick={handleCreate} disabled={creating || !name || !roomId || !/^[a-f0-9]{64}$/i.test(encryptionKey)}>
             {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Создать
           </Button>
@@ -323,6 +320,11 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
 function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node: WdttNodeListItem | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState("");
   const [status, setStatus] = useState("ONLINE");
+  const [provider, setProvider] = useState<"jitsi" | "telemost" | "wbstream">("jitsi");
+  const [transport, setTransport] = useState<"datachannel" | "vp8channel" | "seichannel" | "videochannel">("datachannel");
+  const [roomId, setRoomId] = useState("");
+  const [encryptionKey, setEncryptionKey] = useState("");
+  const [payload, setPayload] = useState("");
   const [capacity, setCapacity] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -330,6 +332,11 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
     if (node) {
       setName(node.name);
       setStatus(node.status);
+      setProvider(node.provider);
+      setTransport(node.transport);
+      setRoomId(node.roomId);
+      setEncryptionKey(node.encryptionKey);
+      setPayload(node.payload ?? "");
       setCapacity(node.capacity != null ? String(node.capacity) : "");
     }
   }, [node]);
@@ -341,6 +348,11 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
       await api.updateWdttNode(token, node.id, {
         name,
         status,
+        provider,
+        transport,
+        roomId,
+        encryptionKey,
+        payload: payload.trim() || null,
         capacity: capacity ? parseInt(capacity) : null,
       });
       onSaved();
@@ -356,6 +368,10 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
         <DialogHeader><DialogTitle>Редактировать ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3"><div><Label>Провайдер</Label><select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="jitsi">Jitsi</option><option value="telemost">Telemost</option><option value="wbstream">WBStream</option></select></div><div><Label>Транспорт</Label><select value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="datachannel">datachannel</option><option value="vp8channel">vp8channel</option><option value="seichannel">seichannel</option><option value="videochannel">videochannel</option></select></div></div>
+          <div><Label>Room ID</Label><Input value={roomId} onChange={(e) => setRoomId(e.target.value)} /></div>
+          <div><Label>Ключ шифрования</Label><Input value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} /></div>
+          <div><Label>Параметры транспорта</Label><Input value={payload} onChange={(e) => setPayload(e.target.value)} /></div>
           <div><Label>Статус</Label>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm">
               <option value="ONLINE">ONLINE</option>
@@ -533,7 +549,7 @@ function CreateTariffDialog({ token, categories, open, onClose, onCreated }: { t
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Создать WDTT тариф</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Создать тариф OlcRTC</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Категория</Label>
             {categories.length === 0 ? (
@@ -544,9 +560,9 @@ function CreateTariffDialog({ token, categories, open, onClose, onCreated }: { t
               </select>
             )}
           </div>
-          <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="WDTT 30 дней" /></div>
+          <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="OlcRTC 30 дней" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Ключей</Label><Input type="number" min={1} value={proxyCount} onChange={(e) => setProxyCount(parseInt(e.target.value) || 1)} /></div>
+            <div><Label>Ссылок</Label><Input type="number" min={1} value={proxyCount} onChange={(e) => setProxyCount(parseInt(e.target.value) || 1)} /></div>
             <div><Label>Дней</Label><Input type="number" min={1} value={durationDays} onChange={(e) => setDurationDays(parseInt(e.target.value) || 30)} /></div>
           </div>
           <div><Label>Трафик (GB, пусто = безлимит)</Label><Input type="number" value={trafficGb} onChange={(e) => setTrafficGb(e.target.value)} placeholder="100" /></div>
@@ -617,7 +633,7 @@ function EditTariffDialog({ token, tariff, open, onClose, onSaved }: { token: st
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Ключей</Label><Input type="number" min={1} value={proxyCount} onChange={(e) => setProxyCount(parseInt(e.target.value) || 1)} /></div>
+            <div><Label>Ссылок</Label><Input type="number" min={1} value={proxyCount} onChange={(e) => setProxyCount(parseInt(e.target.value) || 1)} /></div>
             <div><Label>Дней</Label><Input type="number" min={1} value={durationDays} onChange={(e) => setDurationDays(parseInt(e.target.value) || 30)} /></div>
           </div>
           <div><Label>Трафик (GB, пусто = безлимит)</Label><Input type="number" value={trafficGb} onChange={(e) => setTrafficGb(e.target.value)} /></div>
@@ -696,7 +712,7 @@ function SlotsTab({ token }: { token: string }) {
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : filtered.length === 0 ? (
-        <Card className="p-8 text-center text-muted-foreground">Нет слотов</Card>
+        <Card className="p-8 text-center text-muted-foreground">Нет подписок</Card>
       ) : (
         <div className="space-y-2">
           {filtered.map((s) => (

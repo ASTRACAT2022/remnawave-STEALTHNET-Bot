@@ -748,6 +748,8 @@ const DEFAULT_MENU_EMOJI_KEY_BY_ID: Record<string, string> = {
   my_proxy: "CONTENT_LOCATION",
   singbox: "CONTENT_LOCATION",
   my_singbox: "CONTENT_LOCATION",
+  olcrtc: "CONTENT_LOCATION",
+  my_olcrtc: "CONTENT_LOCATION",
   profile: "CONTENT_USER",
   devices: "CONTENT_DEVICE",
   topup: "PAY_CARD",

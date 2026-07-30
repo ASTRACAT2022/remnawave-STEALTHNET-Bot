@@ -272,6 +272,7 @@ export function mainMenu(opts: {
       if (b.id === "vpn") return opts.showVpn;
       if (b.id === "proxy" || b.id === "my_proxy") return opts.showProxy === true;
       if (b.id === "singbox" || b.id === "my_singbox") return opts.showSingbox === true;
+      if (b.id === "olcrtc" || b.id === "my_olcrtc") return !!opts.appUrl?.trim();
       if (b.id === "cabinet") return !!opts.appUrl?.trim();
       if (b.id === "tickets") return opts.showTickets === true && !!opts.appUrl?.trim();
       if (b.id === "support") return !!opts.hasSupportLinks;
@@ -319,6 +320,9 @@ export function mainMenu(opts: {
       if (iconId) w.icon_custom_emoji_id = iconId;
       if (styleForBtn) w.style = styleForBtn;
       items.push({ node: w, onePerRow });
+    } else if ((b.id === "olcrtc" || b.id === "my_olcrtc") && base) {
+      // Sales and the customer's subscription list use the existing secure WebApp flow.
+      items.push({ node: webAppBtn(labelForIcon, `${base}/cabinet/olcrtc`, styleForBtn, iconId), onePerRow });
     } else if (MENU_IDS[b.id]) {
       items.push({ node: btn(b.label, MENU_IDS[b.id], styleForBtn, iconId), onePerRow });
     }

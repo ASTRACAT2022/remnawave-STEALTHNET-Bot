@@ -746,10 +746,10 @@ export async function notifyWdttSlotsCreated(clientId: string, slotIds: string[]
     select: { wdttLink: true, node: { select: { publicHost: true } } },
     orderBy: { createdAt: "asc" },
   });
-  const name = tariffName?.trim() || "WDTT";
-  let text = `✅ <b>WDTT-доступ «${name}»</b> оплачен.\n\nСсылка для подключения:\n\n`;
+  const name = tariffName?.trim() || "OlcRTC";
+  let text = `✅ <b>Подписка OlcRTC «${escapeHtml(name)}»</b> оплачена.\n\nСсылка для подключения:\n\n`;
   for (const s of slots) text += `<code>${s.wdttLink}</code>\n\n`;
-  text += "Скопируйте ссылку и откройте в приложении proxy-turn-vk-android-main.";
+  text += "Скопируйте ссылку и импортируйте её в совместимое приложение OlcRTC.";
   const cfg = await getSystemConfig();
   await sendTelegramToUser(client.telegramId, text, null, backToMenuMarkup(cfg.botBackLabel), { clientIdForBotToken: client.id });
 }

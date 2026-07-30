@@ -1,148 +1,92 @@
 import { randomBytes } from "crypto";
 import { prisma } from "../../db.js";
 
+/**
+ * OlcRTC direct-link activation. The legacy file/table names only preserve
+ * historical WDTT payment data; no WDTT or OlcRTC Manager HTTP API is called.
+ */
 export type CreateWdttSlotsResult =
   | { ok: true; slotsCreated: number; slotIds: string[] }
   | { ok: false; error: string; status: number };
 
-function generatePassword(): string {
-  return randomBytes(20).toString("base64url").replace(/[^a-zA-Z0-9]/g, "").slice(0, 20) || `p${Date.now().toString(36)}`;
+type OlcRtcLinkNode = {
+  id: string;
+  name: string;
+  status: string;
+  capacity: number | null;
+  currentSlots: number;
+  olcrtcProvider: string;
+  olcrtcTransport: string;
+  olcrtcRoomId: string;
+  olcrtcKey: string;
+  olcrtcPayload: string | null;
+};
+
+function accessCode(): string {
+  return `olc-${randomBytes(12).toString("hex")}`;
 }
 
-async function createKeyOnNode(
-  nodeApiUrl: string,
-  nodeApiKey: string,
-  password: string,
-  trafficLimitBytes: bigint | null,
-): Promise<{ vkHash: string; wdttLink: string }> {
-  const body: Record<string, unknown> = { password };
-  if (trafficLimitBytes != null) {
-    body.traffic_limit_bytes = trafficLimitBytes.toString();
-  }
-  const response = await fetch(`${nodeApiUrl}/api/keys`, {
-    method: "POST",
-    headers: {
-      "X-API-Key": nodeApiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "unknown error");
-    throw new Error(`Node API error ${response.status}: ${text}`);
-  }
-  const data = await response.json() as { vk_hash: string; wdtt_link: string };
-  return { vkHash: data.vk_hash, wdttLink: data.wdtt_link };
+function linkComment(name: string): string {
+  return name.replace(/[?$@#<>]/g, " ").trim() || "OlcRTC";
+}
+
+/** Builds the documented client convention: olcrtc://<auth>?<transport>@<room>#<key>$<comment>. */
+export function buildOlcRtcLink(node: OlcRtcLinkNode): string {
+  const payload = node.olcrtcPayload?.trim();
+  const payloadPart = payload ? `<${payload}>` : "";
+  return `olcrtc://${node.olcrtcProvider}?${node.olcrtcTransport}${payloadPart}@${node.olcrtcRoomId}#${node.olcrtcKey}$${linkComment(node.name)}`;
 }
 
 export async function createWdttSlotsByPaymentId(paymentId: string): Promise<CreateWdttSlotsResult> {
   const payment = await prisma.payment.findUnique({
-    where: { id: paymentId },
-    select: { wdttTariffId: true, clientId: true },
+    where: { id: paymentId }, select: { wdttTariffId: true, clientId: true },
   });
-  if (!payment?.wdttTariffId) {
-    return { ok: false, error: "WDTT тариф не привязан к платежу", status: 400 };
-  }
+  if (!payment?.wdttTariffId) return { ok: false, error: "Тариф OlcRTC не привязан к платежу", status: 400 };
 
   const tariff = await prisma.wdttTariff.findUnique({ where: { id: payment.wdttTariffId } });
-  if (!tariff || !tariff.enabled) {
-    return { ok: false, error: "WDTT тариф не найден или отключён", status: 404 };
-  }
+  if (!tariff || !tariff.enabled) return { ok: false, error: "Тариф OlcRTC не найден или отключён", status: 404 };
 
-  const client = await prisma.client.findUnique({ where: { id: payment.clientId } });
-  if (!client) {
-    return { ok: false, error: "Клиент не найден", status: 404 };
-  }
-
-  const assignedNodeIds = await prisma.wdttTariffNode.findMany({
-    where: { tariffId: tariff.id },
-    select: { nodeId: true },
-  }).then((rows) => rows.map((r) => r.nodeId));
-
-  const nodeWhere =
-    assignedNodeIds.length > 0
-      ? { id: { in: assignedNodeIds }, status: "ONLINE" }
-      : { status: "ONLINE" };
-
+  const assignedNodeIds = (await prisma.wdttTariffNode.findMany({
+    where: { tariffId: tariff.id }, select: { nodeId: true },
+  })).map((row) => row.nodeId);
   const nodes = await prisma.wdttNode.findMany({
-    where: nodeWhere,
-    select: { id: true, name: true, apiUrl: true, apiKey: true, publicHost: true, dtlsPort: true, wgPort: true, tunPort: true, capacity: true, currentSlots: true },
+    where: assignedNodeIds.length ? { id: { in: assignedNodeIds }, status: "ONLINE" } : { status: "ONLINE" },
+    select: {
+      id: true, name: true, status: true, capacity: true, currentSlots: true,
+      olcrtcProvider: true, olcrtcTransport: true, olcrtcRoomId: true, olcrtcKey: true, olcrtcPayload: true,
+    },
     orderBy: { updatedAt: "asc" },
   });
-  if (nodes.length === 0) {
-    return { ok: false, error: "Нет доступных WDTT нод. Попробуйте позже.", status: 503 };
+  const validNodes = nodes.filter((node) => node.olcrtcRoomId.trim() && /^[a-f0-9]{64}$/i.test(node.olcrtcKey));
+  if (!validNodes.length) return { ok: false, error: "Нет настроенных OlcRTC нод. Проверьте room ID, ключ и статус ноды.", status: 503 };
+
+  const expiresAt = new Date(Date.now() + tariff.durationDays * 86_400_000);
+  const usage = new Map(validNodes.map((node) => [node.id, node.currentSlots]));
+  const results: { nodeId: string; code: string; link: string }[] = [];
+  for (let index = 0; index < tariff.proxyCount; index++) {
+    const node = validNodes.find((candidate) => (usage.get(candidate.id) ?? 0) < (candidate.capacity ?? Infinity));
+    if (!node) break;
+    results.push({ nodeId: node.id, code: accessCode(), link: buildOlcRtcLink(node) });
+    usage.set(node.id, (usage.get(node.id) ?? 0) + 1);
   }
+  if (!results.length) return { ok: false, error: "На OlcRTC нодах нет свободных мест", status: 503 };
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + tariff.durationDays * 24 * 60 * 60 * 1000);
-  const slotsToCreate = tariff.proxyCount;
-  const results: { nodeId: string; password: string; vkHash: string; wdttLink: string }[] = [];
-  const nodeSlotCount: Map<string, number> = new Map();
-  for (const n of nodes) nodeSlotCount.set(n.id, n.currentSlots);
-
-  let nodeIndex = 0;
-  for (let i = 0; i < slotsToCreate; i++) {
-    const node = nodes[nodeIndex % nodes.length]!;
-    const used = nodeSlotCount.get(node.id) ?? 0;
-    const cap = node.capacity;
-    if (cap != null && used >= cap) {
-      const next = nodes.find((n) => (nodeSlotCount.get(n.id) ?? 0) < (n.capacity ?? Infinity));
-      if (!next) break;
-      nodeIndex = nodes.indexOf(next);
-    }
-
-    const password = generatePassword();
-    let keyResult: { vkHash: string; wdttLink: string };
-    try {
-      keyResult = await createKeyOnNode(node.apiUrl, node.apiKey, password, tariff.trafficLimitBytes);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      console.error(`[WDTT Activation] Failed to create key on node ${node.name}: ${msg}`);
-      continue;
-    }
-
-    results.push({
-      nodeId: node.id,
-      password,
-      vkHash: keyResult.vkHash,
-      wdttLink: keyResult.wdttLink,
-    });
-    nodeSlotCount.set(node.id, used + 1);
-    nodeIndex++;
-  }
-
-  if (results.length === 0) {
-    return { ok: false, error: "Не удалось создать ключи на нодах", status: 503 };
-  }
-
-  const created = await prisma.$transaction(
-    results.map((r) =>
-      prisma.wdttSlot.create({
-        data: {
-          nodeId: r.nodeId,
-          clientId: client.id,
-          tariffId: tariff.id,
-          paymentId: paymentId,
-          password: r.password,
-          vkHash: r.vkHash,
-          wdttLink: r.wdttLink,
-          expiresAt,
-          trafficLimitBytes: tariff.trafficLimitBytes,
-          status: "ACTIVE",
-        },
-      })
-    )
-  );
-
-  await Promise.all(
-    results.map((r) =>
-      prisma.wdttNode.update({
-        where: { id: r.nodeId },
-        data: { currentSlots: { increment: 1 } },
-      })
-    )
-  );
-
-  return { ok: true, slotsCreated: created.length, slotIds: created.map((c) => c.id) };
+  const created = await prisma.$transaction(results.map((result) => prisma.wdttSlot.create({
+    data: {
+      nodeId: result.nodeId,
+      clientId: payment.clientId,
+      tariffId: tariff.id,
+      paymentId,
+      password: result.code,
+      vkHash: "olcrtc",
+      wdttLink: result.link,
+      expiresAt,
+      trafficLimitBytes: tariff.trafficLimitBytes,
+      status: "ACTIVE",
+    },
+  })));
+  await Promise.all(results.map((result) => prisma.wdttNode.update({
+    where: { id: result.nodeId }, data: { currentSlots: { increment: 1 } },
+  })));
+  return { ok: true, slotsCreated: created.length, slotIds: created.map((slot) => slot.id) };
 }

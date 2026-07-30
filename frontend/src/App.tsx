@@ -335,7 +335,7 @@ function AppRoutes() {
         <Route path="auto-broadcast" element={<ForceChangePassword><AutoBroadcastPage /></ForceChangePassword>} />
         <Route path="proxy" element={<ForceChangePassword><ProxyPage /></ForceChangePassword>} />
         <Route path="singbox" element={<ForceChangePassword><SingboxPage /></ForceChangePassword>} />
-        <Route path="wdtt" element={<ForceChangePassword><WdttPage /></ForceChangePassword>} />
+        <Route path="olcrtc" element={<ForceChangePassword><WdttPage /></ForceChangePassword>} />
         <Route path="backup" element={<ForceChangePassword><BackupPage /></ForceChangePassword>} />
         <Route path="contests" element={<ForceChangePassword><ContestsPage /></ForceChangePassword>} />
         <Route path="tickets" element={<ForceChangePassword><AdminTicketsPage /></ForceChangePassword>} />
@@ -490,7 +490,7 @@ function AppRoutes() {
           }
         />
         <Route
-          path="wdtt"
+          path="olcrtc"
           element={
             <RequireClientAuth>
               <ClientWdttPage />

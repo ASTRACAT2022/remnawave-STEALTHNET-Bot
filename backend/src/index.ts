@@ -68,7 +68,7 @@ async function main() {
     trigger: () => runContestDailyReminder(),
   });
   registerCron({ name: "auto-renew", cron: "*/15 * * * *", description: "Авто-продление подписок с баланса/yookassa" });
-  registerCron({ name: "wdtt-expiry", cron: "*/5 * * * *", description: "Удаление истёкших WDTT ключей с нод" });
+  registerCron({ name: "olcrtc-expiry", cron: "*/5 * * * *", description: "Отключение истёкших OlcRTC подписок" });
   registerCron({ name: "gift-expiry", cron: "*/30 * * * *", description: "Истёкшие gift-коды → освобождаем зарезервированные подписки" });
   registerCron({ name: "auto-backup", cron: "0 4 * * *", description: "Автоматический бэкап БД" });
   registerCron({ name: "marketplace-heartbeat", cron: "*/10 * * * *", description: "Heartbeat в маркетплейс-хаб" });

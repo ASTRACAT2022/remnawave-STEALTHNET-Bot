@@ -225,7 +225,7 @@ function useNavItems() {
     { to: "/cabinet/extra-options", label: t("cabinet.nav.options"), icon: PlusCircle },
     { to: "/cabinet/proxy", label: t("cabinet.nav.proxy"), icon: Globe },
     { to: "/cabinet/singbox", label: t("cabinet.nav.access"), icon: KeyRound },
-    { to: "/cabinet/wdtt", label: "WDTT / Warp", icon: Wifi },
+    { to: "/cabinet/olcrtc", label: "OlcRTC", icon: Wifi },
     { to: "/cabinet/referral", label: t("cabinet.nav.referrals"), icon: Users },
     { to: "/cabinet/tickets", label: t("cabinet.nav.tickets"), icon: MessageSquare },
     { to: "/cabinet/gifts", label: "Подарки", icon: Gift },
