@@ -506,6 +506,11 @@ export function ClientWdttPage() {
   const pendingSlots = slots.filter((s) => s.requiresConfiguration || s.status === "PENDING_CONFIG");
   const expiredSlots = slots.filter((s) => s.status !== "ACTIVE" && s.status !== "PENDING_CONFIG");
 
+  // A buyer should land on the setup card immediately after a payment/page refresh.
+  useEffect(() => {
+    if (pendingSlots.length > 0) setActiveTab("slots");
+  }, [pendingSlots.length]);
+
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
       <AnimatePresence mode="wait">
@@ -569,10 +574,10 @@ export function ClientWdttPage() {
                   <Wifi className="h-4 w-4" /> Купить
                 </TabsTrigger>
                 <TabsTrigger value="slots" className="gap-2 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                  Мои доступы
+                  Настроить / доступы
                   {slots.length > 0 && (
-                    <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-xs font-medium">
-                      {slots.length}
+                    <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-xs font-medium" title={pendingSlots.length ? "Требуется настройка" : undefined}>
+                      {pendingSlots.length || slots.length}
                     </span>
                   )}
                 </TabsTrigger>

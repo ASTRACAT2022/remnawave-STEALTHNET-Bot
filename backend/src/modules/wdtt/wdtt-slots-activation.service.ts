@@ -158,7 +158,14 @@ export async function createWdttSlotsByPaymentId(paymentId: string): Promise<Cre
     },
     orderBy: { updatedAt: "asc" },
   });
-  const validNodes = nodes.filter(isValidNode);
+  // Prefer the personal mode whenever it is available. This makes a newly
+  // created personal node take precedence over old shared-link nodes that may
+  // still exist for historical subscriptions.
+  const validNodes = nodes.filter(isValidNode).sort((left, right) => {
+    const leftPersonal = left.olcrtcProvisionMode === "PER_CLIENT" ? 0 : 1;
+    const rightPersonal = right.olcrtcProvisionMode === "PER_CLIENT" ? 0 : 1;
+    return leftPersonal - rightPersonal;
+  });
   if (!validNodes.length) return { ok: false, error: "Нет настроенных OlcRTC нод. Проверьте ноду и её статус.", status: 503 };
 
   const expiresAt = new Date(Date.now() + tariff.durationDays * 86_400_000);
