@@ -75,13 +75,18 @@ async function provisionerRequest(node: PersonalSlot["node"], path: string, init
     throw new Error("На ноде не настроен сервис персональных OlcRTC-серверов");
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    return await fetch(provisionerUrl(node.olcrtcProvisionerUrl, path), {
-      ...init,
-      headers: { Authorization: `Bearer ${node.olcrtcProvisionerToken}`, "Content-Type": "application/json", ...init.headers },
-      signal: controller.signal,
-    });
+    try {
+      return await fetch(provisionerUrl(node.olcrtcProvisionerUrl, path), {
+        ...init,
+        headers: { Authorization: `Bearer ${node.olcrtcProvisionerToken}`, "Content-Type": "application/json", ...init.headers },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error("Сервис выдачи личных OlcRTC-серверов не ответил за 15 секунд");
+      throw error;
+    }
   } finally {
     clearTimeout(timeout);
   }
