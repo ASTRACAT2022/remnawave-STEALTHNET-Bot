@@ -383,7 +383,9 @@ async function migrateOlcRtcSlotsToWdttNode(
     if (!["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(slot.status)) {
       result.failed.push({ slotId, error: "Переносятся только действующие оплаченные подключения" }); continue;
     }
-    if (slot.nodeId === target.id || slot.node.olcrtcProvisionMode === "WDTT_COMPAT") {
+    const alreadyWdtt = slot.wdttLink.startsWith("wdtt://");
+    const staysOnSameNode = slot.nodeId === target.id;
+    if (alreadyWdtt) {
       result.failed.push({ slotId, error: "Подключение уже является WDTT-доступом" }); continue;
     }
     if (slot.expiresAt <= new Date()) {
@@ -400,10 +402,10 @@ async function migrateOlcRtcSlotsToWdttNode(
 
     try {
       await prisma.$transaction(async (tx) => {
-        if (target.capacity !== null) {
+        if (!staysOnSameNode && target.capacity !== null) {
           const reserved = await tx.wdttNode.updateMany({ where: { id: target.id, currentSlots: { lt: target.capacity } }, data: { currentSlots: { increment: 1 } } });
           if (reserved.count !== 1) throw new Error("На целевой WDTT-ноде больше нет свободных мест");
-        } else {
+        } else if (!staysOnSameNode) {
           await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
         }
         await tx.wdttSlot.update({
@@ -420,14 +422,25 @@ async function migrateOlcRtcSlotsToWdttNode(
             revokedAt: null,
           },
         });
-        const actualSourceSlots = await tx.wdttSlot.count({ where: { nodeId: slot.nodeId, status: { in: ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"] } } });
-        await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: actualSourceSlots } });
+        if (!staysOnSameNode) {
+          const actualSourceSlots = await tx.wdttSlot.count({ where: { nodeId: slot.nodeId, status: { in: ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"] } } });
+          await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: actualSourceSlots } });
+        }
         await tx.wdttSlotBackup.create({
           data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED_TO_WDTT", provider: slot.olcrtcProvider, roomId: slot.olcrtcRoomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt },
         });
       });
       result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link: issued.link });
-      if (!await deprovisionOlcRtcSlot(slot)) result.cleanupWarnings.push({ slotId, warning: "WDTT-ключ уже выдан, но старый личный OlcRTC-контейнер не удалось остановить автоматически" });
+      // A node can be switched to WDTT in-place. Its saved provisioner
+      // credentials are retained, so use them to stop the old personal
+      // container even though the node's current mode is WDTT_COMPAT.
+      const oldContainerStopped = staysOnSameNode
+        ? (!slot.node.olcrtcProvisionerUrl || !slot.node.olcrtcProvisionerToken
+          || await deprovisionOlcRtcSlot({ ...slot, node: { ...slot.node, olcrtcProvisionMode: "PER_CLIENT" } }))
+        : await deprovisionOlcRtcSlot(slot);
+      if (!oldContainerStopped) {
+        result.cleanupWarnings.push({ slotId, warning: "WDTT-ключ уже выдан, но старый личный OlcRTC-контейнер не удалось остановить автоматически" });
+      }
     } catch (error) {
       await revokeWdttAccess({ id: slot.id, status: "ACTIVE", password: issued.password, node: target }).catch(() => false);
       result.failed.push({ slotId, error: error instanceof Error ? error.message : "Не удалось сохранить WDTT-доступ" });
