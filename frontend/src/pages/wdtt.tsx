@@ -373,15 +373,21 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
       await api.updateWdttNode(token, node.id, {
         name,
         status,
-        provider,
-        transport,
-        roomId,
-        encryptionKey,
-        payload: payload.trim() || null,
         provisionMode,
-        provisionerUrl: provisionMode === "PER_CLIENT" ? provisionerUrl || null : null,
-        provisionerToken: provisionMode === "PER_CLIENT" ? provisionerToken || null : null,
-        capacity: capacity ? parseInt(capacity) : null,
+        capacity: capacity ? parseInt(capacity, 10) : null,
+        ...(provisionMode === "PER_CLIENT" ? {
+          provisionerUrl: provisionerUrl || null,
+          // Пустое поле означает «оставить текущий секрет», а не стереть его.
+          ...(provisionerToken.trim() ? { provisionerToken: provisionerToken.trim() } : {}),
+        } : {
+          provider,
+          transport,
+          roomId,
+          encryptionKey,
+          payload: payload.trim() || null,
+          provisionerUrl: null,
+          provisionerToken: null,
+        }),
       });
       onSaved();
     } catch (e) {

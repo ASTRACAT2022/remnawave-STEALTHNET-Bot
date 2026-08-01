@@ -2,7 +2,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireClientAuth } from "../client/client.middleware.js";
-import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient, reissueOlcRtcSlotForClient } from "./wdtt-slots-activation.service.js";
+import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient, reissueOlcRtcSlotForClient, restoreOlcRtcSlotBackupForClient } from "./wdtt-slots-activation.service.js";
 
 type AuthRequest = express.Request & { clientId: string };
 
@@ -55,7 +55,7 @@ const configureSlotSchema = z.object({
 // POST /api/client/olcrtc/slots/:id/configure — client selects carrier and their room.
 wdttClientRouter.post("/slots/:id/configure", asyncRoute(async (req, res) => {
   const body = configureSlotSchema.safeParse(req.body);
-  if (!body.success) return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+  if (!body.success) return res.status(400).json({ message: body.error.issues[0]?.message ?? "Проверьте данные комнаты", errors: body.error.flatten() });
   try {
     const result = await configureOlcRtcSlotForClient({
       clientId: (req as AuthRequest).clientId,
@@ -66,6 +66,23 @@ wdttClientRouter.post("/slots/:id/configure", asyncRoute(async (req, res) => {
     return res.json({ success: true, wdttLink: result.link });
   } catch (error) {
     return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось настроить подключение" });
+  }
+}));
+
+wdttClientRouter.get("/slots/:id/backups", asyncRoute(async (req, res) => {
+  const clientId = (req as AuthRequest).clientId;
+  const slot = await prisma.wdttSlot.findFirst({ where: { id: req.params.id, clientId }, select: { id: true } });
+  if (!slot) return res.status(404).json({ message: "Подписка не найдена" });
+  const items = await prisma.wdttSlotBackup.findMany({ where: { slotId: slot.id, clientId }, orderBy: { createdAt: "desc" }, take: 10, select: { id: true, reason: true, provider: true, roomId: true, createdAt: true } });
+  return res.json({ items: items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) });
+}));
+
+wdttClientRouter.post("/slots/:id/backups/:backupId/restore", asyncRoute(async (req, res) => {
+  try {
+    const result = await restoreOlcRtcSlotBackupForClient({ clientId: (req as AuthRequest).clientId, slotId: req.params.id, backupId: req.params.backupId });
+    return res.json({ success: true, wdttLink: result.link });
+  } catch (error) {
+    return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось восстановить резервную копию" });
   }
 }));
 

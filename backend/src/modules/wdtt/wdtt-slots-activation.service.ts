@@ -135,7 +135,11 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
     olcrtcPayload: PERSONAL_VP8_PAYLOAD,
   });
   try {
-    await prisma.wdttSlot.update({ where: { id: slot.id }, data: { status: "ACTIVE", vkHash: "olcrtc", wdttLink: link } });
+    await prisma.$transaction([
+      prisma.wdttSlot.update({ where: { id: slot.id }, data: { status: "ACTIVE", vkHash: "olcrtc", wdttLink: link, olcrtcProvider: input.provider, olcrtcRoomId: roomId } }),
+      prisma.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: input.clientId, reason: "CONFIGURED", provider: input.provider, roomId, wdttLink: link, expiresAt: slot.expiresAt } }),
+    ]);
+    await pruneOlcRtcBackups(slot.id).catch((error) => console.error(`[OlcRTC] unable to prune backups for ${slot.id}`, error));
   } catch (error) {
     await deprovisionOlcRtcSlot(slot);
     throw error;
@@ -155,10 +159,29 @@ export async function reissueOlcRtcSlotForClient(input: { clientId: string; slot
   if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Перевыпуск доступен только для личных OlcRTC-серверов");
   if (!await deprovisionOlcRtcSlot(slot)) throw new Error("Не удалось остановить старый личный сервер; повторите попытку");
 
-  await prisma.wdttSlot.update({
-    where: { id: slot.id },
-    data: { status: "PENDING_CONFIG", vkHash: "olcrtc-pending", wdttLink: "" },
-  });
+  await prisma.$transaction([
+    prisma.wdttSlot.update({
+      where: { id: slot.id },
+      data: { status: "PENDING_CONFIG", vkHash: "olcrtc-pending", wdttLink: "", olcrtcProvider: null, olcrtcRoomId: null },
+    }),
+    prisma.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: input.clientId, reason: "REISSUED", provider: slot.olcrtcProvider, roomId: slot.olcrtcRoomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt } }),
+  ]);
+  await pruneOlcRtcBackups(slot.id).catch((error) => console.error(`[OlcRTC] unable to prune backups for ${slot.id}`, error));
+}
+
+async function pruneOlcRtcBackups(slotId: string): Promise<void> {
+  const stale = await prisma.wdttSlotBackup.findMany({ where: { slotId }, orderBy: { createdAt: "desc" }, skip: 10, select: { id: true } });
+  if (stale.length) await prisma.wdttSlotBackup.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
+}
+
+/** Restores a saved room configuration by creating a fresh personal server and link. */
+export async function restoreOlcRtcSlotBackupForClient(input: { clientId: string; slotId: string; backupId: string }): Promise<{ link: string }> {
+  const backup = await prisma.wdttSlotBackup.findFirst({ where: { id: input.backupId, slotId: input.slotId, clientId: input.clientId } });
+  if (!backup) throw new Error("Резервная копия OlcRTC не найдена");
+  if ((backup.provider !== "telemost" && backup.provider !== "wbstream") || !backup.roomId?.trim()) {
+    throw new Error("В этой резервной копии нет данных комнаты для восстановления");
+  }
+  return configureOlcRtcSlotForClient({ clientId: input.clientId, slotId: input.slotId, provider: backup.provider, roomId: backup.roomId });
 }
 
 export async function createWdttSlotsByPaymentId(paymentId: string): Promise<CreateWdttSlotsResult> {

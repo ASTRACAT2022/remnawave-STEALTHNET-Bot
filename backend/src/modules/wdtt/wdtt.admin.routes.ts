@@ -105,7 +105,7 @@ const createWdttNodeSchema = z.object({
 wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
   const body = createWdttNodeSchema.safeParse(req.body);
   if (!body.success) {
-    return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+    return res.status(400).json({ message: body.error.issues[0]?.message ?? "Проверьте параметры ноды", errors: body.error.flatten() });
   }
 
   const node = await prisma.wdttNode.create({
@@ -221,7 +221,7 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
   const id = req.params.id;
   const body = updateWdttNodeSchema.safeParse(req.body);
   if (!body.success) {
-    return res.status(400).json({ message: "Invalid input", errors: body.error.flatten() });
+    return res.status(400).json({ message: body.error.issues[0]?.message ?? "Проверьте параметры ноды", errors: body.error.flatten() });
   }
   const node = await prisma.wdttNode.findUnique({ where: { id } });
   if (!node) return res.status(404).json({ message: "Node not found" });

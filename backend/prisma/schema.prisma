@@ -1691,6 +1691,8 @@ model WdttSlot {
   password           String
   vkHash             String    @map("vk_hash")
   wdttLink           String    @map("wdtt_link")
+  olcrtcProvider     String?   @map("olcrtc_provider")
+  olcrtcRoomId       String?   @map("olcrtc_room_id")
 
   // Статус и сроки
   expiresAt          DateTime  @map("expires_at")
@@ -1710,6 +1712,7 @@ model WdttSlot {
   client Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
   tariff WdttTariff? @relation(fields: [tariffId], references: [id], onDelete: SetNull)
   payment Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  backups WdttSlotBackup[]
 
   @@index([nodeId])
   @@index([clientId])
@@ -1717,4 +1720,22 @@ model WdttSlot {
   @@index([status])
   @@index([expiresAt])
   @@map("wdtt_slots")
+}
+
+model WdttSlotBackup {
+  id             String   @id @default(cuid())
+  slotId         String   @map("slot_id")
+  clientId       String   @map("client_id")
+  reason         String
+  provider       String?  @map("provider")
+  roomId         String?  @map("room_id")
+  wdttLink       String   @map("wdtt_link")
+  expiresAt      DateTime @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  slot WdttSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@index([slotId, createdAt])
+  @@index([clientId, createdAt])
+  @@map("wdtt_slot_backups")
 }
