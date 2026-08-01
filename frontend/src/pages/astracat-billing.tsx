@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Archive, Bell, CalendarClock, ChevronDown, CircleHelp, ClipboardList, CreditCard, Gauge, Gift, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Package, PanelLeftClose, Plus, ReceiptText, Settings, ShieldCheck, Ticket, Users, Wallet, X } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
-import { api, type ClientPayer, type ClientPayment, type ClientTeamMember, type ClientVisit, type PublicTariff, type PublicTariffCategory, type WdttClientCategoryItem, type WdttClientSlotItem, type WdttSlotBackupItem } from "@/lib/api";
+import { api, type ClientPayer, type ClientPayment, type ClientTeamMember, type ClientVisit, type PublicSellOption, type PublicTariff, type PublicTariffCategory, type WdttClientCategoryItem, type WdttClientSlotItem, type WdttSlotBackupItem } from "@/lib/api";
 import { preparePaymentRedirect } from "@/lib/open-payment-url";
 import { Button, Checkbox, EmptyState, FormField, IconButton, Input, Modal, Select, StatusBadge, Stepper, Switcher, Textarea } from "@/components/astracat/dragon";
 import "./astracat-billing.css";
 
-type PageId = "home" | "profile" | "roles" | "payers" | "referrals" | "cart" | "orders" | "methods" | "discounts" | "preferences" | "subscriptions" | "olcrtc" | "payments" | "expenses" | "renewals" | "usage" | "tickets" | "archive" | "statistics" | "visits" | "help";
+type PageId = "home" | "profile" | "roles" | "payers" | "referrals" | "cart" | "orders" | "methods" | "discounts" | "preferences" | "subscriptions" | "options" | "olcrtc" | "payments" | "expenses" | "renewals" | "usage" | "tickets" | "archive" | "statistics" | "visits" | "help";
 type ModalName = "topup" | "ticket" | "order" | "olcrtcOrder" | "payer" | "member" | null;
 type SubscriptionRow = { id: string; service: string; plan: string; status: string; expiresAt: string | null; days: number | null; traffic: string; devices: string; autoRenew: boolean; type: "root" | "secondary" };
 type TicketRow = { id: string; subject: string; status: string; createdAt: string; updatedAt: string };
@@ -15,7 +15,7 @@ type TicketRow = { id: string; subject: string; status: string; createdAt: strin
 const groups: { label?: string; items: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }> }[] = [
   { items: [{ id: "home", label: "Главная", icon: LayoutDashboard }] },
   { label: "Клиент", items: [{ id: "profile", label: "Профиль", icon: Users }, { id: "roles", label: "Роли пользователей", icon: ShieldCheck }, { id: "payers", label: "Плательщики", icon: Users }, { id: "referrals", label: "Реферальная программа", icon: Gift }, { id: "cart", label: "Корзина", icon: ReceiptText }, { id: "orders", label: "Заказы", icon: ClipboardList }, { id: "methods", label: "Способы оплаты", icon: CreditCard }, { id: "discounts", label: "Скидки", icon: Gift }, { id: "preferences", label: "Настройки пользователя", icon: Settings }] },
-  { label: "Товары / Услуги", items: [{ id: "subscriptions", label: "Подписки ASTRACAT", icon: Package }, { id: "olcrtc", label: "OlcRTC", icon: Gauge }] },
+  { label: "Товары / Услуги", items: [{ id: "subscriptions", label: "Подписки ASTRACAT", icon: Package }, { id: "options", label: "Доп. опции", icon: Plus }, { id: "olcrtc", label: "OlcRTC", icon: Gauge }] },
   { label: "Финансы", items: [{ id: "payments", label: "Платежи", icon: Wallet }, { id: "expenses", label: "Расходы", icon: ReceiptText }, { id: "renewals", label: "Автопродление услуг", icon: CalendarClock }, { id: "usage", label: "Потребление ресурсов", icon: Gauge }] },
   { label: "Поддержка", items: [{ id: "tickets", label: "Запросы", icon: Ticket }, { id: "archive", label: "Архив запросов", icon: Archive }] },
   { label: "Инструменты", items: [{ id: "statistics", label: "Статистика", icon: Gauge }, { id: "visits", label: "Журнал посещений", icon: ClipboardList }] },
@@ -87,6 +87,7 @@ function BillingPage({ page, data, token, open, modal, inform, refreshProfile }:
   if (page === "home") return <Dashboard data={data} open={open} modal={modal} />;
   if (page === "subscriptions") return <Subscriptions data={data} token={token} modal={modal} reload={data.reload} inform={inform} />;
   if (page === "payments" || page === "orders") return <Payments payments={data.payments} order={page === "orders"} modal={modal} />;
+  if (page === "options") return <ExtraOptions data={data} token={token} reload={data.reload} refreshProfile={refreshProfile} inform={inform} />;
   if (page === "tickets" || page === "archive") return <Tickets tickets={data.tickets.filter((ticket) => page === "archive" ? ticket.status === "closed" : ticket.status !== "closed")} modal={modal} />;
   if (page === "profile") return <Profile token={token} profile={data.profile} refresh={refreshProfile} inform={inform} />;
   if (page === "payers") return <Payers payers={data.payers} token={token} modal={modal} reload={data.reload} inform={inform} />;
@@ -102,6 +103,65 @@ function BillingPage({ page, data, token, open, modal, inform, refreshProfile }:
   if (page === "statistics") return <Frame title="Статистика"><section className="ac-widget-grid"><Widget title="Подписки" icon={<Package size={18} />}><strong className="ac-money">{data.subscriptions.length}</strong></Widget><Widget title="Платежи" icon={<Wallet size={18} />}><strong className="ac-money">{data.payments.length}</strong></Widget></section></Frame>;
   if (page === "preferences") return <Preferences />;
   return <Frame title={labels[page]}><EmptyState title="Нет данных" text="Этот раздел не содержит отдельных сущностей в текущей модели сервиса; демонстрационные записи не показываются." /></Frame>;
+}
+
+function extraOptionLabel(option: PublicSellOption) {
+  if (option.kind === "traffic") return `+${option.trafficGb} ГБ трафика`;
+  if (option.kind === "devices") return `+${option.deviceCount} устройств`;
+  return `${option.trafficGb ? `+${option.trafficGb} ГБ · ` : ""}дополнительный сервер`;
+}
+
+function ExtraOptions({ data, token, reload, refreshProfile, inform }: { data: ReturnType<typeof useBillingData>; token: string; reload: () => Promise<void>; refreshProfile: () => Promise<void>; inform: (message: string) => void }) {
+  const [options, setOptions] = useState<PublicSellOption[]>([]);
+  const [enabled, setEnabled] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [selected, setSelected] = useState<PublicSellOption | null>(null);
+  const [targetSubscriptionId, setTargetSubscriptionId] = useState("");
+  const [method, setMethod] = useState<CheckoutMethod>("balance");
+  const [plategaMethod, setPlategaMethod] = useState(2);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const paymentCreationRef = useRef(false);
+  const { methods, plategaMethods, loading: loadingMethods } = useAvailableCheckoutMethods(true);
+
+  useEffect(() => {
+    void api.getPublicConfig().then((config) => {
+      setEnabled(Boolean(config.sellOptionsEnabled));
+      setOptions(config.sellOptions ?? []);
+    }).catch(() => { setEnabled(false); setOptions([]); }).finally(() => setLoadingOptions(false));
+  }, []);
+  useEffect(() => { if (data.subscriptions.length && !targetSubscriptionId) setTargetSubscriptionId(data.subscriptions[0].id); }, [data.subscriptions, targetSubscriptionId]);
+  useEffect(() => { if (methods.length && !methods.some((item) => item.id === method)) setMethod(methods[0].id); }, [methods, method]);
+  useEffect(() => { if (plategaMethods.length) setPlategaMethod(plategaMethods[0].id); }, [plategaMethods]);
+
+  const close = () => { setSelected(null); setPaymentUrl(null); setError(null); };
+  const startPayment = async () => {
+    if (!selected || !targetSubscriptionId || paymentUrl || paymentCreationRef.current) return;
+    paymentCreationRef.current = true;
+    setError(null);
+    const extraOption = { kind: selected.kind, productId: selected.id, targetSubscriptionId };
+    try {
+      if (method === "balance") {
+        await api.clientPayOptionByBalance(token, { extraOption: { kind: selected.kind, productId: selected.id }, targetSubscriptionId });
+        await Promise.all([reload(), refreshProfile()]);
+        inform("Дополнительная опция оплачена и применена к подписке");
+        close();
+        return;
+      }
+      const url = await startExternalPayment(token, method, { extraOption }, plategaMethod);
+      setPaymentUrl(url);
+      inform("Ссылка на оплату создана");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось создать платёж");
+    } finally {
+      paymentCreationRef.current = false;
+    }
+  };
+
+  if (loadingOptions) return <Frame title="Доп. опции"><EmptyState title="Загрузка" text="Получаем доступные дополнительные опции." /></Frame>;
+  if (!enabled || options.length === 0) return <Frame title="Доп. опции" description="Трафик, устройства и серверы, настроенные администратором."><EmptyState title={enabled ? "Опции пока не настроены" : "Продажа дополнительных опций отключена"} text={enabled ? "Как только администратор добавит товары, они появятся здесь." : "Обратитесь к администратору, чтобы подключить эту возможность."} /></Frame>;
+
+  return <><Frame title="Доп. опции" description="Улучшайте конкретную подписку: добавляйте трафик, устройства или серверы."><section className="ac-option-grid">{options.map((option) => <article className="ac-option-card" key={`${option.kind}-${option.id}`}><div><StatusBadge tone="neutral">{option.kind === "traffic" ? "ТРАФИК" : option.kind === "devices" ? "УСТРОЙСТВА" : "СЕРВЕР"}</StatusBadge><h2>{option.name || extraOptionLabel(option)}</h2><p>{extraOptionLabel(option)}</p></div><footer><strong>{money(option.price, option.currency)}</strong><Button onClick={() => { setSelected(option); setPaymentUrl(null); setError(null); }}>Выбрать</Button></footer></article>)}</section></Frame>{selected && <Modal title={`Оплата: ${selected.name || extraOptionLabel(selected)}`} onClose={close}><div className="ac-modal-body"><section className="ac-order-summary"><span>{extraOptionLabel(selected)}</span><strong>{money(selected.price, selected.currency)}</strong><small>Итоговая цена и скидка подтверждаются сервером при создании платежа.</small></section>{data.subscriptions.length > 0 ? <FormField label="Применить к подписке"><Select value={targetSubscriptionId} disabled={Boolean(paymentUrl)} onChange={(event) => setTargetSubscriptionId(event.target.value)}>{data.subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>{subscription.plan} · {subscription.service}</option>)}</Select></FormField> : <p className="text-destructive">Сначала оформите хотя бы одну VPN-подписку: опция должна быть применена к существующей услуге.</p>}<FormField label="Способ оплаты"><Select value={method} disabled={Boolean(paymentUrl) || loadingMethods || methods.length === 0} onChange={(event) => setMethod(event.target.value as CheckoutMethod)}>{methods.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></FormField>{method === "platega" && plategaMethods.length > 0 && <FormField label="Способ оплаты Platega"><Select value={String(plategaMethod)} disabled={Boolean(paymentUrl)} onChange={(event) => setPlategaMethod(Number(event.target.value))}>{plategaMethods.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></FormField>}{method === "balance" && <p className="ac-hint">Текущий баланс: {money(data.profile?.balance ?? 0, data.profile?.preferredCurrency ?? selected.currency)}</p>}{paymentUrl && <ExternalPaymentLink url={paymentUrl} />}{!loadingMethods && methods.length === 0 && <p className="text-destructive">Нет подключённых платёжных систем.</p>}{error && <p className="text-destructive">{error}</p>}<div className="ac-modal-actions"><Button tone="secondary" onClick={close}>{paymentUrl ? "Закрыть" : "Отмена"}</Button>{!paymentUrl && <Button disabled={!targetSubscriptionId || loadingMethods || methods.length === 0} onClick={() => void startPayment()}>{method === "balance" ? "Оплатить с баланса" : "Создать ссылку на оплату"}</Button>}</div></div></Modal>}</>;
 }
 
 function Widget({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) { return <section className="ac-widget"><header><h2>{icon}{title}</h2></header>{children}</section>; }
@@ -167,7 +227,7 @@ function useAvailableCheckoutMethods(includeBalance: boolean) {
   return { methods, plategaMethods: config?.plategaMethods ?? [], loading: config === null };
 }
 
-async function startExternalPayment(token: string, method: Exclude<CheckoutMethod, "balance">, payload: { amount?: number; currency?: string; tariffId?: string; wdttTariffId?: string; promoCode?: string }, plategaMethod: number): Promise<string> {
+async function startExternalPayment(token: string, method: Exclude<CheckoutMethod, "balance">, payload: { amount?: number; currency?: string; tariffId?: string; wdttTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string } }, plategaMethod: number): Promise<string> {
   if (method === "yookassa") { const result = await api.yookassaCreatePayment(token, payload); return result.confirmationUrl; }
   if (method === "yoomoney") { const result = await api.yoomoneyCreateFormPayment(token, { ...payload, paymentType: "AC" }); return result.paymentUrl; }
   if (method === "cryptopay") { const result = await api.cryptopayCreatePayment(token, payload); return result.payUrl; }
