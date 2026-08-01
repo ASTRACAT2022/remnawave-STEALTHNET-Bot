@@ -766,6 +766,11 @@ function SlotsTab({ token }: { token: string }) {
     }
     return true;
   });
+  const migratableIds = filtered.filter((slot) => ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(slot.status)).map((slot) => slot.id);
+  const allVisibleSelected = migratableIds.length > 0 && migratableIds.every((id) => selectedIds.includes(id));
+  const toggleAllVisible = () => setSelectedIds((current) => allVisibleSelected
+    ? current.filter((id) => !migratableIds.includes(id))
+    : [...new Set([...current, ...migratableIds])]);
 
   return (
     <div className="space-y-4">
@@ -779,6 +784,9 @@ function SlotsTab({ token }: { token: string }) {
         </select>
         <Button variant="outline" disabled={selectedIds.length === 0} onClick={() => { setMigrationResult(null); setMigrationOpen(true); }}>
           Перенести выбранные ({selectedIds.length})
+        </Button>
+        <Button variant="ghost" size="sm" disabled={migratableIds.length === 0} onClick={toggleAllVisible}>
+          {allVisibleSelected ? "Снять выделение" : "Выбрать всех"} ({migratableIds.length})
         </Button>
       </div>
 
