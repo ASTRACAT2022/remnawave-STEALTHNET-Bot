@@ -59,6 +59,8 @@ const DEFAULT_BOT_BUTTONS: BotButtonItem[] = [
   { id: "my_proxy", visible: true, label: "📋 Мои прокси", order: 0.6, style: "primary", emojiKey: "SERVERS" },
   { id: "singbox", visible: true, label: "🔑 Доступы", order: 0.55, style: "primary", emojiKey: "SERVERS" },
   { id: "my_singbox", visible: true, label: "📋 Мои доступы", order: 0.65, style: "primary", emojiKey: "SERVERS" },
+  { id: "olcrtc", visible: true, label: "⚡ WDTT", order: 0.58, style: "primary", emojiKey: "SERVERS" },
+  { id: "my_olcrtc", visible: true, label: "📋 Мои WDTT-доступы", order: 0.68, style: "primary", emojiKey: "SERVERS" },
   { id: "profile", visible: true, label: "👤 Профиль", order: 1, style: "", emojiKey: "PUZZLE" },
   { id: "devices", visible: true, label: "📱 Устройства", order: 1.5, style: "primary", emojiKey: "DEVICES" },
   { id: "topup", visible: true, label: "💳 Пополнить баланс", order: 2, style: "success", emojiKey: "CARD" },
@@ -439,7 +441,10 @@ export function SettingsPage() {
           const loaded = Array.isArray(raw) ? raw : [];
           return DEFAULT_BOT_BUTTONS.map((def) => {
             const fromApi = loaded.find((b: { id: string }) => b.id === def.id);
-            return fromApi ? { ...def, ...fromApi } : def;
+            const button = fromApi ? { ...def, ...fromApi } : def;
+            if (button.id === "olcrtc" && button.label === "⚡ OlcRTC") return { ...button, label: "⚡ WDTT" };
+            if (button.id === "my_olcrtc" && button.label === "📋 Мои подписки OlcRTC") return { ...button, label: "📋 Мои WDTT-доступы" };
+            return button;
           }) as BotButtonItem[];
         })(),
         botButtonsPerRow: (data as AdminSettings).botButtonsPerRow ?? 1,

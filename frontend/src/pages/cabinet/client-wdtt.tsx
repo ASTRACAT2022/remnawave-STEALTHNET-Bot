@@ -564,7 +564,7 @@ export function ClientWdttPage() {
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-sm sm:text-base font-bold truncate text-foreground">Оплата OlcRTC</h2>
+                  <h2 className="text-sm sm:text-base font-bold truncate text-foreground">Оплата WDTT</h2>
                   <p className="text-[11px] font-medium text-muted-foreground truncate">{payModal.name}</p>
                 </div>
               </div>
@@ -589,7 +589,7 @@ export function ClientWdttPage() {
                 <div className="flex-1">
                   <h1 className="text-3xl font-bold tracking-tight sm:text-4xl text-foreground flex items-center gap-3">
                     <Wifi className="h-8 w-8 text-primary" />
-                    OlcRTC
+                    WDTT
                   </h1>
                   <p className="mt-3 text-[16px] text-muted-foreground max-w-xl leading-relaxed">
                     Маскирует сетевой трафик под разрешённые видеозвонки (WebRTC).
@@ -622,7 +622,7 @@ export function ClientWdttPage() {
                   <Card className="rounded-3xl border border-border/50 bg-card/40 backdrop-blur-xl shadow-sm">
                     <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
                       <Wifi className="h-12 w-12 opacity-20" />
-                      <p>Тарифы OlcRTC пока не настроены. Обратитесь в поддержку.</p>
+                      <p>Тарифы WDTT пока не настроены. Обратитесь в поддержку.</p>
                     </CardContent>
                   </Card>
                 ) : isMobileOrMiniapp ? (
@@ -778,7 +778,7 @@ export function ClientWdttPage() {
                   <Card className="rounded-3xl border border-border/50 bg-card/40 backdrop-blur-xl shadow-sm">
                     <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
                       <Wifi className="h-12 w-12 opacity-20" />
-                      <p>У вас пока нет активных подписок OlcRTC. Купите тариф во вкладке «Купить».</p>
+                      <p>У вас пока нет активных WDTT-доступов. Купите тариф во вкладке «Купить».</p>
                       <Button variant="outline" onClick={recoverPurchase} disabled={recoveryLoading}>
                         {recoveryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Проверить оплаченную покупку
                       </Button>
@@ -799,7 +799,7 @@ export function ClientWdttPage() {
                                       <Shield className="h-5 w-5" />
                                     </div>
                                     <div>
-                                      <h3 className="font-semibold text-foreground">OlcRTC {s.nodeName || s.publicHost}</h3>
+                                      <h3 className="font-semibold text-foreground">WDTT {s.nodeName || s.publicHost}</h3>
                                       {s.trafficLimitBytes && Number(s.trafficLimitBytes) > 0 ? (
                                         <p className="text-xs text-muted-foreground mt-0.5">
                                           Трафик: {formatBytes(s.trafficUsedBytes)} / {formatBytes(s.trafficLimitBytes)}
@@ -902,7 +902,7 @@ export function ClientWdttPage() {
                 <div className="p-2 bg-primary/10 rounded-xl">
                   <Shield className="h-6 w-6 text-primary" />
                 </div>
-                Оплата OlcRTC
+                Оплата WDTT
               </DialogTitle>
               <DialogDescription className="hidden" />
             </DialogHeader>
@@ -920,7 +920,7 @@ export function ClientWdttPage() {
       <Dialog open={!!configSlot} onOpenChange={(open) => { if (!open && !configLoading) setConfigSlot(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Настроить OlcRTC</DialogTitle>
+            <DialogTitle>Настроить WDTT</DialogTitle>
             <DialogDescription>Выберите сервис видеозвонков и вставьте ссылку комнаты. Будет создан отдельный сервер для этой подписки.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

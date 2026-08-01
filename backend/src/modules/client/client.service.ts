@@ -248,8 +248,8 @@ const DEFAULT_BOT_BUTTONS: BotButtonConfig[] = [
   { id: "my_proxy", visible: true, label: "📋 Мои прокси", order: 0.6, style: "primary", emojiKey: "SERVERS" },
   { id: "singbox", visible: true, label: "🔑 Доступы", order: 0.55, style: "primary", emojiKey: "SERVERS" },
   { id: "my_singbox", visible: true, label: "📋 Мои доступы", order: 0.65, style: "primary", emojiKey: "SERVERS" },
-  { id: "olcrtc", visible: true, label: "⚡ OlcRTC", order: 0.58, style: "primary", emojiKey: "SERVERS" },
-  { id: "my_olcrtc", visible: true, label: "📋 Мои подписки OlcRTC", order: 0.68, style: "primary", emojiKey: "SERVERS" },
+  { id: "olcrtc", visible: true, label: "⚡ WDTT", order: 0.58, style: "primary", emojiKey: "SERVERS" },
+  { id: "my_olcrtc", visible: true, label: "📋 Мои WDTT-доступы", order: 0.68, style: "primary", emojiKey: "SERVERS" },
   { id: "profile", visible: true, label: "👤 Профиль", order: 1, style: "", emojiKey: "PUZZLE" },
   { id: "devices", visible: true, label: "📱 Устройства", order: 1.5, style: "primary", emojiKey: "DEVICES" },
   { id: "topup", visible: true, label: "💳 Пополнить баланс", order: 2, style: "success", emojiKey: "CARD" },
@@ -458,10 +458,18 @@ function parseBotButtons(raw: string | undefined): BotButtonConfig[] {
       const o = x as Record<string, unknown>;
       const id = typeof o.id === "string" ? o.id : String(o.id ?? "button");
       const def = DEFAULT_BOT_BUTTONS.find((d) => d.id === id) ?? { label: id, order: i, style: "" as string };
+      const savedLabel = typeof o.label === "string" && o.label.trim() ? o.label.trim() : def.label;
+      // Переименование продукта не должно требовать ручного сохранения настроек:
+      // меняем только прежние стандартные подписи, пользовательские названия не трогаем.
+      const label = id === "olcrtc" && savedLabel === "⚡ OlcRTC"
+        ? "⚡ WDTT"
+        : id === "my_olcrtc" && savedLabel === "📋 Мои подписки OlcRTC"
+          ? "📋 Мои WDTT-доступы"
+          : savedLabel;
       return {
         id,
         visible: typeof o.visible === "boolean" ? o.visible : true,
-        label: typeof o.label === "string" && o.label.trim() ? o.label.trim() : def.label,
+        label,
         order: typeof o.order === "number" ? o.order : (typeof o.order === "string" ? parseFloat(o.order) : i),
         style: typeof o.style === "string" ? o.style : (def as BotButtonConfig).style ?? "",
         emojiKey: typeof o.emojiKey === "string" ? o.emojiKey.trim() : undefined,

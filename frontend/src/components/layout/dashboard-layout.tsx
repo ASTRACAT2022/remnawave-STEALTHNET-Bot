@@ -51,7 +51,7 @@ function useNavSections(): NavItem[] {
     { to: "/admin/clients", label: t("admin.nav.clients"), icon: Users, section: "clients", category: "management" },
     { to: "/admin/proxy", label: t("admin.nav.proxy"), icon: Globe, section: "proxy", category: "management" },
     { to: "/admin/singbox", label: t("admin.nav.singbox"), icon: Server, section: "singbox", category: "management" },
-    { to: "/admin/olcrtc", label: "OlcRTC", icon: Wifi, section: "olcrtc", category: "management" },
+    { to: "/admin/olcrtc", label: "WDTT", icon: Wifi, section: "olcrtc", category: "management" },
     { to: "/admin/backup", label: t("admin.nav.backups"), icon: Database, section: "backup", category: "management" },
     { to: "/admin/tickets", label: t("admin.nav.tickets"), icon: MessageSquare, section: "tickets", category: "management" },
     { to: "/admin/tariffs", label: t("admin.nav.tariffs"), icon: CreditCard, section: "tariffs", category: "subscription" },

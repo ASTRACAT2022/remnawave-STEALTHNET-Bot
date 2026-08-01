@@ -92,8 +92,8 @@ export function WdttPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">OlcRTC</h1>
-          <p className="text-sm text-muted-foreground mt-1">Управление нодами OlcRTC, тарифами и подписками</p>
+          <h1 className="text-2xl font-bold tracking-tight">WDTT</h1>
+          <p className="text-sm text-muted-foreground mt-1">Управление WDTT-нодами, тарифами и подписками</p>
         </div>
       </div>
 
@@ -174,7 +174,7 @@ function NodesTab({ token }: { token: string }) {
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : nodes.length === 0 ? (
-        <Card className="p-8 text-center text-muted-foreground">Нет OlcRTC-нод. Добавьте первую ноду.</Card>
+        <Card className="p-8 text-center text-muted-foreground">Нет WDTT-нод. Добавьте первую ноду.</Card>
       ) : (
         <div className="grid gap-4">
           {nodes.map((n) => (
@@ -308,21 +308,21 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Добавить OlcRTC-ноду</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Добавить WDTT-ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Моя нода" /></div>
-          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Общая статическая ссылка OlcRTC</option></select></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Устаревшая общая ссылка</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
               <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} placeholder="10.0.0.10:9500 или http://10.0.0.10:9500" /></div>
-              <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="OLCRTC_PROVISIONER_TOKEN" /></div>
+              <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="PROVISIONER_TOKEN" /></div>
               <p className="text-xs text-muted-foreground">После оплаты клиент выбирает Telemost/WBStream и вставляет свою ссылку комнаты. Для него создаётся отдельный контейнер, который будет удалён после окончания тарифа.</p>
             </>
           ) : provisionMode === "WDTT_COMPAT" ? (
             <>
               <div><Label>URL WDTT API</Label><Input value={wdttApiUrl} onChange={(e) => setWdttApiUrl(e.target.value)} placeholder="http://10.0.0.10:9000" /></div>
               <div><Label>API-ключ WDTT</Label><Input type="password" value={wdttApiKey} onChange={(e) => setWdttApiKey(e.target.value)} placeholder="API_KEY из wdtt-node/.env" /></div>
-              <p className="text-xs text-muted-foreground">Биллинг проверит <code>/api/health</code>, а после оплаты запросит персональный ключ через <code>/api/keys</code>. Клиенту будет выдана ссылка <code>wdtt://</code>, а не <code>olcrtc://</code>.</p>
+              <p className="text-xs text-muted-foreground">Биллинг проверит <code>/api/health</code>, а после оплаты запросит персональный ключ через <code>/api/keys</code>. Клиенту будет выдана персональная ссылка <code>wdtt://</code>.</p>
             </>
           ) : (
             <>
@@ -330,7 +330,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
           <div><Label>Room ID</Label><Input value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="https://meet.example.org/room" /></div>
           <div><Label>Ключ шифрования</Label><Input value={encryptionKey} onChange={(e) => setEncryptionKey(e.target.value)} placeholder="64 символа hex" /></div>
           <div><Label>Параметры транспорта (необязательно)</Label><Input value={payload} onChange={(e) => setPayload(e.target.value)} placeholder="vp8-fps=60&vp8-batch=64" /></div>
-          <p className="text-xs text-muted-foreground">После оплаты BillingStyle создаёт и выдаёт ссылку <code>olcrtc://…</code> с этими параметрами.</p>
+          <p className="text-xs text-muted-foreground">Устаревший режим общей ссылки. Для новых продаж используйте WDTT-совместимую ноду.</p>
           <p className="text-xs text-amber-600 dark:text-amber-400">Одинаковые Room ID и ключ получает каждый покупатель этой ноды. Отзыв подписки в BillingStyle не отключает уже импортированную ссылку на сервере.</p>
             </>
           )}
@@ -422,7 +422,7 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
         <DialogHeader><DialogTitle>Редактировать ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Общая статическая ссылка OlcRTC</option></select></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Устаревшая общая ссылка</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
               <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} /></div>
@@ -433,7 +433,7 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
             <>
               <div><Label>URL WDTT API</Label><Input value={wdttApiUrl} onChange={(e) => setWdttApiUrl(e.target.value)} /></div>
               <div><Label>Новый API-ключ WDTT</Label><Input type="password" value={wdttApiKey} onChange={(e) => setWdttApiKey(e.target.value)} placeholder="Оставьте пустым, чтобы не менять" /></div>
-              <p className="text-xs text-muted-foreground">WDTT и OlcRTC — разные протоколы. Эта нода выдаёт <code>wdtt://</code> и может использоваться в тех же тарифах и оплатах.</p>
+              <p className="text-xs text-muted-foreground">Эта нода выдаёт персональные ссылки <code>wdtt://</code> и может использоваться в тех же тарифах и оплатах.</p>
             </>
           ) : (
             <>
@@ -620,7 +620,7 @@ function CreateTariffDialog({ token, categories, open, onClose, onCreated }: { t
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Создать тариф OlcRTC</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Создать тариф WDTT</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Категория</Label>
             {categories.length === 0 ? (
@@ -631,7 +631,7 @@ function CreateTariffDialog({ token, categories, open, onClose, onCreated }: { t
               </select>
             )}
           </div>
-          <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="OlcRTC 30 дней" /></div>
+          <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="WDTT 30 дней" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Ссылок</Label><Input type="number" min={1} value={proxyCount} onChange={(e) => setProxyCount(parseInt(e.target.value) || 1)} /></div>
             <div><Label>Дней</Label><Input type="number" min={1} value={durationDays} onChange={(e) => setDurationDays(parseInt(e.target.value) || 30)} /></div>
@@ -866,8 +866,8 @@ function SlotsTab({ token }: { token: string }) {
         <DialogContent>
           <DialogHeader><DialogTitle>Перенести подключения</DialogTitle></DialogHeader>
           <div className="space-y-4 text-sm">
-            <p className="text-muted-foreground">Платежи, сроки действия и трафик не изменятся. При переносе на персональную OlcRTC-ноду сначала проверяется новый контейнер. При переносе на WDTT-ноду для каждого клиента выпускается новый персональный <code>wdtt://</code>-ключ, а старая OlcRTC-ссылка сохраняется в резервной копии.</p>
-            <div><Label>Целевая нода</Label><select value={targetNodeId} onChange={(event) => setTargetNodeId(event.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="">Выберите ноду</option>{nodes.filter((node) => node.status === "ONLINE" && (node.provisionMode === "PER_CLIENT" || node.provisionMode === "WDTT_COMPAT")).map((node) => <option key={node.id} value={node.id}>{node.name} · {node.provisionMode === "WDTT_COMPAT" ? "WDTT" : "OlcRTC"} · {node.currentSlots}/{node.capacity ?? "∞"}</option>)}</select></div>
+            <p className="text-muted-foreground">Платежи, сроки действия и трафик не изменятся. При переносе сначала проверяется целевой сервис. Для каждого клиента на WDTT-ноде выпускается новый персональный <code>wdtt://</code>-ключ, а прежняя ссылка сохраняется в резервной копии.</p>
+            <div><Label>Целевая нода</Label><select value={targetNodeId} onChange={(event) => setTargetNodeId(event.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="">Выберите ноду</option>{nodes.filter((node) => node.status === "ONLINE" && (node.provisionMode === "PER_CLIENT" || node.provisionMode === "WDTT_COMPAT")).map((node) => <option key={node.id} value={node.id}>{node.name} · {node.provisionMode === "WDTT_COMPAT" ? "WDTT" : "Персональная нода"} · {node.currentSlots}/{node.capacity ?? "∞"}</option>)}</select></div>
             <p>Выбрано подключений: <strong>{selectedIds.length}</strong></p>
             {migrationResult && <pre className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs">{migrationResult}</pre>}
           </div>
