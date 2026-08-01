@@ -89,6 +89,7 @@ const ClientGiftsPage = lazy(() => import("@/pages/cabinet/client-gifts").then((
 const GiftActivatePage = lazy(() => import("@/pages/gift-activate").then((m) => ({ default: m.GiftActivatePage })));
 const LandingPage = lazy(() => import("@/pages/landing").then((m) => ({ default: m.LandingPage })));
 const PwaUpdatePrompt = lazy(() => import("@/components/pwa/pwa-update-prompt").then((m) => ({ default: m.PwaUpdatePrompt })));
+const AstracatBillingPage = lazy(() => import("@/pages/astracat-billing").then((m) => ({ default: m.AstracatBillingPage })));
 
 function LoadingScreen({ label = "Загрузка…" }: { label?: string }) {
   return (
@@ -281,6 +282,8 @@ function AppRoutes() {
       <Routes>
       {/* Главная: лендинг (если включён в настройках) или редирект в кабинет */}
       <Route path="/" element={<RootRoute />} />
+      {/* Clean-room ASTRACAT billing workspace: independent from existing cabinet routes and API contracts. */}
+      <Route path="/billing" element={<ClientAuthProvider><AstracatBillingPage /></ClientAuthProvider>} />
 
       {/* Админка */}
       <Route path="/admin/login" element={state.accessToken ? <Navigate to="/admin" replace /> : <LoginPage />} />

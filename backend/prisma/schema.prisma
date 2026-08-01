@@ -199,6 +199,9 @@ model Client {
   proxySlots            ProxySlot[]
   singboxSlots          SingboxSlot[]
   tickets               Ticket[]
+  payers                ClientPayer[]
+  teamMembers           ClientTeamMember[]
+  visits                ClientVisit[]
   contestWinners        ContestWinner[]
   giftCodesCreated      GiftCode[]          @relation("GiftCodeCreator")
   giftCodesRedeemed     GiftCode[]          @relation("GiftCodeRedeemer")
@@ -225,6 +228,64 @@ model Client {
   @@index([registrationIp], map: "clients_registration_ip_idx")
   @@index([createdAt(sort: Desc)], map: "clients_created_at_idx")
   @@map("clients")
+}
+
+/// Реквизиты, от имени которых клиент оплачивает услуги. Не привязываются к
+/// платёжному провайдеру: один и тот же плательщик может использоваться с любым
+/// из существующих способов оплаты.
+model ClientPayer {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  type      String   @default("PERSON") @db.VarChar(20) // PERSON | COMPANY
+  country   String   @db.VarChar(2)
+  name      String   @db.VarChar(255)
+  taxId     String?  @map("tax_id") @db.VarChar(64)
+  email     String?  @db.VarChar(320)
+  address   String?  @db.Text
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([clientId, isDefault])
+  @@map("client_payers")
+}
+
+/// Дополнительные пользователи клиентского кабинета. Роль — бизнес-роль
+/// контакта в аккаунте, а не глобальная роль администратора системы.
+model ClientTeamMember {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  email     String   @db.VarChar(320)
+  name      String   @db.VarChar(128)
+  role      String   @default("VIEWER") @db.VarChar(20) // VIEWER | BILLING | SUPPORT | ADMIN
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, email])
+  @@index([clientId])
+  @@map("client_team_members")
+}
+
+/// Неизменяемый журнал визитов в клиентский кабинет. Записи добавляет сервер,
+/// поэтому IP и User-Agent нельзя подменить телом запроса.
+model ClientVisit {
+  id         String   @id @default(cuid())
+  clientId   String   @map("client_id")
+  authMethod String   @default("web") @map("auth_method") @db.VarChar(32)
+  ip         String?  @db.VarChar(64)
+  userAgent  String?  @map("user_agent") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt(sort: Desc)])
+  @@map("client_visits")
 }
 
 // Тикет поддержки (включается/выключается в настройках)

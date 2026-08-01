@@ -1882,6 +1882,39 @@ export const api = {
     return request("/client/payments", { token });
   },
 
+  async getClientPayers(token: string): Promise<{ items: ClientPayer[] }> {
+    return request("/client/payers", { token });
+  },
+  async createClientPayer(token: string, data: Omit<ClientPayer, "id" | "createdAt" | "updatedAt">): Promise<ClientPayer> {
+    return request("/client/payers", { method: "POST", body: JSON.stringify(data), token });
+  },
+  async updateClientPayer(token: string, id: string, data: Partial<Omit<ClientPayer, "id" | "createdAt" | "updatedAt">>): Promise<ClientPayer> {
+    return request(`/client/payers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(data), token });
+  },
+  async deleteClientPayer(token: string, id: string): Promise<void> {
+    return request(`/client/payers/${encodeURIComponent(id)}`, { method: "DELETE", token });
+  },
+
+  async getClientTeamMembers(token: string): Promise<{ items: ClientTeamMember[] }> {
+    return request("/client/team/members", { token });
+  },
+  async createClientTeamMember(token: string, data: Omit<ClientTeamMember, "id" | "createdAt" | "updatedAt">): Promise<ClientTeamMember> {
+    return request("/client/team/members", { method: "POST", body: JSON.stringify(data), token });
+  },
+  async updateClientTeamMember(token: string, id: string, data: Partial<Omit<ClientTeamMember, "id" | "createdAt" | "updatedAt">>): Promise<ClientTeamMember> {
+    return request(`/client/team/members/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(data), token });
+  },
+  async deleteClientTeamMember(token: string, id: string): Promise<void> {
+    return request(`/client/team/members/${encodeURIComponent(id)}`, { method: "DELETE", token });
+  },
+
+  async getClientVisits(token: string, limit = 50): Promise<{ items: ClientVisit[] }> {
+    return request(`/client/visits?limit=${encodeURIComponent(String(limit))}`, { token });
+  },
+  async recordClientVisit(token: string): Promise<ClientVisit> {
+    return request("/client/visits", { method: "POST", token });
+  },
+
   /** Список устройств (HWID) пользователя в Remna */
   async getClientDevices(token: string): Promise<{ total: number; devices: { hwid: string; platform?: string; deviceModel?: string; createdAt?: string }[] }> {
     return request("/client/devices", { token });
@@ -4493,6 +4526,37 @@ export interface ClientPayment {
   status: string;
   createdAt: string;
   paidAt: string | null;
+}
+
+export interface ClientPayer {
+  id: string;
+  type: "PERSON" | "COMPANY";
+  country: string;
+  name: string;
+  taxId: string | null;
+  email: string | null;
+  address: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientTeamMember {
+  id: string;
+  email: string;
+  name: string;
+  role: "VIEWER" | "BILLING" | "SUPPORT" | "ADMIN";
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientVisit {
+  id: string;
+  authMethod: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
 }
 
 export interface PublicTariffCategory {

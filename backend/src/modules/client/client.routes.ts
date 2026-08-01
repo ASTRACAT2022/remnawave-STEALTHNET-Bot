@@ -69,6 +69,17 @@ function getRequestIp(req: Request): string | null {
   return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
 }
 
+/** Создаёт запись в журнале посещений. Сбой аудита не должен ломать авторизацию. */
+function recordClientVisit(req: Request, clientId: string, authMethod: string) {
+  const rawUserAgent = req.headers["user-agent"];
+  const userAgent = typeof rawUserAgent === "string" ? rawUserAgent.slice(0, 1_000) : null;
+  return prisma.clientVisit.create({
+    data: { clientId, authMethod, ip: getRequestIp(req), userAgent },
+  }).catch((error: unknown) => {
+    console.error("[client-visits] unable to record visit", error);
+  });
+}
+
 /** Извлекает текущий expireAt из ответа Remna. Возвращает Date если в будущем, иначе null. */
 function extractCurrentExpireAt(data: unknown): Date | null {
   if (!data || typeof data !== "object") return null;
@@ -545,6 +556,7 @@ clientAuthRouter.post("/login", async (req, res) => {
   });
   if (!full) return res.status(401).json({ message: "Invalid email or password" });
   const auth = buildAuthResponse(full);
+  if (!("requires2FA" in auth)) void recordClientVisit(req, full.id, "password");
   return res.json(auth);
 });
 
@@ -665,6 +677,7 @@ clientAuthRouter.post("/2fa-login", async (req, res) => {
   const result = await verify({ secret: client.totpSecret, token: body.data.code });
   if (!result.valid) return res.status(401).json({ message: "Неверный код" });
   const token = signClientToken(client.id);
+  void recordClientVisit(req, client.id, "password+totp");
   return res.json({ token, client: toClientShape(client) });
 });
 
@@ -1253,6 +1266,135 @@ clientRouter.get("/tour-steps", async (_req, res) => {
 });
 
 clientRouter.use(requireClientAuth);
+
+// ——— Плательщики, роли клиентов и журнал посещений ———
+const payerInputSchema = z.object({
+  type: z.enum(["PERSON", "COMPANY"]),
+  country: z.string().trim().length(2).transform((value) => value.toUpperCase()),
+  name: z.string().trim().min(1).max(255),
+  taxId: z.string().trim().max(64).nullable().optional(),
+  email: z.string().trim().email().max(320).nullable().optional(),
+  address: z.string().trim().max(4_000).nullable().optional(),
+  isDefault: z.boolean().optional(),
+});
+const payerUpdateSchema = payerInputSchema.partial();
+const teamMemberInputSchema = z.object({
+  email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
+  name: z.string().trim().min(1).max(128),
+  role: z.enum(["VIEWER", "BILLING", "SUPPORT", "ADMIN"]),
+  isActive: z.boolean().optional(),
+});
+const teamMemberUpdateSchema = teamMemberInputSchema.partial();
+
+function currentClientId(req: Request): string {
+  return (req as unknown as { client: { id: string } }).client.id;
+}
+
+clientRouter.get("/payers", async (req, res) => {
+  const items = await prisma.clientPayer.findMany({
+    where: { clientId: currentClientId(req) },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+  });
+  return res.json({ items });
+});
+
+clientRouter.post("/payers", async (req, res) => {
+  const body = payerInputSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Некорректные данные плательщика", errors: body.error.flatten() });
+  const clientId = currentClientId(req);
+  const payer = await prisma.$transaction(async (tx) => {
+    const hasPayers = await tx.clientPayer.count({ where: { clientId } });
+    const isDefault = body.data.isDefault ?? hasPayers === 0;
+    if (isDefault) await tx.clientPayer.updateMany({ where: { clientId }, data: { isDefault: false } });
+    return tx.clientPayer.create({ data: { ...body.data, clientId, isDefault } });
+  });
+  return res.status(201).json(payer);
+});
+
+clientRouter.patch("/payers/:id", async (req, res) => {
+  const body = payerUpdateSchema.safeParse(req.body);
+  if (!body.success || Object.keys(body.data).length === 0) return res.status(400).json({ message: "Некорректные данные плательщика" });
+  const clientId = currentClientId(req);
+  const existing = await prisma.clientPayer.findFirst({ where: { id: req.params.id, clientId }, select: { id: true } });
+  if (!existing) return res.status(404).json({ message: "Плательщик не найден" });
+  const payer = await prisma.$transaction(async (tx) => {
+    if (body.data.isDefault) await tx.clientPayer.updateMany({ where: { clientId }, data: { isDefault: false } });
+    return tx.clientPayer.update({ where: { id: existing.id }, data: body.data });
+  });
+  return res.json(payer);
+});
+
+clientRouter.delete("/payers/:id", async (req, res) => {
+  const result = await prisma.clientPayer.deleteMany({ where: { id: req.params.id, clientId: currentClientId(req) } });
+  if (result.count === 0) return res.status(404).json({ message: "Плательщик не найден" });
+  return res.status(204).end();
+});
+
+clientRouter.get("/team/members", async (req, res) => {
+  const items = await prisma.clientTeamMember.findMany({
+    where: { clientId: currentClientId(req) },
+    orderBy: { createdAt: "desc" },
+  });
+  return res.json({ items });
+});
+
+clientRouter.post("/team/members", async (req, res) => {
+  const body = teamMemberInputSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Некорректные данные пользователя", errors: body.error.flatten() });
+  try {
+    const member = await prisma.clientTeamMember.create({
+      data: { ...body.data, clientId: currentClientId(req), isActive: body.data.isActive ?? true },
+    });
+    return res.status(201).json(member);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return res.status(409).json({ message: "Пользователь с таким email уже добавлен" });
+    throw error;
+  }
+});
+
+clientRouter.patch("/team/members/:id", async (req, res) => {
+  const body = teamMemberUpdateSchema.safeParse(req.body);
+  if (!body.success || Object.keys(body.data).length === 0) return res.status(400).json({ message: "Некорректные данные пользователя" });
+  const existing = await prisma.clientTeamMember.findFirst({ where: { id: req.params.id, clientId: currentClientId(req) }, select: { id: true } });
+  if (!existing) return res.status(404).json({ message: "Пользователь не найден" });
+  try {
+    const member = await prisma.clientTeamMember.update({ where: { id: existing.id }, data: body.data });
+    return res.json(member);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return res.status(409).json({ message: "Пользователь с таким email уже добавлен" });
+    throw error;
+  }
+});
+
+clientRouter.delete("/team/members/:id", async (req, res) => {
+  const result = await prisma.clientTeamMember.deleteMany({ where: { id: req.params.id, clientId: currentClientId(req) } });
+  if (result.count === 0) return res.status(404).json({ message: "Пользователь не найден" });
+  return res.status(204).end();
+});
+
+clientRouter.get("/visits", async (req, res) => {
+  const requestedLimit = Number(req.query.limit);
+  const take = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.floor(requestedLimit), 1), 100) : 50;
+  const items = await prisma.clientVisit.findMany({
+    where: { clientId: currentClientId(req) },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  return res.json({ items });
+});
+
+/** Явная запись визита для SSO/Telegram и уже восстановленной сессии. */
+clientRouter.post("/visits", async (req, res) => {
+  const visit = await prisma.clientVisit.create({
+    data: {
+      clientId: currentClientId(req),
+      authMethod: "session",
+      ip: getRequestIp(req),
+      userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"].slice(0, 1_000) : null,
+    },
+  });
+  return res.status(201).json(visit);
+});
 
 // ——— 2FA (TOTP) ———
 const twoFaConfirmSchema = z.object({ code: z.string().length(6, "Код должен быть 6 цифр").regex(/^\d+$/) });
@@ -7588,4 +7730,3 @@ publicConfigRouter.get("/singbox-tariffs", async (req, res) => {
     return res.status(500).json({ message: "Ошибка загрузки тарифов Sing-box" });
   }
 });
-
