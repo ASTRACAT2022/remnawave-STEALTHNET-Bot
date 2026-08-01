@@ -116,7 +116,7 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
     include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
   });
   if (!slot) throw new Error("Подписка не найдена");
-  if (slot.status !== "PENDING_CONFIG") throw new Error("Эта подписка уже настроена или недоступна");
+  if (slot.status !== "PENDING_CONFIG" && slot.status !== "PROVISION_FAILED") throw new Error("Эта подписка уже настроена или недоступна");
   if (slot.expiresAt <= new Date()) throw new Error("Срок действия подписки уже закончился");
   if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Эта нода не поддерживает личную настройку");
   if (!roomId || roomId.length > 1000) throw new Error("Вставьте ссылку или ID комнаты");
@@ -159,9 +159,53 @@ async function provisionOlcRtcSlot(input: { slot: PersonalSlot; provider: "telem
     console.error(`[OlcRTC] unable to provision ${slot.id}: ${message}`);
     await prisma.wdttSlot.updateMany({
       where: { id: slot.id, status: "PROVISIONING" },
-      data: { status: "PENDING_CONFIG", vkHash: "olcrtc-pending", wdttLink: "", olcrtcProvider: null, olcrtcRoomId: null, revokeReason: `Provisioner: ${message}`.slice(0, 1000) },
+      // Keep the room and generated link. A temporary network/Docker failure
+      // must not force a paid client to enter their room a second time.
+      data: { status: "PROVISION_FAILED", vkHash: "olcrtc-provision-failed", revokeReason: `Provisioner: ${message}`.slice(0, 1000) },
     });
   }
+}
+
+function keyFromOlcRtcLink(link: string): string | null {
+  const match = /#([a-f0-9]{64})\$/i.exec(link);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Retry only the chosen paid slot. It reuses the saved room and key whenever
+ * possible, so retries are safe when the first request reached Docker but the
+ * response was lost on its way back to the billing backend.
+ */
+export async function retryOlcRtcProvisioningForClient(input: { clientId: string; slotId: string }): Promise<{ link: string }> {
+  const slot = await prisma.wdttSlot.findFirst({
+    where: { id: input.slotId, clientId: input.clientId },
+    include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+  });
+  if (!slot) throw new Error("Подписка не найдена");
+  if (slot.status !== "PROVISION_FAILED" && slot.status !== "PENDING_CONFIG") throw new Error("Повторный запуск сейчас не требуется");
+  if (slot.expiresAt <= new Date()) throw new Error("Срок действия подписки уже закончился");
+  if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Эта нода не использует личные контейнеры");
+
+  let provider: "telemost" | "wbstream" | null = slot.olcrtcProvider === "telemost" || slot.olcrtcProvider === "wbstream" ? slot.olcrtcProvider : null;
+  let roomId = slot.olcrtcRoomId?.trim() || null;
+  if (!provider || !roomId) {
+    const backup = await prisma.wdttSlotBackup.findFirst({
+      where: { slotId: slot.id, clientId: input.clientId, provider: { in: ["telemost", "wbstream"] }, roomId: { not: null } },
+      orderBy: { createdAt: "desc" },
+    });
+    provider = backup?.provider === "telemost" || backup?.provider === "wbstream" ? backup.provider : null;
+    roomId = backup?.roomId?.trim() || null;
+  }
+  if (!provider || !roomId) throw new Error("Нет сохранённой комнаты. Восстановите настройку из резервной копии или укажите комнату снова.");
+
+  const key = keyFromOlcRtcLink(slot.wdttLink) ?? encryptionKey();
+  const link = buildOlcRtcLink({ name: slot.node.name, olcrtcProvider: provider, olcrtcTransport: "vp8channel", olcrtcRoomId: roomId, olcrtcKey: key, olcrtcPayload: PERSONAL_VP8_PAYLOAD });
+  await prisma.wdttSlot.update({
+    where: { id: slot.id },
+    data: { status: "PROVISIONING", vkHash: "olcrtc-provisioning", wdttLink: link, olcrtcProvider: provider, olcrtcRoomId: roomId, revokeReason: null },
+  });
+  void provisionOlcRtcSlot({ slot, provider, roomId, key });
+  return { link };
 }
 
 /** Stops the old personal server and returns its paid slot to the setup step. */

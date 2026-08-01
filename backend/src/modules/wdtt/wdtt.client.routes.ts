@@ -2,7 +2,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireClientAuth } from "../client/client.middleware.js";
-import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient, reissueOlcRtcSlotForClient, restoreOlcRtcSlotBackupForClient } from "./wdtt-slots-activation.service.js";
+import { configureOlcRtcSlotForClient, recoverWdttSlotsForClient, reissueOlcRtcSlotForClient, restoreOlcRtcSlotBackupForClient, retryOlcRtcProvisioningForClient } from "./wdtt-slots-activation.service.js";
 
 type AuthRequest = express.Request & { clientId: string };
 
@@ -40,8 +40,11 @@ wdttClientRouter.get("/slots", asyncRoute(async (req, res) => {
       expiresAt: s.expiresAt.toISOString(),
       trafficLimitBytes: s.trafficLimitBytes?.toString() ?? null,
       trafficUsedBytes: s.trafficUsedBytes.toString(),
-      status: s.status,
+      // The cabinet displays this value directly. Do not hide the real
+      // provisioner failure behind a generic status for a paid client.
+      status: s.status === "PROVISION_FAILED" && s.revokeReason ? `ОШИБКА ЗАПУСКА: ${s.revokeReason}` : s.status,
       requiresConfiguration: s.status === "PENDING_CONFIG",
+      revokeReason: s.revokeReason,
       createdAt: s.createdAt.toISOString(),
     })),
   });
@@ -93,6 +96,17 @@ wdttClientRouter.post("/slots/:id/reissue", asyncRoute(async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось перевыпустить ссылку" });
+  }
+}));
+
+// POST /api/client/olcrtc/slots/:id/retry-provisioning — retry a failed
+// container start without asking the client to enter their room again.
+wdttClientRouter.post("/slots/:id/retry-provisioning", asyncRoute(async (req, res) => {
+  try {
+    const result = await retryOlcRtcProvisioningForClient({ clientId: (req as AuthRequest).clientId, slotId: req.params.id });
+    return res.json({ success: true, wdttLink: result.link });
+  } catch (error) {
+    return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось повторить запуск личного контейнера" });
   }
 }));
 

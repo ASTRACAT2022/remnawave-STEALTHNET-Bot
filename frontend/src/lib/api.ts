@@ -779,6 +779,9 @@ export const api = {
   async reissueWdttSlot(token: string, id: string): Promise<{ success: boolean }> {
     return request(`/client/olcrtc/slots/${id}/reissue`, { method: "POST", token });
   },
+  async retryWdttSlotProvisioning(token: string, id: string): Promise<{ success: boolean; wdttLink: string }> {
+    return request(`/client/olcrtc/slots/${id}/retry-provisioning`, { method: "POST", token });
+  },
   async getWdttSlotBackups(token: string, id: string): Promise<{ items: WdttSlotBackupItem[] }> {
     return request(`/client/olcrtc/slots/${id}/backups`, { token });
   },
@@ -5042,6 +5045,7 @@ export interface WdttClientSlotItem {
   trafficUsedBytes: string;
   status: string;
   requiresConfiguration: boolean;
+  revokeReason: string | null;
   createdAt: string;
 }
 

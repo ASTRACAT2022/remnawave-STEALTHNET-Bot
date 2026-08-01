@@ -102,21 +102,23 @@ func main() {
 			Labels:     map[string]string{"com.astracat.olcrtc.managed": "true", "com.astracat.olcrtc.subscription": req.SubscriptionID},
 			HostConfig: dockerHostConfig{NetworkMode: "host", RestartPolicy: dockerRestartPolicy{Name: "unless-stopped"}},
 		}
+		createdNew := false
 		if err := dockerJSON(r.Context(), docker, http.MethodPost, "/v1.41/containers/create?name="+url.QueryEscape(name), create, nil); err != nil {
-			if strings.Contains(err.Error(), "Conflict") {
-				writeError(w, http.StatusConflict, "instance already exists")
+			// A retry can reach this point after Docker already created the
+			// container but before BillingStyle received the first response.
+			// Treat it as idempotent: retain the existing container and verify it.
+			if !strings.Contains(err.Error(), "409") && !strings.Contains(err.Error(), "Conflict") {
+				writeError(w, http.StatusBadGateway, "Docker create failed: "+err.Error())
 				return
 			}
-			writeError(w, http.StatusBadGateway, "Docker create failed: "+err.Error())
-			return
+		} else {
+			createdNew = true
 		}
-		if err := dockerJSON(r.Context(), docker, http.MethodPost, "/v1.41/containers/"+url.PathEscape(name)+"/start", nil, nil); err != nil {
-			_ = dockerJSON(r.Context(), docker, http.MethodDelete, "/v1.41/containers/"+url.PathEscape(name)+"?force=true", nil, nil)
-			writeError(w, http.StatusBadGateway, "Docker start failed: "+err.Error())
-			return
-		}
-		if err := waitForContainerRunning(r.Context(), docker, name); err != nil {
-			_ = dockerJSON(r.Context(), docker, http.MethodDelete, "/v1.41/containers/"+url.PathEscape(name)+"?force=true", nil, nil)
+		if err := ensureContainerRunning(r.Context(), docker, name); err != nil {
+			// Never delete an existing instance merely because a retry failed.
+			if createdNew {
+				_ = dockerJSON(r.Context(), docker, http.MethodDelete, "/v1.41/containers/"+url.PathEscape(name)+"?force=true", nil, nil)
+			}
 			writeError(w, http.StatusBadGateway, "OlcRTC container did not start: "+err.Error())
 			return
 		}
@@ -220,6 +222,23 @@ func waitForContainerRunning(parent context.Context, client *http.Client, name s
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+func ensureContainerRunning(ctx context.Context, client *http.Client, name string) error {
+	var inspect dockerInspectResponse
+	if err := dockerJSON(ctx, client, http.MethodGet, "/v1.41/containers/"+url.PathEscape(name)+"/json", nil, &inspect); err != nil {
+		return err
+	}
+	if inspect.State.Running {
+		return nil
+	}
+	if err := dockerJSON(ctx, client, http.MethodPost, "/v1.41/containers/"+url.PathEscape(name)+"/start", nil, nil); err != nil {
+		// Docker reports 304 when another concurrent request just started it.
+		if !strings.Contains(err.Error(), "304") && !strings.Contains(err.Error(), "already started") {
+			return err
+		}
+	}
+	return waitForContainerRunning(ctx, client, name)
 }
 
 func containerName(id string) string { return "olcrtc-sub-" + strings.ToLower(id) }
