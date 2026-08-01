@@ -757,7 +757,7 @@ export const api = {
     return request("/admin/olcrtc/slots", { token });
   },
 
-  async migrateWdttSlots(token: string, data: { targetNodeId: string; slotIds: string[] }): Promise<{ success: boolean; migrated: Array<{ slotId: string; clientId: string; link: string }>; failed: Array<{ slotId: string; error: string }>; cleanupWarnings: Array<{ slotId: string; warning: string }> }> {
+  async migrateWdttSlots(token: string, data: { targetNodeId: string; slotIds: string[] }): Promise<{ success: boolean; migrated: Array<{ slotId: string; clientId: string; link: string | null }>; failed: Array<{ slotId: string; error: string }>; cleanupWarnings: Array<{ slotId: string; warning: string }> }> {
     return request("/admin/olcrtc/slots/migrate", { method: "POST", body: JSON.stringify(data), token });
   },
 

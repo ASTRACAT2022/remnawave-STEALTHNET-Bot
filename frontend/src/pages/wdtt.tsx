@@ -793,7 +793,7 @@ function SlotsTab({ token }: { token: string }) {
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1 text-sm min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    {s.status === "ACTIVE" && <Checkbox checked={selectedIds.includes(s.id)} onCheckedChange={(checked) => setSelectedIds((current) => checked === true ? [...new Set([...current, s.id])] : current.filter((id) => id !== s.id))} aria-label={`Выбрать ${s.password}`} />}
+                    {["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(s.status) && <Checkbox checked={selectedIds.includes(s.id)} onCheckedChange={(checked) => setSelectedIds((current) => checked === true ? [...new Set([...current, s.id])] : current.filter((id) => id !== s.id))} aria-label={`Выбрать ${s.password}`} />}
                     <span className="font-mono text-xs">{s.password}</span>
                     {slotStatusBadge(s.status)}
                     <span className="text-xs text-muted-foreground">на {s.nodeName}</span>
@@ -829,7 +829,7 @@ function SlotsTab({ token }: { token: string }) {
         <DialogContent>
           <DialogHeader><DialogTitle>Перенести OlcRTC-подключения</DialogTitle></DialogHeader>
           <div className="space-y-4 text-sm">
-            <p className="text-muted-foreground">Платежи, сроки действия и трафик не изменятся. Сначала будет проверен новый контейнер; ссылка сменится только для успешно перенесённых клиентов.</p>
+            <p className="text-muted-foreground">Платежи, сроки действия и трафик не изменятся. Настроенные подключения получат новую ссылку после проверки нового контейнера. Неподготовленные подключения тоже будут перенесены без оплаты и настроятся уже на новой ноде.</p>
             <div><Label>Целевая нода</Label><select value={targetNodeId} onChange={(event) => setTargetNodeId(event.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="">Выберите ноду</option>{nodes.filter((node) => node.status === "ONLINE" && node.provisionMode === "PER_CLIENT").map((node) => <option key={node.id} value={node.id}>{node.name} · {node.currentSlots}/{node.capacity ?? "∞"}</option>)}</select></div>
             <p>Выбрано подключений: <strong>{selectedIds.length}</strong></p>
             {migrationResult && <pre className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs">{migrationResult}</pre>}

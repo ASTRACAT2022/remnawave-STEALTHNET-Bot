@@ -209,7 +209,7 @@ export async function retryOlcRtcProvisioningForClient(input: { clientId: string
 }
 
 export type MigrateOlcRtcSlotsResult = {
-  migrated: Array<{ slotId: string; clientId: string; link: string }>;
+  migrated: Array<{ slotId: string; clientId: string; link: string | null }>;
   failed: Array<{ slotId: string; error: string }>;
   cleanupWarnings: Array<{ slotId: string; warning: string }>;
 };
@@ -233,12 +233,34 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
       include: { node: { select: { id: true, name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
     });
     if (!slot) { result.failed.push({ slotId, error: "Подписка не найдена" }); continue; }
-    if (slot.status !== "ACTIVE") { result.failed.push({ slotId, error: "Можно переносить только активные подключения" }); continue; }
+    if (slot.status !== "ACTIVE" && slot.status !== "PENDING_CONFIG" && slot.status !== "PROVISION_FAILED") { result.failed.push({ slotId, error: "Подключение сейчас занято настройкой; повторите перенос после завершения операции" }); continue; }
     if (slot.nodeId === target.id) { result.failed.push({ slotId, error: "Подключение уже находится на выбранной ноде" }); continue; }
     if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") { result.failed.push({ slotId, error: "Исходная нода не использует личные контейнеры" }); continue; }
+    // A paid but not yet configured slot has no container or link. It can be
+    // moved immediately: its future configuration will be created on target.
+    if (slot.status === "PENDING_CONFIG") {
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (target.capacity !== null) {
+            const reserved = await tx.wdttNode.updateMany({ where: { id: target.id, currentSlots: { lt: target.capacity } }, data: { currentSlots: { increment: 1 } } });
+            if (reserved.count !== 1) throw new Error("На целевой ноде больше нет свободных мест");
+          } else {
+            await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
+          }
+          const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
+          if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
+          await tx.wdttSlot.update({ where: { id: slot.id }, data: { nodeId: target.id, revokeReason: null } });
+          await tx.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED", provider: null, roomId: null, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt } });
+        });
+        result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link: null });
+      } catch (error) {
+        result.failed.push({ slotId, error: error instanceof Error ? error.message : "Не удалось перенести неподготовленное подключение" });
+      }
+      continue;
+    }
     const provider = slot.olcrtcProvider === "telemost" || slot.olcrtcProvider === "wbstream" ? slot.olcrtcProvider : null;
     const roomId = slot.olcrtcRoomId?.trim() || null;
-    if (!provider || !roomId) { result.failed.push({ slotId, error: "У подключения нет сохранённой комнаты" }); continue; }
+    if (!provider || !roomId) { result.failed.push({ slotId, error: "У подключения нет сохранённой комнаты; его можно перенести после восстановления настройки" }); continue; }
 
     const key = encryptionKey();
     const link = buildOlcRtcLink({ name: target.name, olcrtcProvider: provider, olcrtcTransport: "vp8channel", olcrtcRoomId: roomId, olcrtcKey: key, olcrtcPayload: PERSONAL_VP8_PAYLOAD });
