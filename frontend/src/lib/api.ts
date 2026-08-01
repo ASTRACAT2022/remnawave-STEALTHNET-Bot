@@ -1960,6 +1960,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2075,6 +2076,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2113,6 +2115,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2144,6 +2147,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2170,6 +2174,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2196,6 +2201,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
       customBuild?: { days: number; devices: number; trafficGb?: number };
@@ -2222,6 +2228,7 @@ export const api = {
       deviceCount?: number;
       proxyTariffId?: string;
       singboxTariffId?: string;
+      wdttTariffId?: string;
       promoCode?: string;
       email?: string;
       offerId?: string;
@@ -4490,6 +4497,8 @@ export interface ClientProfile {
   onboardingCompleted?: boolean;
   /** Установлен ли пароль для входа через веб. false для юзеров, зарегистрированных через Telegram/Google/Apple без пароля. */
   hasPassword?: boolean;
+  /** Персональная скидка, выданная администратором. Применяется сервером при оплате услуг. */
+  personalDiscountPercent?: number | null;
 }
 
 export interface ClientAuthResponse {
