@@ -69,7 +69,7 @@ export function preparePaymentRedirect(): PaymentRedirect {
     return {
       open: (url) => {
         try {
-          webApp.openLink!(url);
+          webApp.openLink!(url, { try_instant_view: false });
         } catch {
           window.location.assign(url);
         }
