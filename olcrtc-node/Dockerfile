@@ -1,16 +1,23 @@
+# syntax=docker/dockerfile:1.7
 # OlcRTC server node. The upstream ref is pinned through build args so an
 # operator can deliberately update it instead of inheriting an unknown image.
 FROM golang:1.26-alpine3.22 AS builder
 
 ARG OLCRTC_REPOSITORY=https://github.com/openlibrecommunity/olcrtc.git
 ARG OLCRTC_REF=master
+ARG GO_BUILD_MAX_PROCS=2
 
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /src
 RUN git clone --depth 1 --recurse-submodules --branch "${OLCRTC_REF}" "${OLCRTC_REPOSITORY}" .
-RUN go mod download && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/olcrtc ./cmd/olcrtc
+# Persist the Go module and compiler caches between Compose builds. This is
+# particularly important for small VPS hosts: subsequent rebuilds download and
+# compile only changed packages instead of rebuilding OlcRTC from scratch.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOMAXPROCS=${GO_BUILD_MAX_PROCS} go mod download && \
+    GOMAXPROCS=${GO_BUILD_MAX_PROCS} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/olcrtc ./cmd/olcrtc
 
 FROM alpine:3.22
 

@@ -208,6 +208,73 @@ export async function retryOlcRtcProvisioningForClient(input: { clientId: string
   return { link };
 }
 
+export type MigrateOlcRtcSlotsResult = {
+  migrated: Array<{ slotId: string; clientId: string; link: string }>;
+  failed: Array<{ slotId: string; error: string }>;
+  cleanupWarnings: Array<{ slotId: string; warning: string }>;
+};
+
+/**
+ * Moves already-paid personal OlcRTC slots to another personal node without a
+ * payment or expiration change. The target container is verified first; only
+ * then is the slot switched in the database and its old container stopped.
+ */
+export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targetNodeId: string }): Promise<MigrateOlcRtcSlotsResult> {
+  const target = await prisma.wdttNode.findUnique({ where: { id: input.targetNodeId } });
+  if (!target) throw new Error("Целевая нода не найдена");
+  if (target.status !== "ONLINE") throw new Error("Целевая нода должна быть ONLINE");
+  if (target.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Миграция доступна только на ноду с личными контейнерами");
+  if (!target.olcrtcProvisionerUrl || !target.olcrtcProvisionerToken) throw new Error("На целевой ноде не настроен provisioner");
+
+  const result: MigrateOlcRtcSlotsResult = { migrated: [], failed: [], cleanupWarnings: [] };
+  for (const slotId of [...new Set(input.slotIds)]) {
+    const slot = await prisma.wdttSlot.findUnique({
+      where: { id: slotId },
+      include: { node: { select: { id: true, name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+    });
+    if (!slot) { result.failed.push({ slotId, error: "Подписка не найдена" }); continue; }
+    if (slot.status !== "ACTIVE") { result.failed.push({ slotId, error: "Можно переносить только активные подключения" }); continue; }
+    if (slot.nodeId === target.id) { result.failed.push({ slotId, error: "Подключение уже находится на выбранной ноде" }); continue; }
+    if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") { result.failed.push({ slotId, error: "Исходная нода не использует личные контейнеры" }); continue; }
+    const provider = slot.olcrtcProvider === "telemost" || slot.olcrtcProvider === "wbstream" ? slot.olcrtcProvider : null;
+    const roomId = slot.olcrtcRoomId?.trim() || null;
+    if (!provider || !roomId) { result.failed.push({ slotId, error: "У подключения нет сохранённой комнаты" }); continue; }
+
+    const key = encryptionKey();
+    const link = buildOlcRtcLink({ name: target.name, olcrtcProvider: provider, olcrtcTransport: "vp8channel", olcrtcRoomId: roomId, olcrtcKey: key, olcrtcPayload: PERSONAL_VP8_PAYLOAD });
+    let createdOnTarget = false;
+    try {
+      const response = await provisionerRequest(target, "/v1/instances", {
+        method: "POST",
+        body: JSON.stringify({ subscriptionId: slot.id, provider, roomId, encryptionKey: key }),
+      });
+      if (!response.ok) throw new Error(await describeProvisionerFailure(response));
+      createdOnTarget = true;
+      await prisma.$transaction(async (tx) => {
+        if (target.capacity !== null) {
+          const reserved = await tx.wdttNode.updateMany({ where: { id: target.id, currentSlots: { lt: target.capacity } }, data: { currentSlots: { increment: 1 } } });
+          if (reserved.count !== 1) throw new Error("На целевой ноде больше нет свободных мест");
+        } else {
+          await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
+        }
+        const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
+        if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
+        await tx.wdttSlot.update({
+          where: { id: slot.id },
+          data: { nodeId: target.id, status: "ACTIVE", vkHash: "olcrtc", wdttLink: link, revokeReason: null },
+        });
+        await tx.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED", provider, roomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt } });
+      });
+      result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link });
+      if (!await deprovisionOlcRtcSlot(slot)) result.cleanupWarnings.push({ slotId: slot.id, warning: "Новый контейнер активен, но старый не удалось остановить автоматически" });
+    } catch (error) {
+      if (createdOnTarget) await deprovisionOlcRtcSlot({ id: slot.id, status: "ACTIVE", node: target }).catch(() => false);
+      result.failed.push({ slotId, error: error instanceof Error ? error.message : "Не удалось перенести подключение" });
+    }
+  }
+  return result;
+}
+
 /** Stops the old personal server and returns its paid slot to the setup step. */
 export async function reissueOlcRtcSlotForClient(input: { clientId: string; slotId: string }): Promise<void> {
   const slot = await prisma.wdttSlot.findFirst({

@@ -1,8 +1,13 @@
+# syntax=docker/dockerfile:1.7
 FROM golang:1.25-alpine AS builder
+
+ARG GO_BUILD_MAX_PROCS=2
 
 WORKDIR /src
 COPY go.mod main.go ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/olcrtc-provisioner .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOMAXPROCS=${GO_BUILD_MAX_PROCS} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/olcrtc-provisioner .
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates

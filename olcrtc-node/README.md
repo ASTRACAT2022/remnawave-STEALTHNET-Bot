@@ -20,7 +20,10 @@ cd olcrtc-node
 cp .env.personal.example .env
 openssl rand -hex 32             # paste the result into OLCRTC_PROVISIONER_TOKEN
 nano .env
-docker compose build olcrtc-node provisioner
+# Build sequentially. On a 1–2 vCPU VPS this is faster overall and prevents
+# the two Go compilers from exhausting CPU/RAM. BuildKit keeps Go caches for
+# future rebuilds.
+sh ./build-personal.sh
 docker compose up -d provisioner
 docker compose logs -f provisioner
 ```

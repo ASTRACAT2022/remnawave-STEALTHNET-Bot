@@ -6,6 +6,9 @@ services:
       args:
         # Use a tag or a commit SHA in production after testing it.
         OLCRTC_REF: ${OLCRTC_REF:-master}
+        # Build one Go process at a time on small VPS hosts. This affects only
+        # image compilation, never the runtime OlcRTC containers.
+        GO_BUILD_MAX_PROCS: ${OLCRTC_BUILD_JOBS:-2}
     container_name: olcrtc-node
     restart: unless-stopped
     env_file:
@@ -18,6 +21,8 @@ services:
   provisioner:
     build:
       context: ./provisioner
+      args:
+        GO_BUILD_MAX_PROCS: ${OLCRTC_BUILD_JOBS:-2}
     image: ${OLCRTC_PROVISIONER_IMAGE:-astracat/olcrtc-provisioner:latest}
     container_name: olcrtc-provisioner
     restart: unless-stopped

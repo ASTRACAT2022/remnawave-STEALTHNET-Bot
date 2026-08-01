@@ -717,20 +717,45 @@ function EditTariffDialog({ token, tariff, open, onClose, onSaved }: { token: st
 // ——— Slots Tab ———
 function SlotsTab({ token }: { token: string }) {
   const [slots, setSlots] = useState<WdttSlotAdminItem[]>([]);
+  const [nodes, setNodes] = useState<WdttNodeListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [migrationOpen, setMigrationOpen] = useState(false);
+  const [targetNodeId, setTargetNodeId] = useState("");
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<string | null>(null);
 
   const fetchSlots = () => {
     setLoading(true);
     api.getWdttSlotsAdmin(token).then((r) => setSlots(r.items)).finally(() => setLoading(false));
   };
   useEffect(() => { fetchSlots(); }, [token]);
+  useEffect(() => { void api.getWdttNodes(token).then((result) => setNodes(result.items)).catch(() => setNodes([])); }, [token]);
 
   const revokeSlot = async (id: string) => {
     if (!confirm("Отозвать доступ?")) return;
     await api.revokeWdttSlotAdmin(token, id);
     fetchSlots();
+  };
+
+  const migrate = async () => {
+    if (!targetNodeId || selectedIds.length === 0) return;
+    setMigrating(true);
+    setMigrationResult(null);
+    try {
+      const result = await api.migrateWdttSlots(token, { targetNodeId, slotIds: selectedIds });
+      const failed = result.failed.map((item) => `${item.slotId}: ${item.error}`).join("\n");
+      const warnings = result.cleanupWarnings.map((item) => item.warning).join("\n");
+      setMigrationResult(`Перенесено: ${result.migrated.length}. Ошибок: ${result.failed.length}.${failed ? `\n${failed}` : ""}${warnings ? `\n${warnings}` : ""}`);
+      setSelectedIds([]);
+      fetchSlots();
+    } catch (error) {
+      setMigrationResult(error instanceof Error ? error.message : "Не удалось перенести подключения");
+    } finally {
+      setMigrating(false);
+    }
   };
 
   const filtered = slots.filter((s) => {
@@ -744,7 +769,7 @@ function SlotsTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по паролю, email, telegram..." className="max-w-sm" />
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="flex h-10 rounded-xl border bg-background px-3 py-2 text-sm">
           <option value="ALL">Все статусы</option>
@@ -752,6 +777,9 @@ function SlotsTab({ token }: { token: string }) {
           <option value="EXPIRED">Истёкшие</option>
           <option value="REVOKED">Отозванные</option>
         </select>
+        <Button variant="outline" disabled={selectedIds.length === 0} onClick={() => { setMigrationResult(null); setMigrationOpen(true); }}>
+          Перенести выбранные ({selectedIds.length})
+        </Button>
       </div>
 
       {loading ? (
@@ -765,6 +793,7 @@ function SlotsTab({ token }: { token: string }) {
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1 text-sm min-w-0 flex-1">
                   <div className="flex items-center gap-2">
+                    {s.status === "ACTIVE" && <Checkbox checked={selectedIds.includes(s.id)} onCheckedChange={(checked) => setSelectedIds((current) => checked === true ? [...new Set([...current, s.id])] : current.filter((id) => id !== s.id))} aria-label={`Выбрать ${s.password}`} />}
                     <span className="font-mono text-xs">{s.password}</span>
                     {slotStatusBadge(s.status)}
                     <span className="text-xs text-muted-foreground">на {s.nodeName}</span>
@@ -796,6 +825,18 @@ function SlotsTab({ token }: { token: string }) {
           ))}
         </div>
       )}
+      <Dialog open={migrationOpen} onOpenChange={(open) => { if (!migrating) setMigrationOpen(open); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Перенести OlcRTC-подключения</DialogTitle></DialogHeader>
+          <div className="space-y-4 text-sm">
+            <p className="text-muted-foreground">Платежи, сроки действия и трафик не изменятся. Сначала будет проверен новый контейнер; ссылка сменится только для успешно перенесённых клиентов.</p>
+            <div><Label>Целевая нода</Label><select value={targetNodeId} onChange={(event) => setTargetNodeId(event.target.value)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="">Выберите ноду</option>{nodes.filter((node) => node.status === "ONLINE" && node.provisionMode === "PER_CLIENT").map((node) => <option key={node.id} value={node.id}>{node.name} · {node.currentSlots}/{node.capacity ?? "∞"}</option>)}</select></div>
+            <p>Выбрано подключений: <strong>{selectedIds.length}</strong></p>
+            {migrationResult && <pre className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs">{migrationResult}</pre>}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setMigrationOpen(false)} disabled={migrating}>Закрыть</Button><Button disabled={!targetNodeId || selectedIds.length === 0 || migrating} onClick={() => void migrate()}>{migrating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Запустить миграцию</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

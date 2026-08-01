@@ -757,6 +757,10 @@ export const api = {
     return request("/admin/olcrtc/slots", { token });
   },
 
+  async migrateWdttSlots(token: string, data: { targetNodeId: string; slotIds: string[] }): Promise<{ success: boolean; migrated: Array<{ slotId: string; clientId: string; link: string }>; failed: Array<{ slotId: string; error: string }>; cleanupWarnings: Array<{ slotId: string; warning: string }> }> {
+    return request("/admin/olcrtc/slots/migrate", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async updateWdttSlotAdmin(token: string, id: string, data: { status?: string; expiresAt?: string }): Promise<unknown> {
     return request(`/admin/olcrtc/slots/${id}`, { method: "PATCH", body: JSON.stringify(data), token });
   },

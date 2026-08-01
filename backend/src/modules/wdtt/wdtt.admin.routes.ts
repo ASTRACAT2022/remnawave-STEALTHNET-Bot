@@ -7,7 +7,7 @@ import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, requireAdminSection } from "../auth/middleware.js";
-import { deprovisionOlcRtcSlot } from "./wdtt-slots-activation.service.js";
+import { deprovisionOlcRtcSlot, migrateOlcRtcSlotsToNode } from "./wdtt-slots-activation.service.js";
 
 export const wdttAdminRouter = Router();
 wdttAdminRouter.use(requireAuth);
@@ -311,6 +311,24 @@ wdttAdminRouter.post("/nodes/:id/test", asyncRoute(async (req, res) => {
   }
   await prisma.wdttNode.update({ where: { id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
   return res.json({ success: true, nodeStatus: "ONLINE", data: { provider: node.olcrtcProvider, transport: node.olcrtcTransport, provisionMode: node.olcrtcProvisionMode } });
+}));
+
+const migrateSlotsSchema = z.object({
+  targetNodeId: z.string().min(1),
+  slotIds: z.array(z.string().min(1)).min(1, "Выберите хотя бы одно подключение").max(200, "За один запуск можно перенести не более 200 подключений"),
+});
+
+// POST /api/admin/olcrtc/slots/migrate — no payment is created or changed.
+// A slot switches only after its new personal container is confirmed running.
+wdttAdminRouter.post("/slots/migrate", asyncRoute(async (req, res) => {
+  const body = migrateSlotsSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: body.error.issues[0]?.message ?? "Проверьте параметры миграции", errors: body.error.flatten() });
+  try {
+    const result = await migrateOlcRtcSlotsToNode(body.data);
+    return res.json({ success: result.failed.length === 0, ...result });
+  } catch (error) {
+    return res.status(400).json({ message: error instanceof Error ? error.message : "Не удалось начать миграцию" });
+  }
 }));
 
 // ——— WDTT Категории ———
