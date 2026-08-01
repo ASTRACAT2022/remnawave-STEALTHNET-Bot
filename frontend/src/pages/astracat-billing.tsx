@@ -62,7 +62,7 @@ function savedTabs(): PageId[] { try { const value = JSON.parse(localStorage.get
 export function AstracatBillingPage() {
   const { state: auth, refreshProfile, logout } = useClientAuth(); const data = useBillingData(auth.token);
   const [searchParams] = useSearchParams();
-  const [theme, setTheme] = useState<"light" | "dark">("light"); const [collapsed, setCollapsed] = useState(false); const [mobileMenuOpen, setMobileMenuOpen] = useState(false); const [tabs, setTabs] = useState<PageId[]>(savedTabs); const [active, setActive] = useState<PageId>(() => savedTabs()[0]); const [modal, setModal] = useState<ModalName>(null); const [notice, setNotice] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("dark"); const [collapsed, setCollapsed] = useState(false); const [mobileMenuOpen, setMobileMenuOpen] = useState(false); const [tabs, setTabs] = useState<PageId[]>(savedTabs); const [active, setActive] = useState<PageId>(() => savedTabs()[0]); const [modal, setModal] = useState<ModalName>(null); const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { localStorage.setItem("astracat-tabs-client", JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { const requested = searchParams.get("page"); if (!requested || !(requested in labels)) return; const page = requested as PageId; setTabs((current) => current.includes(page) ? current : [...current, page]); setActive(page); }, [searchParams]);
   const open = (id: PageId) => { setTabs((current) => current.includes(id) ? current : [...current, id]); setActive(id); setMobileMenuOpen(false); };
