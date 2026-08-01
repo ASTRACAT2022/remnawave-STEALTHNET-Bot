@@ -44,6 +44,15 @@ type dockerRestartPolicy struct {
 	Name string `json:"Name"`
 }
 
+type dockerInspectResponse struct {
+	State struct {
+		Running  bool   `json:"Running"`
+		Status   string `json:"Status"`
+		Error    string `json:"Error"`
+		ExitCode int    `json:"ExitCode"`
+	} `json:"State"`
+}
+
 func main() {
 	token := strings.TrimSpace(os.Getenv("OLCRTC_PROVISIONER_TOKEN"))
 	if len(token) < 32 {
@@ -60,7 +69,15 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]bool{"ok": true}) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := dockerJSON(ctx, docker, http.MethodGet, "/v1.41/version", nil, nil); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Docker недоступен: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("POST /v1/instances", authenticated(token, func(w http.ResponseWriter, r *http.Request) {
 		var req provisionRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
@@ -96,6 +113,11 @@ func main() {
 		if err := dockerJSON(r.Context(), docker, http.MethodPost, "/v1.41/containers/"+url.PathEscape(name)+"/start", nil, nil); err != nil {
 			_ = dockerJSON(r.Context(), docker, http.MethodDelete, "/v1.41/containers/"+url.PathEscape(name)+"?force=true", nil, nil)
 			writeError(w, http.StatusBadGateway, "Docker start failed: "+err.Error())
+			return
+		}
+		if err := waitForContainerRunning(r.Context(), docker, name); err != nil {
+			_ = dockerJSON(r.Context(), docker, http.MethodDelete, "/v1.41/containers/"+url.PathEscape(name)+"?force=true", nil, nil)
+			writeError(w, http.StatusBadGateway, "OlcRTC container did not start: "+err.Error())
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"instanceId": req.SubscriptionID, "container": name})
@@ -173,6 +195,31 @@ func dockerJSON(ctx context.Context, client *http.Client, method, path string, i
 		return json.NewDecoder(resp.Body).Decode(output)
 	}
 	return nil
+}
+
+func waitForContainerRunning(parent context.Context, client *http.Client, name string) error {
+	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
+	defer cancel()
+	for {
+		var inspect dockerInspectResponse
+		if err := dockerJSON(ctx, client, http.MethodGet, "/v1.41/containers/"+url.PathEscape(name)+"/json", nil, &inspect); err != nil {
+			return err
+		}
+		if inspect.State.Running {
+			return nil
+		}
+		if inspect.State.Status == "exited" || inspect.State.Status == "dead" {
+			if inspect.State.Error != "" {
+				return errors.New(inspect.State.Error)
+			}
+			return fmt.Errorf("status=%s, exitCode=%d", inspect.State.Status, inspect.State.ExitCode)
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("timeout waiting for Docker container state=running")
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 func containerName(id string) string { return "olcrtc-sub-" + strings.ToLower(id) }

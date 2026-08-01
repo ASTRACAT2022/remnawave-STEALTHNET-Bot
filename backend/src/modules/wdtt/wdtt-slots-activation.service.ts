@@ -122,15 +122,6 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
   if (!roomId || roomId.length > 1000) throw new Error("Вставьте ссылку или ID комнаты");
 
   const key = encryptionKey();
-  const response = await provisionerRequest(slot.node, "/v1/instances", {
-    method: "POST",
-    body: JSON.stringify({ subscriptionId: slot.id, provider: input.provider, roomId, encryptionKey: key }),
-  });
-  if (!response.ok) {
-    const reason = await describeProvisionerFailure(response);
-    throw new Error(`Не удалось запустить личный сервер: ${reason}`);
-  }
-
   const link = buildOlcRtcLink({
     name: slot.node.name,
     olcrtcProvider: input.provider,
@@ -139,17 +130,38 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
     olcrtcKey: key,
     olcrtcPayload: PERSONAL_VP8_PAYLOAD,
   });
-  try {
-    await prisma.$transaction([
-      prisma.wdttSlot.update({ where: { id: slot.id }, data: { status: "ACTIVE", vkHash: "olcrtc", wdttLink: link, olcrtcProvider: input.provider, olcrtcRoomId: roomId } }),
-      prisma.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: input.clientId, reason: "CONFIGURED", provider: input.provider, roomId, wdttLink: link, expiresAt: slot.expiresAt } }),
-    ]);
-    await pruneOlcRtcBackups(slot.id).catch((error) => console.error(`[OlcRTC] unable to prune backups for ${slot.id}`, error));
-  } catch (error) {
-    await deprovisionOlcRtcSlot(slot);
-    throw error;
-  }
+  await prisma.$transaction([
+    prisma.wdttSlot.update({ where: { id: slot.id }, data: { status: "PROVISIONING", revokeReason: null, vkHash: "olcrtc-provisioning", wdttLink: link, olcrtcProvider: input.provider, olcrtcRoomId: roomId } }),
+    prisma.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: input.clientId, reason: "CONFIGURED", provider: input.provider, roomId, wdttLink: link, expiresAt: slot.expiresAt } }),
+  ]);
+  await pruneOlcRtcBackups(slot.id).catch((error) => console.error(`[OlcRTC] unable to prune backups for ${slot.id}`, error));
+  void provisionOlcRtcSlot({ slot, provider: input.provider, roomId, key });
   return { link };
+}
+
+/**
+ * Provisioning can include a Docker container start and must not make the
+ * browser wait for the full operation. The client receives its link first;
+ * the slot becomes ACTIVE only after the provisioner confirms the start.
+ */
+async function provisionOlcRtcSlot(input: { slot: PersonalSlot; provider: "telemost" | "wbstream"; roomId: string; key: string }): Promise<void> {
+  const slot = input.slot;
+  if (!slot) return;
+  try {
+    const response = await provisionerRequest(slot.node, "/v1/instances", {
+      method: "POST",
+      body: JSON.stringify({ subscriptionId: slot.id, provider: input.provider, roomId: input.roomId, encryptionKey: input.key }),
+    });
+    if (!response.ok) throw new Error(await describeProvisionerFailure(response));
+    await prisma.wdttSlot.updateMany({ where: { id: slot.id, status: "PROVISIONING" }, data: { status: "ACTIVE", vkHash: "olcrtc", revokeReason: null } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Неизвестная ошибка provisioner";
+    console.error(`[OlcRTC] unable to provision ${slot.id}: ${message}`);
+    await prisma.wdttSlot.updateMany({
+      where: { id: slot.id, status: "PROVISIONING" },
+      data: { status: "PENDING_CONFIG", vkHash: "olcrtc-pending", wdttLink: "", olcrtcProvider: null, olcrtcRoomId: null, revokeReason: `Provisioner: ${message}`.slice(0, 1000) },
+    });
+  }
 }
 
 /** Stops the old personal server and returns its paid slot to the setup step. */
