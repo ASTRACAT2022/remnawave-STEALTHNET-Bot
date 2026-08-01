@@ -771,10 +771,13 @@ function SlotsTab({ token }: { token: string }) {
     setMigrating(true);
     setMigrationResult(null);
     try {
-      const result = await api.migrateWdttSlots(token, { targetNodeId, slotIds: selectedIds });
-      const failed = result.failed.map((item) => `${item.slotId}: ${item.error}`).join("\n");
-      const warnings = result.cleanupWarnings.map((item) => item.warning).join("\n");
-      setMigrationResult(`Перенесено: ${result.migrated.length}. Ошибок: ${result.failed.length}.${failed ? `\n${failed}` : ""}${warnings ? `\n${warnings}` : ""}`);
+      const batches = Array.from({ length: Math.ceil(selectedIds.length / 200) }, (_, index) => selectedIds.slice(index * 200, (index + 1) * 200));
+      const results = [] as Awaited<ReturnType<typeof api.migrateWdttSlots>>[];
+      for (const slotIds of batches) results.push(await api.migrateWdttSlots(token, { targetNodeId, slotIds }));
+      const migrated = results.flatMap((result) => result.migrated);
+      const failed = results.flatMap((result) => result.failed).map((item) => `${item.slotId}: ${item.error}`).join("\n");
+      const warnings = results.flatMap((result) => result.cleanupWarnings).map((item) => item.warning).join("\n");
+      setMigrationResult(`Перенесено: ${migrated.length}. Ошибок: ${results.reduce((total, result) => total + result.failed.length, 0)}.${failed ? `\n${failed}` : ""}${warnings ? `\n${warnings}` : ""}`);
       setSelectedIds([]);
       fetchSlots();
     } catch (error) {
