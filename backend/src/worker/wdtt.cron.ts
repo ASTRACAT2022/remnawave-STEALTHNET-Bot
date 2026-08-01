@@ -8,8 +8,8 @@ async function checkExpiredOlcRtcAccesses(): Promise<void> {
   const expired = await prisma.wdttSlot.findMany({
     where: { status: { in: ["ACTIVE", "PENDING_CONFIG"] }, expiresAt: { lt: new Date() } },
     select: {
-      id: true, nodeId: true, status: true,
-      node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } },
+      id: true, nodeId: true, status: true, password: true,
+      node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } },
     },
   });
   if (!expired.length) return;

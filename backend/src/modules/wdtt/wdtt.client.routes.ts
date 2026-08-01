@@ -40,9 +40,7 @@ wdttClientRouter.get("/slots", asyncRoute(async (req, res) => {
       expiresAt: s.expiresAt.toISOString(),
       trafficLimitBytes: s.trafficLimitBytes?.toString() ?? null,
       trafficUsedBytes: s.trafficUsedBytes.toString(),
-      // The cabinet displays this value directly. Do not hide the real
-      // provisioner failure behind a generic status for a paid client.
-      status: s.status === "PROVISION_FAILED" && s.revokeReason ? `ОШИБКА ЗАПУСКА: ${s.revokeReason}` : s.status,
+      status: s.status,
       requiresConfiguration: s.status === "PENDING_CONFIG",
       revokeReason: s.revokeReason,
       createdAt: s.createdAt.toISOString(),

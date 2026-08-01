@@ -43,11 +43,11 @@ type ClientDevice struct {
 }
 
 var (
-	db       *Database
-	dbMutex  sync.Mutex
-	dbFile   string
-	serverIP string
-	wdttPorts string
+	db            *Database
+	dbMutex       sync.Mutex
+	dbFile        string
+	serverIP      string
+	wdttPorts     string
 	defaultVkHash string
 )
 
@@ -99,7 +99,7 @@ func saveDB() {
 	os.WriteFile(dbFile, data, 0600)
 }
 
-// Restart the WDTT server process so it picks up new passwords from passwords.json
+// Restart the WDTT server process so its watchdog picks up passwords.json.
 func restartWdttServer() {
 	log.Println("[API] Restarting WDTT server to pick up new password...")
 	// pkill from procps package
@@ -171,21 +171,29 @@ func handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		VkHash string `json:"vk_hash"`
+		VkHash    string `json:"vk_hash"`
+		ExpiresAt int64  `json:"expires_at"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-
-	// Используем main password — он всегда работает без перезапуска сервера
-	password := os.Getenv("MAIN_PASSWORD")
-	if password == "" {
-		http.Error(w, `{"error":"MAIN_PASSWORD not set"}`, 500)
-		return
-	}
 
 	vkHash := req.VkHash
 	if vkHash == "" {
 		vkHash = defaultVkHash
 	}
+	if vkHash == "" {
+		http.Error(w, `{"error":"VK_HASH not set"}`, 500)
+		return
+	}
+
+	// A shared MAIN_PASSWORD makes it impossible to revoke one paid access
+	// without disconnecting everyone. Store a unique per-subscription password
+	// in the format already used by the WDTT server, then reload it.
+	password := generatePassword()
+	dbMutex.Lock()
+	loadDB()
+	db.Passwords[password] = &PasswordEntry{ExpiresAt: req.ExpiresAt, VkHash: vkHash, Ports: wdttPorts}
+	saveDB()
+	dbMutex.Unlock()
 
 	wdttLink := buildWdttLink(password, vkHash)
 	log.Printf("[API] Key created for client (vk_hash: %s)", vkHash[:min(8, len(vkHash))])
@@ -197,6 +205,12 @@ func handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		"vk_hash":   vkHash,
 		"wdtt_link": wdttLink,
 	})
+	// Let the HTTP response reach Billing first. start.sh supervises the
+	// server binary and starts it again with the updated passwords.json.
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		restartWdttServer()
+	}()
 }
 
 func min(a, b int) int {
@@ -236,6 +250,10 @@ func handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "revoked"})
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		restartWdttServer()
+	}()
 }
 
 // GET /api/health - Health check

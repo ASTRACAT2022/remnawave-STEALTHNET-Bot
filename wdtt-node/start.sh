@@ -23,8 +23,9 @@ echo "════════════════════════�
 
 cleanup() {
     echo "[boot] Shutting down..."
-    kill $WDTT_PID 2>/dev/null
-    kill $API_PID 2>/dev/null
+    kill ${WATCHDOG_PID:-} 2>/dev/null
+    kill ${WDTT_PID:-} 2>/dev/null
+    kill ${API_PID:-} 2>/dev/null
     exit 0
 }
 trap cleanup SIGTERM SIGINT
@@ -41,16 +42,31 @@ export VK_HASH="$VK_HASH"
 api-server &
 API_PID=$!
 
-# Start WDTT server (no watchdog — Docker restarts the container if it crashes)
-echo "[boot] Starting WDTT server..."
-wdtt-server \
-    -listen "0.0.0.0:$DTLS_PORT" \
-    -wg-port "$WG_PORT" \
-    -config-dir "$CONFIG_DIR" \
-    -password "$MAIN_PASSWORD" \
-    ${ADMIN_ID:+-admin "$ADMIN_ID"} \
-    ${BOT_TOKEN:+-bot-token "$BOT_TOKEN"} &
-WDTT_PID=$!
+start_wdtt_server() {
+    echo "[boot] Starting WDTT server..."
+    wdtt-server \
+        -listen "0.0.0.0:$DTLS_PORT" \
+        -wg-port "$WG_PORT" \
+        -config-dir "$CONFIG_DIR" \
+        -password "$MAIN_PASSWORD" \
+        ${ADMIN_ID:+-admin "$ADMIN_ID"} \
+        ${BOT_TOKEN:+-bot-token "$BOT_TOKEN"} &
+    WDTT_PID=$!
+}
 
-echo "[boot] All services started (WDTT=$WDTT_PID, API=$API_PID)"
-wait $WDTT_PID $API_PID 2>/dev/null
+# The API wrapper deliberately restarts only wdtt-server after a key is issued
+# or revoked. Keep a tiny watchdog here so that reload never stops the node.
+watch_wdtt_server() {
+    while true; do
+        start_wdtt_server
+        wait "$WDTT_PID" 2>/dev/null
+        echo "[boot] WDTT server stopped; reloading configuration..."
+        sleep 1
+    done
+}
+
+watch_wdtt_server &
+WATCHDOG_PID=$!
+
+echo "[boot] All services started (watchdog=$WATCHDOG_PID, API=$API_PID)"
+wait "$API_PID" 2>/dev/null

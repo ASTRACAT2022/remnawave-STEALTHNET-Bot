@@ -699,7 +699,7 @@ export const api = {
     return request("/admin/olcrtc/nodes", { token });
   },
 
-  async createWdttNode(token: string, data?: { name?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT"; provisionerUrl?: string | null; provisionerToken?: string | null; capacity?: number | null }): Promise<CreateWdttNodeResponse> {
+  async createWdttNode(token: string, data?: { name?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT"; provisionerUrl?: string | null; provisionerToken?: string | null; wdttApiUrl?: string | null; wdttApiKey?: string | null; capacity?: number | null }): Promise<CreateWdttNodeResponse> {
     return request("/admin/olcrtc/nodes", { method: "POST", body: JSON.stringify(data ?? {}), token });
   },
 
@@ -707,7 +707,7 @@ export const api = {
     return request(`/admin/olcrtc/nodes/${id}`, { token });
   },
 
-  async updateWdttNode(token: string, id: string, data: { name?: string; status?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT"; provisionerUrl?: string | null; provisionerToken?: string | null; capacity?: number | null }): Promise<unknown> {
+  async updateWdttNode(token: string, id: string, data: { name?: string; status?: string; provider?: "jitsi" | "telemost" | "wbstream"; transport?: "datachannel" | "vp8channel" | "seichannel" | "videochannel"; roomId?: string; encryptionKey?: string; payload?: string | null; provisionMode?: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT"; provisionerUrl?: string | null; provisionerToken?: string | null; wdttApiUrl?: string | null; wdttApiKey?: string | null; capacity?: number | null }): Promise<unknown> {
     return request(`/admin/olcrtc/nodes/${id}`, { method: "PATCH", body: JSON.stringify(data), token });
   },
 
@@ -4929,14 +4929,15 @@ export interface WdttNodeListItem {
   lastSeenAt: string | null;
   publicHost: string | null;
   apiUrl: string;
-  provider: "jitsi" | "telemost" | "wbstream";
+  provider: "jitsi" | "telemost" | "wbstream" | "wdtt";
   transport: "datachannel" | "vp8channel" | "seichannel" | "videochannel";
   roomId: string;
   encryptionKey: string;
   payload: string | null;
-  provisionMode: "STATIC" | "PER_CLIENT";
+  provisionMode: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT";
   provisionerUrl: string | null;
   provisionerToken: string | null;
+  wdttApiUrl: string | null;
   dtlsPort: number;
   wgPort: number;
   tunPort: number;
@@ -4947,7 +4948,7 @@ export interface WdttNodeListItem {
 }
 
 export interface CreateWdttNodeResponse {
-  node: { id: string; name: string; status: string; provider: string; transport: string; roomId: string; encryptionKey: string; payload: string | null; provisionMode: "STATIC" | "PER_CLIENT"; provisionerUrl: string | null; capacity: number | null; createdAt: string };
+  node: { id: string; name: string; status: string; provider: string; transport: string; roomId: string; encryptionKey: string; payload: string | null; provisionMode: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT"; provisionerUrl: string | null; capacity: number | null; createdAt: string };
   instructions: string;
 }
 
@@ -4959,14 +4960,15 @@ export interface WdttNodeDetail {
   publicHost: string | null;
   apiUrl: string;
   apiKey: string;
-  provider: "jitsi" | "telemost" | "wbstream";
+  provider: "jitsi" | "telemost" | "wbstream" | "wdtt";
   transport: "datachannel" | "vp8channel" | "seichannel" | "videochannel";
   roomId: string;
   encryptionKey: string;
   payload: string | null;
-  provisionMode: "STATIC" | "PER_CLIENT";
+  provisionMode: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT";
   provisionerUrl: string | null;
   provisionerToken: string | null;
+  wdttApiUrl: string | null;
   dtlsPort: number;
   wgPort: number;
   tunPort: number;

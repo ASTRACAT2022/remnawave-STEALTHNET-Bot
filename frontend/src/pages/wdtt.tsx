@@ -187,6 +187,8 @@ function NodesTab({ token }: { token: string }) {
                     <div className="text-xs text-muted-foreground">
                       {n.provisionMode === "PER_CLIENT"
                         ? `Персональные контейнеры · ${n.provisionerUrl || "provisioner не задан"}`
+                        : n.provisionMode === "WDTT_COMPAT"
+                          ? `WDTT-совместимая нода · ${n.wdttApiUrl || n.apiUrl}`
                         : `${n.provider} · ${n.transport} · ${n.roomId}`}
                     </div>
                   </div>
@@ -252,9 +254,11 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
   const [roomId, setRoomId] = useState("");
   const [encryptionKey, setEncryptionKey] = useState("");
   const [payload, setPayload] = useState("");
-  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT">("PER_CLIENT");
+  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT" | "WDTT_COMPAT">("PER_CLIENT");
   const [provisionerUrl, setProvisionerUrl] = useState("");
   const [provisionerToken, setProvisionerToken] = useState("");
+  const [wdttApiUrl, setWdttApiUrl] = useState("");
+  const [wdttApiKey, setWdttApiKey] = useState("");
   const [capacity, setCapacity] = useState("");
   const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<CreateWdttNodeResponse | null>(null);
@@ -272,6 +276,8 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
         provisionMode,
         provisionerUrl: provisionerUrl || null,
         provisionerToken: provisionerToken || null,
+        wdttApiUrl: wdttApiUrl || null,
+        wdttApiKey: wdttApiKey || null,
         capacity: capacity ? parseInt(capacity) : null,
       });
       setResult(r);
@@ -288,7 +294,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
           <DialogHeader><DialogTitle>Нода добавлена</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <div><Label>Название</Label><div className="font-medium">{result.node.name}</div></div>
-            <div><Label>Режим</Label><div className="font-mono text-xs">{result.node.provisionMode === "PER_CLIENT" ? "Персональные контейнеры" : `${result.node.provider} · ${result.node.transport} · ${result.node.roomId}`}</div></div>
+            <div><Label>Режим</Label><div className="font-mono text-xs">{result.node.provisionMode === "PER_CLIENT" ? "Персональные контейнеры" : result.node.provisionMode === "WDTT_COMPAT" ? "WDTT-совместимая нода" : `${result.node.provider} · ${result.node.transport} · ${result.node.roomId}`}</div></div>
             <p className="text-muted-foreground">{result.instructions}</p>
           </div>
           <DialogFooter>
@@ -305,12 +311,18 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
         <DialogHeader><DialogTitle>Добавить OlcRTC-ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Моя нода" /></div>
-          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Общая статическая ссылка OlcRTC</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
               <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} placeholder="10.0.0.10:9500 или http://10.0.0.10:9500" /></div>
               <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="OLCRTC_PROVISIONER_TOKEN" /></div>
               <p className="text-xs text-muted-foreground">После оплаты клиент выбирает Telemost/WBStream и вставляет свою ссылку комнаты. Для него создаётся отдельный контейнер, который будет удалён после окончания тарифа.</p>
+            </>
+          ) : provisionMode === "WDTT_COMPAT" ? (
+            <>
+              <div><Label>URL WDTT API</Label><Input value={wdttApiUrl} onChange={(e) => setWdttApiUrl(e.target.value)} placeholder="http://10.0.0.10:9000" /></div>
+              <div><Label>API-ключ WDTT</Label><Input type="password" value={wdttApiKey} onChange={(e) => setWdttApiKey(e.target.value)} placeholder="API_KEY из wdtt-node/.env" /></div>
+              <p className="text-xs text-muted-foreground">Биллинг проверит <code>/api/health</code>, а после оплаты запросит персональный ключ через <code>/api/keys</code>. Клиенту будет выдана ссылка <code>wdtt://</code>, а не <code>olcrtc://</code>.</p>
             </>
           ) : (
             <>
@@ -326,7 +338,7 @@ function CreateNodeDialog({ token, open, onClose, onCreated }: { token: string; 
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Отмена</Button>
-          <Button onClick={handleCreate} disabled={creating || !name || (provisionMode === "PER_CLIENT" ? (!provisionerUrl || provisionerToken.length < 32) : (!roomId || !/^[a-f0-9]{64}$/i.test(encryptionKey)))}>
+          <Button onClick={handleCreate} disabled={creating || !name || (provisionMode === "PER_CLIENT" ? (!provisionerUrl || provisionerToken.length < 32) : provisionMode === "WDTT_COMPAT" ? (!wdttApiUrl || wdttApiKey.length < 16) : (!roomId || !/^[a-f0-9]{64}$/i.test(encryptionKey)))}>
             {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Создать
           </Button>
@@ -344,9 +356,11 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
   const [roomId, setRoomId] = useState("");
   const [encryptionKey, setEncryptionKey] = useState("");
   const [payload, setPayload] = useState("");
-  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT">("STATIC");
+  const [provisionMode, setProvisionMode] = useState<"STATIC" | "PER_CLIENT" | "WDTT_COMPAT">("STATIC");
   const [provisionerUrl, setProvisionerUrl] = useState("");
   const [provisionerToken, setProvisionerToken] = useState("");
+  const [wdttApiUrl, setWdttApiUrl] = useState("");
+  const [wdttApiKey, setWdttApiKey] = useState("");
   const [capacity, setCapacity] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -354,7 +368,7 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
     if (node) {
       setName(node.name);
       setStatus(node.status);
-      setProvider(node.provider);
+      setProvider(node.provider === "wdtt" ? "jitsi" : node.provider);
       setTransport(node.transport);
       setRoomId(node.roomId);
       setEncryptionKey(node.encryptionKey);
@@ -362,6 +376,8 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
       setProvisionMode(node.provisionMode);
       setProvisionerUrl(node.provisionerUrl ?? "");
       setProvisionerToken(node.provisionerToken ?? "");
+      setWdttApiUrl(node.wdttApiUrl ?? "");
+      setWdttApiKey("");
       setCapacity(node.capacity != null ? String(node.capacity) : "");
     }
   }, [node]);
@@ -379,6 +395,10 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
           provisionerUrl: provisionerUrl || null,
           // Пустое поле означает «оставить текущий секрет», а не стереть его.
           ...(provisionerToken.trim() ? { provisionerToken: provisionerToken.trim() } : {}),
+        } : provisionMode === "WDTT_COMPAT" ? {
+          wdttApiUrl: wdttApiUrl || null,
+          // Empty secret keeps the current API key on an existing node.
+          ...(wdttApiKey.trim() ? { wdttApiKey: wdttApiKey.trim() } : {}),
         } : {
           provider,
           transport,
@@ -402,12 +422,18 @@ function EditNodeDialog({ token, node, onClose, onSaved }: { token: string; node
         <DialogHeader><DialogTitle>Редактировать ноду</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div><Label>Название</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="STATIC">Общая статическая ссылка</option></select></div>
+          <div><Label>Режим выдачи</Label><select value={provisionMode} onChange={(e) => setProvisionMode(e.target.value as typeof provisionMode)} className="flex h-10 w-full rounded-xl border bg-background px-3 py-2 text-sm"><option value="PER_CLIENT">Персональный сервер для каждой подписки</option><option value="WDTT_COMPAT">WDTT-совместимая нода</option><option value="STATIC">Общая статическая ссылка OlcRTC</option></select></div>
           {provisionMode === "PER_CLIENT" ? (
             <>
               <div><Label>IP:порт или URL provisioner</Label><Input value={provisionerUrl} onChange={(e) => setProvisionerUrl(e.target.value)} /></div>
               <div><Label>Токен provisioner</Label><Input type="password" value={provisionerToken} onChange={(e) => setProvisionerToken(e.target.value)} placeholder="Заполните для нового токена" /></div>
               <p className="text-xs text-muted-foreground">После сохранения нажмите «Тест», затем переведите ноду в ONLINE.</p>
+            </>
+          ) : provisionMode === "WDTT_COMPAT" ? (
+            <>
+              <div><Label>URL WDTT API</Label><Input value={wdttApiUrl} onChange={(e) => setWdttApiUrl(e.target.value)} /></div>
+              <div><Label>Новый API-ключ WDTT</Label><Input type="password" value={wdttApiKey} onChange={(e) => setWdttApiKey(e.target.value)} placeholder="Оставьте пустым, чтобы не менять" /></div>
+              <p className="text-xs text-muted-foreground">WDTT и OlcRTC — разные протоколы. Эта нода выдаёт <code>wdtt://</code> и может использоваться в тех же тарифах и оплатах.</p>
             </>
           ) : (
             <>

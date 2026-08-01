@@ -27,12 +27,15 @@ type OlcRtcLinkNode = {
   olcrtcProvisionMode: string;
   olcrtcProvisionerUrl: string | null;
   olcrtcProvisionerToken: string | null;
+  apiUrl: string;
+  apiKey: string;
 };
 
 type PersonalSlot = {
   id: string;
   status: string;
-  node: Pick<OlcRtcLinkNode, "olcrtcProvisionMode" | "olcrtcProvisionerUrl" | "olcrtcProvisionerToken">;
+  password?: string;
+  node: Pick<OlcRtcLinkNode, "olcrtcProvisionMode" | "olcrtcProvisionerUrl" | "olcrtcProvisionerToken" | "apiUrl" | "apiKey">;
 };
 
 const PERSONAL_VP8_PAYLOAD = "vp8-fps=30&vp8-batch=64";
@@ -57,10 +60,11 @@ export function buildOlcRtcLink(node: Pick<OlcRtcLinkNode, "name" | "olcrtcProvi
 }
 
 function isStaticNode(node: OlcRtcLinkNode): boolean {
-  return node.olcrtcProvisionMode !== "PER_CLIENT";
+  return node.olcrtcProvisionMode === "STATIC";
 }
 
 function isValidNode(node: OlcRtcLinkNode): boolean {
+  if (node.olcrtcProvisionMode === "WDTT_COMPAT") return Boolean(node.apiUrl.trim() && node.apiKey.trim());
   if (isStaticNode(node)) return Boolean(node.olcrtcRoomId.trim()) && /^[a-f0-9]{64}$/i.test(node.olcrtcKey);
   return Boolean(node.olcrtcProvisionerUrl?.trim() && node.olcrtcProvisionerToken?.trim());
 }
@@ -97,8 +101,59 @@ async function describeProvisionerFailure(response: Response): Promise<string> {
   return typeof data?.message === "string" ? data.message : `HTTP ${response.status}`;
 }
 
+function wdttApiUrl(base: string, path: string): string {
+  const normalized = /^https?:\/\//i.test(base) ? base : `http://${base}`;
+  return `${normalized.replace(/\/+$/, "")}${path}`;
+}
+
+type WdttIssuedAccess = { password: string; vkHash: string; link: string };
+
+/** Calls the retained WDTT node API. This is intentionally separate from the
+ * OlcRTC provisioner: the two protocols issue different client links. */
+async function issueWdttAccess(node: Pick<OlcRtcLinkNode, "apiUrl" | "apiKey">, expiresAt: Date): Promise<WdttIssuedAccess> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(wdttApiUrl(node.apiUrl, "/api/keys"), {
+      method: "POST",
+      headers: { "X-API-Key": node.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ expires_at: Math.floor(expiresAt.getTime() / 1000) }),
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => null) as { password?: unknown; vk_hash?: unknown; wdtt_link?: unknown; error?: unknown } | null;
+    if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : `WDTT-нода вернула HTTP ${response.status}`);
+    if (typeof data?.password !== "string" || !data.password || typeof data.wdtt_link !== "string" || !data.wdtt_link.startsWith("wdtt://")) {
+      throw new Error("WDTT-нода вернула некорректный ключ");
+    }
+    return { password: data.password, vkHash: typeof data.vk_hash === "string" ? data.vk_hash : "", link: data.wdtt_link };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("WDTT-нода не ответила за 15 секунд");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function revokeWdttAccess(slot: PersonalSlot): Promise<boolean> {
+  if (!slot.password || !slot.node.apiUrl || !slot.node.apiKey) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(wdttApiUrl(slot.node.apiUrl, `/api/keys/${encodeURIComponent(slot.password)}`), {
+      method: "DELETE", headers: { "X-API-Key": slot.node.apiKey }, signal: controller.signal,
+    });
+    return response.ok || response.status === 404;
+  } catch (error) {
+    console.error(`[WDTT] unable to revoke ${slot.id}`, error);
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /** Removes the per-slot server. Returns false so callers can retry safely. */
 export async function deprovisionOlcRtcSlot(slot: PersonalSlot): Promise<boolean> {
+  if (slot.node.olcrtcProvisionMode === "WDTT_COMPAT") return revokeWdttAccess(slot);
   if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") return true;
   try {
     const response = await provisionerRequest(slot.node, `/v1/instances/${encodeURIComponent(slot.id)}`, { method: "DELETE" });
@@ -113,7 +168,7 @@ export async function configureOlcRtcSlotForClient(input: { clientId: string; sl
   const roomId = input.roomId.trim();
   const slot = await prisma.wdttSlot.findFirst({
     where: { id: input.slotId, clientId: input.clientId },
-    include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+    include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } } },
   });
   if (!slot) throw new Error("Подписка не найдена");
   if (slot.status !== "PENDING_CONFIG" && slot.status !== "PROVISION_FAILED") throw new Error("Эта подписка уже настроена или недоступна");
@@ -179,7 +234,7 @@ function keyFromOlcRtcLink(link: string): string | null {
 export async function retryOlcRtcProvisioningForClient(input: { clientId: string; slotId: string }): Promise<{ link: string }> {
   const slot = await prisma.wdttSlot.findFirst({
     where: { id: input.slotId, clientId: input.clientId },
-    include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+    include: { node: { select: { name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } } },
   });
   if (!slot) throw new Error("Подписка не найдена");
   if (slot.status !== "PROVISION_FAILED" && slot.status !== "PENDING_CONFIG") throw new Error("Повторный запуск сейчас не требуется");
@@ -230,12 +285,12 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
   for (const slotId of [...new Set(input.slotIds)]) {
     const slot = await prisma.wdttSlot.findUnique({
       where: { id: slotId },
-      include: { node: { select: { id: true, name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+      include: { node: { select: { id: true, name: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, olcrtcProvider: true, olcrtcRoomId: true, apiUrl: true, apiKey: true } } },
     });
     if (!slot) { result.failed.push({ slotId, error: "Подписка не найдена" }); continue; }
     if (slot.status !== "ACTIVE" && slot.status !== "PENDING_CONFIG" && slot.status !== "PROVISION_FAILED") { result.failed.push({ slotId, error: "Подключение сейчас занято настройкой; повторите перенос после завершения операции" }); continue; }
     if (slot.nodeId === target.id) { result.failed.push({ slotId, error: "Подключение уже находится на выбранной ноде" }); continue; }
-    if (slot.node.olcrtcProvisionMode !== "PER_CLIENT") { result.failed.push({ slotId, error: "Исходная нода не использует личные контейнеры" }); continue; }
+    if (slot.node.olcrtcProvisionMode === "WDTT_COMPAT") { result.failed.push({ slotId, error: "Это WDTT-доступ (wdtt://), а не OlcRTC. Его нельзя перенести как личную OlcRTC-комнату." }); continue; }
     // A paid but not yet configured slot has no container or link. It can be
     // moved immediately: its future configuration will be created on target.
     if (slot.status === "PENDING_CONFIG") {
@@ -258,8 +313,13 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
       }
       continue;
     }
-    const provider = slot.olcrtcProvider === "telemost" || slot.olcrtcProvider === "wbstream" ? slot.olcrtcProvider : null;
-    const roomId = slot.olcrtcRoomId?.trim() || null;
+    // Old shared OlcRTC subscriptions were stored in the historical wdtt_*
+    // tables. They did not duplicate the room on every slot, so recover it
+    // from the source node before moving it to a verified personal container.
+    const provider = slot.olcrtcProvider === "telemost" || slot.olcrtcProvider === "wbstream"
+      ? slot.olcrtcProvider
+      : (slot.node.olcrtcProvider === "telemost" || slot.node.olcrtcProvider === "wbstream" ? slot.node.olcrtcProvider : null);
+    const roomId = slot.olcrtcRoomId?.trim() || slot.node.olcrtcRoomId?.trim() || null;
     if (!provider || !roomId) { result.failed.push({ slotId, error: "У подключения нет сохранённой комнаты; его можно перенести после восстановления настройки" }); continue; }
 
     const key = encryptionKey();
@@ -301,7 +361,7 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
 export async function reissueOlcRtcSlotForClient(input: { clientId: string; slotId: string }): Promise<void> {
   const slot = await prisma.wdttSlot.findFirst({
     where: { id: input.slotId, clientId: input.clientId },
-    include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+    include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } } },
   });
   if (!slot) throw new Error("Подписка не найдена");
   if (slot.status !== "ACTIVE") throw new Error("Перевыпустить можно только активную подписку");
@@ -351,32 +411,37 @@ export async function createWdttSlotsByPaymentId(paymentId: string): Promise<Cre
     select: {
       id: true, name: true, capacity: true, currentSlots: true, olcrtcProvider: true, olcrtcTransport: true,
       olcrtcRoomId: true, olcrtcKey: true, olcrtcPayload: true, olcrtcProvisionMode: true,
-      olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true,
+      olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true,
     },
     orderBy: { updatedAt: "asc" },
   });
-  // Prefer the personal mode whenever it is available. This makes a newly
-  // created personal node take precedence over old shared-link nodes that may
-  // still exist for historical subscriptions.
+  // Prefer isolated OlcRTC containers, then the compatible WDTT nodes, then
+  // legacy shared OlcRTC links. Assignments on a tariff still take precedence.
   const validNodes = nodes.filter(isValidNode).sort((left, right) => {
-    const leftPersonal = left.olcrtcProvisionMode === "PER_CLIENT" ? 0 : 1;
-    const rightPersonal = right.olcrtcProvisionMode === "PER_CLIENT" ? 0 : 1;
-    return leftPersonal - rightPersonal;
+    const priority = (node: typeof left) => node.olcrtcProvisionMode === "PER_CLIENT" ? 0 : node.olcrtcProvisionMode === "WDTT_COMPAT" ? 1 : 2;
+    return priority(left) - priority(right);
   });
   if (!validNodes.length) return { ok: false, error: "Нет настроенных OlcRTC нод. Проверьте ноду и её статус.", status: 503 };
 
   const expiresAt = new Date(Date.now() + tariff.durationDays * 86_400_000);
   const usage = new Map(validNodes.map((node) => [node.id, node.currentSlots]));
-  const results: { node: OlcRtcLinkNode; code: string; link: string; status: string }[] = [];
+  const results: { node: OlcRtcLinkNode; code: string; vkHash: string; link: string; status: string }[] = [];
   for (let index = 0; index < tariff.proxyCount; index++) {
     const node = validNodes.find((candidate) => (usage.get(candidate.id) ?? 0) < (candidate.capacity ?? Infinity));
     if (!node) break;
-    results.push({
-      node,
-      code: accessCode(),
-      link: isStaticNode(node) ? buildOlcRtcLink(node) : "",
-      status: isStaticNode(node) ? "ACTIVE" : "PENDING_CONFIG",
-    });
+    if (node.olcrtcProvisionMode === "WDTT_COMPAT") {
+      try {
+        const issued = await issueWdttAccess(node, expiresAt);
+        results.push({ node, code: issued.password, vkHash: issued.vkHash || "wdtt", link: issued.link, status: "ACTIVE" });
+      } catch (error) {
+        for (const result of results.filter((result) => result.node.olcrtcProvisionMode === "WDTT_COMPAT")) {
+          await revokeWdttAccess({ id: "unpersisted", status: "ACTIVE", password: result.code, node: result.node }).catch(() => false);
+        }
+        return { ok: false, error: error instanceof Error ? `WDTT: ${error.message}` : "WDTT-нода не выдала доступ", status: 503 };
+      }
+    } else {
+      results.push({ node, code: accessCode(), vkHash: isStaticNode(node) ? "olcrtc" : "olcrtc-pending", link: isStaticNode(node) ? buildOlcRtcLink(node) : "", status: isStaticNode(node) ? "ACTIVE" : "PENDING_CONFIG" });
+    }
     usage.set(node.id, (usage.get(node.id) ?? 0) + 1);
   }
   if (!results.length) return { ok: false, error: "На OlcRTC нодах нет свободных мест", status: 503 };
@@ -384,7 +449,7 @@ export async function createWdttSlotsByPaymentId(paymentId: string): Promise<Cre
   const created = await prisma.$transaction(results.map((result) => prisma.wdttSlot.create({
     data: {
       nodeId: result.node.id, clientId: payment.clientId, tariffId: tariff.id, paymentId,
-      password: result.code, vkHash: result.status === "ACTIVE" ? "olcrtc" : "olcrtc-pending",
+      password: result.code, vkHash: result.vkHash,
       wdttLink: result.link, expiresAt, trafficLimitBytes: tariff.trafficLimitBytes, status: result.status,
     },
   })));

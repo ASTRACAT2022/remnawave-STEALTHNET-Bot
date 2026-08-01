@@ -1,6 +1,7 @@
 /**
  * OlcRTC direct-link administration. The filename and Prisma model names are
- * legacy-only; OlcRTC links are issued locally without a Manager HTTP API.
+ * legacy-only; OlcRTC links are issued locally, while the optional retained
+ * WDTT-compatible node mode talks to its original HTTP API.
  */
 
 import express, { Router } from "express";
@@ -23,7 +24,7 @@ function asyncRoute(
 
 const providers = ["jitsi", "telemost", "wbstream"] as const;
 const transports = ["datachannel", "vp8channel", "seichannel", "videochannel"] as const;
-const provisionModes = ["STATIC", "PER_CLIENT"] as const;
+const provisionModes = ["STATIC", "PER_CLIENT", "WDTT_COMPAT"] as const;
 
 function isOlcRtcKey(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value.trim());
@@ -41,6 +42,12 @@ function normalizeProvisionerUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** WDTT uses its own API, even though its nodes are administered alongside
+ * OlcRTC for backward-compatible tariffs and subscriptions. */
+function normalizeWdttApiUrl(value: string): string | null {
+  return normalizeProvisionerUrl(value);
 }
 
 // ——— OlcRTC link nodes ———
@@ -69,6 +76,7 @@ wdttAdminRouter.get("/nodes", asyncRoute(async (_req, res) => {
       provisionMode: n.olcrtcProvisionMode,
       provisionerUrl: n.olcrtcProvisionerUrl,
       provisionerToken: n.olcrtcProvisionerToken,
+      wdttApiUrl: n.olcrtcProvisionMode === "WDTT_COMPAT" ? n.apiUrl : null,
       dtlsPort: n.dtlsPort,
       wgPort: n.wgPort,
       tunPort: n.tunPort,
@@ -91,14 +99,19 @@ const createWdttNodeSchema = z.object({
   provisionMode: z.enum(provisionModes).default("STATIC"),
   provisionerUrl: z.string().max(500).optional().nullable(),
   provisionerToken: z.string().min(32, "Токен provisioner должен содержать не менее 32 символов").optional().nullable(),
+  wdttApiUrl: z.string().max(500).optional().nullable(),
+  wdttApiKey: z.string().min(16, "API-ключ WDTT должен содержать не менее 16 символов").optional().nullable(),
   capacity: z.number().int().min(1).nullable().optional(),
 }).superRefine((value, context) => {
   if (value.provisionMode === "STATIC") {
     if (!value.roomId.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["roomId"], message: "Укажите ID комнаты" });
     if (!isOlcRtcKey(value.encryptionKey)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["encryptionKey"], message: "Ключ должен содержать 64 шестнадцатеричных символа" });
-  } else {
+  } else if (value.provisionMode === "PER_CLIENT") {
     if (!value.provisionerUrl?.trim() || !normalizeProvisionerUrl(value.provisionerUrl)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerUrl"], message: "Укажите IP:порт или URL provisioner-сервиса" });
     if (!value.provisionerToken?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["provisionerToken"], message: "Укажите токен provisioner-сервиса" });
+  } else {
+    if (!value.wdttApiUrl?.trim() || !normalizeWdttApiUrl(value.wdttApiUrl)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["wdttApiUrl"], message: "Укажите URL WDTT API" });
+    if (!value.wdttApiKey?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["wdttApiKey"], message: "Укажите API-ключ WDTT" });
   }
 });
 
@@ -112,10 +125,10 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
     data: {
       name: body.data.name,
       // Required legacy columns. Runtime code uses the explicit olcrtc_* fields below.
-      apiUrl: body.data.provisionMode === "PER_CLIENT" ? normalizeProvisionerUrl(body.data.provisionerUrl!)! : body.data.roomId.trim(),
-      apiKey: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : body.data.encryptionKey.trim(),
+      apiUrl: body.data.provisionMode === "PER_CLIENT" ? normalizeProvisionerUrl(body.data.provisionerUrl!)! : body.data.provisionMode === "WDTT_COMPAT" ? normalizeWdttApiUrl(body.data.wdttApiUrl!)! : body.data.roomId.trim(),
+      apiKey: body.data.provisionMode === "PER_CLIENT" ? body.data.provisionerToken!.trim() : body.data.provisionMode === "WDTT_COMPAT" ? body.data.wdttApiKey!.trim() : body.data.encryptionKey.trim(),
       publicHost: null,
-      olcrtcProvider: body.data.provider,
+      olcrtcProvider: body.data.provisionMode === "WDTT_COMPAT" ? "wdtt" : body.data.provider,
       olcrtcTransport: body.data.transport,
       olcrtcRoomId: body.data.roomId.trim(),
       olcrtcKey: body.data.encryptionKey.trim(),
@@ -145,6 +158,8 @@ wdttAdminRouter.post("/nodes", asyncRoute(async (req, res) => {
     },
     instructions: body.data.provisionMode === "PER_CLIENT"
       ? "Нода добавлена. После оплаты клиент сам выберет Telemost/WBStream и получит отдельную ссылку olcrtc://."
+      : body.data.provisionMode === "WDTT_COMPAT"
+        ? "WDTT-нода добавлена. После оплаты биллинг запросит у неё персональный ключ и выдаст ссылку wdtt://."
       : "Нода добавлена. BillingStyle будет выдавать собственные ссылки olcrtc:// с этими параметрами.",
   });
 }));
@@ -180,6 +195,7 @@ wdttAdminRouter.get("/nodes/:id", asyncRoute(async (req, res) => {
     provisionMode: node.olcrtcProvisionMode,
     provisionerUrl: node.olcrtcProvisionerUrl,
     provisionerToken: node.olcrtcProvisionerToken,
+    wdttApiUrl: node.olcrtcProvisionMode === "WDTT_COMPAT" ? node.apiUrl : null,
     dtlsPort: node.dtlsPort,
     wgPort: node.wgPort,
     tunPort: node.tunPort,
@@ -214,6 +230,8 @@ const updateWdttNodeSchema = z.object({
   provisionMode: z.enum(provisionModes).optional(),
   provisionerUrl: z.string().max(500).nullable().optional(),
   provisionerToken: z.string().min(32).nullable().optional(),
+  wdttApiUrl: z.string().max(500).nullable().optional(),
+  wdttApiKey: z.string().min(16).nullable().optional(),
   capacity: z.number().int().min(1).nullable().optional(),
 });
 
@@ -227,6 +245,9 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
   if (!node) return res.status(404).json({ message: "Node not found" });
   if (body.data.provisionerUrl && !normalizeProvisionerUrl(body.data.provisionerUrl)) {
     return res.status(400).json({ message: "Invalid input", errors: { fieldErrors: { provisionerUrl: ["Укажите IP:порт или URL provisioner-сервиса"] }, formErrors: [] } });
+  }
+  if (body.data.wdttApiUrl && !normalizeWdttApiUrl(body.data.wdttApiUrl)) {
+    return res.status(400).json({ message: "Invalid input", errors: { fieldErrors: { wdttApiUrl: ["Укажите URL WDTT API"] }, formErrors: [] } });
   }
 
   const updated = await prisma.wdttNode.update({
@@ -242,6 +263,8 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
       ...(body.data.provisionMode !== undefined && { olcrtcProvisionMode: body.data.provisionMode }),
       ...(body.data.provisionerUrl !== undefined && { olcrtcProvisionerUrl: body.data.provisionerUrl ? normalizeProvisionerUrl(body.data.provisionerUrl) : null, apiUrl: body.data.provisionerUrl ? normalizeProvisionerUrl(body.data.provisionerUrl)! : node.apiUrl }),
       ...(body.data.provisionerToken !== undefined && { olcrtcProvisionerToken: body.data.provisionerToken?.trim() || null, apiKey: body.data.provisionerToken?.trim() || node.apiKey }),
+      ...(body.data.wdttApiUrl !== undefined && { apiUrl: body.data.wdttApiUrl ? normalizeWdttApiUrl(body.data.wdttApiUrl)! : node.apiUrl }),
+      ...(body.data.wdttApiKey !== undefined && { apiKey: body.data.wdttApiKey?.trim() || node.apiKey }),
       ...(body.data.capacity !== undefined && { capacity: body.data.capacity }),
     },
   });
@@ -256,6 +279,7 @@ wdttAdminRouter.patch("/nodes/:id", asyncRoute(async (req, res) => {
     payload: updated.olcrtcPayload,
     provisionMode: updated.olcrtcProvisionMode,
     provisionerUrl: updated.olcrtcProvisionerUrl,
+    wdttApiUrl: updated.olcrtcProvisionMode === "WDTT_COMPAT" ? updated.apiUrl : null,
     capacity: updated.capacity,
     subscriptionBaseUrl: updated.publicHost,
     updatedAt: updated.updatedAt.toISOString(),
@@ -270,13 +294,13 @@ wdttAdminRouter.delete("/nodes/:id", asyncRoute(async (req, res) => {
     include: {
       slots: {
         where: { status: { in: ["ACTIVE", "PENDING_CONFIG"] } },
-        select: { id: true, status: true },
+        select: { id: true, status: true, password: true },
       },
     },
   });
   if (!node) return res.status(404).json({ message: "Node not found" });
   for (const slot of node.slots) {
-    if (!await deprovisionOlcRtcSlot({ id: slot.id, status: slot.status, node })) {
+    if (!await deprovisionOlcRtcSlot({ id: slot.id, status: slot.status, password: slot.password, node })) {
       return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; нода не удалена" });
     }
   }
@@ -303,6 +327,17 @@ wdttAdminRouter.post("/nodes/:id/test", asyncRoute(async (req, res) => {
       if (!health.ok) return res.status(502).json({ success: false, error: `Provisioner вернул HTTP ${health.status}` });
     } catch {
       return res.status(502).json({ success: false, error: "Provisioner недоступен" });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } else if (node.olcrtcProvisionMode === "WDTT_COMPAT") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const health = await fetch(`${node.apiUrl.replace(/\/+$/, "")}/api/health`, { headers: { "X-API-Key": node.apiKey }, signal: controller.signal });
+      if (!health.ok) return res.status(502).json({ success: false, error: `WDTT API вернул HTTP ${health.status}` });
+    } catch {
+      return res.status(502).json({ success: false, error: "WDTT API недоступен" });
     } finally {
       clearTimeout(timeout);
     }
@@ -593,7 +628,7 @@ wdttAdminRouter.patch("/slots/:id", asyncRoute(async (req, res) => {
   if (body.data.status && ["EXPIRED", "REVOKED"].includes(body.data.status) && (slot.status === "ACTIVE" || slot.status === "PENDING_CONFIG")) {
     const fullSlot = await prisma.wdttSlot.findUnique({
       where: { id },
-      include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true } } },
+      include: { node: { select: { olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } } },
     });
     if (fullSlot && !await deprovisionOlcRtcSlot(fullSlot)) {
       return res.status(502).json({ message: "Не удалось остановить личный OlcRTC-сервер; повторите операцию" });
