@@ -581,7 +581,7 @@ wdttAdminRouter.delete("/tariffs/:id", asyncRoute(async (req, res) => {
 wdttAdminRouter.get("/slots", asyncRoute(async (_req, res) => {
   const slots = await prisma.wdttSlot.findMany({
     include: {
-      node: { select: { id: true, name: true, publicHost: true, dtlsPort: true, wgPort: true, tunPort: true } },
+      node: { select: { id: true, name: true, publicHost: true, dtlsPort: true, wgPort: true, tunPort: true, olcrtcProvisionMode: true } },
       client: { select: { id: true, email: true, telegramUsername: true, telegramId: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -591,6 +591,7 @@ wdttAdminRouter.get("/slots", asyncRoute(async (_req, res) => {
       id: s.id,
       nodeId: s.nodeId,
       nodeName: s.node.name,
+      nodeProvisionMode: s.node.olcrtcProvisionMode,
       publicHost: s.node.publicHost,
       dtlsPort: s.node.dtlsPort,
       wgPort: s.node.wgPort,

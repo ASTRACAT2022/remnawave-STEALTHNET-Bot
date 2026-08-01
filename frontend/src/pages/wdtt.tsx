@@ -795,7 +795,7 @@ function SlotsTab({ token }: { token: string }) {
     }
     return true;
   });
-  const migratableIds = filtered.filter((slot) => ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(slot.status)).map((slot) => slot.id);
+  const migratableIds = filtered.filter((slot) => ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(slot.status) && slot.nodeProvisionMode !== "WDTT_COMPAT").map((slot) => slot.id);
   const allVisibleSelected = migratableIds.length > 0 && migratableIds.every((id) => selectedIds.includes(id));
   const toggleAllVisible = () => setSelectedIds((current) => allVisibleSelected
     ? current.filter((id) => !migratableIds.includes(id))
@@ -830,7 +830,7 @@ function SlotsTab({ token }: { token: string }) {
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1 text-sm min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    {["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(s.status) && <Checkbox checked={selectedIds.includes(s.id)} onCheckedChange={(checked) => setSelectedIds((current) => checked === true ? [...new Set([...current, s.id])] : current.filter((id) => id !== s.id))} aria-label={`Выбрать ${s.password}`} />}
+                    {["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(s.status) && s.nodeProvisionMode !== "WDTT_COMPAT" && <Checkbox checked={selectedIds.includes(s.id)} onCheckedChange={(checked) => setSelectedIds((current) => checked === true ? [...new Set([...current, s.id])] : current.filter((id) => id !== s.id))} aria-label={`Выбрать ${s.password}`} />}
                     <span className="font-mono text-xs">{s.password}</span>
                     {slotStatusBadge(s.status)}
                     <span className="text-xs text-muted-foreground">на {s.nodeName}</span>

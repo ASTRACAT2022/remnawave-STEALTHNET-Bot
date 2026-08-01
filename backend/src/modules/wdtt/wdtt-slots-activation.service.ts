@@ -305,9 +305,9 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
           } else {
             await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
           }
-          const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
-          if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
           await tx.wdttSlot.update({ where: { id: slot.id }, data: { nodeId: target.id, revokeReason: null } });
+          const actualSourceSlots = await tx.wdttSlot.count({ where: { nodeId: slot.nodeId, status: { in: ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"] } } });
+          await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: actualSourceSlots } });
           await tx.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED", provider: null, roomId: null, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt } });
         });
         result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link: null });
@@ -342,12 +342,12 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
         } else {
           await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
         }
-        const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
-        if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
         await tx.wdttSlot.update({
           where: { id: slot.id },
           data: { nodeId: target.id, status: "ACTIVE", vkHash: "olcrtc", wdttLink: link, revokeReason: null },
         });
+        const actualSourceSlots = await tx.wdttSlot.count({ where: { nodeId: slot.nodeId, status: { in: ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"] } } });
+        await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: actualSourceSlots } });
         await tx.wdttSlotBackup.create({ data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED", provider, roomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt } });
       });
       result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link });
@@ -406,8 +406,6 @@ async function migrateOlcRtcSlotsToWdttNode(
         } else {
           await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
         }
-        const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
-        if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
         await tx.wdttSlot.update({
           where: { id: slot.id },
           data: {
@@ -422,6 +420,8 @@ async function migrateOlcRtcSlotsToWdttNode(
             revokedAt: null,
           },
         });
+        const actualSourceSlots = await tx.wdttSlot.count({ where: { nodeId: slot.nodeId, status: { in: ["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"] } } });
+        await tx.wdttNode.update({ where: { id: slot.nodeId }, data: { currentSlots: actualSourceSlots } });
         await tx.wdttSlotBackup.create({
           data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED_TO_WDTT", provider: slot.olcrtcProvider, roomId: slot.olcrtcRoomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt },
         });

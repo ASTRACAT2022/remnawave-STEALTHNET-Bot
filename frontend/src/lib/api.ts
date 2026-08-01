@@ -4111,6 +4111,7 @@ export interface ProxySlotAdminItem {
   id: string;
   nodeId: string;
   nodeName: string;
+  nodeProvisionMode: "STATIC" | "PER_CLIENT" | "WDTT_COMPAT";
   publicHost: string | null;
   socksPort: number;
   httpPort: number;
