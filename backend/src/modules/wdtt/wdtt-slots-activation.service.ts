@@ -278,6 +278,9 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
   const target = await prisma.wdttNode.findUnique({ where: { id: input.targetNodeId } });
   if (!target) throw new Error("Целевая нода не найдена");
   if (target.status !== "ONLINE") throw new Error("Целевая нода должна быть ONLINE");
+  if (target.olcrtcProvisionMode === "WDTT_COMPAT") {
+    return migrateOlcRtcSlotsToWdttNode(input, target);
+  }
   if (target.olcrtcProvisionMode !== "PER_CLIENT") throw new Error("Миграция доступна только на ноду с личными контейнерами");
   if (!target.olcrtcProvisionerUrl || !target.olcrtcProvisionerToken) throw new Error("На целевой ноде не настроен provisioner");
 
@@ -352,6 +355,82 @@ export async function migrateOlcRtcSlotsToNode(input: { slotIds: string[]; targe
     } catch (error) {
       if (createdOnTarget) await deprovisionOlcRtcSlot({ id: slot.id, status: "ACTIVE", node: target }).catch(() => false);
       result.failed.push({ slotId, error: error instanceof Error ? error.message : "Не удалось перенести подключение" });
+    }
+  }
+  return result;
+}
+
+/**
+ * Changes an already paid OlcRTC access into a real per-client WDTT key.
+ * The payment, expiration and traffic limits stay intact. The WDTT key is
+ * obtained before the database switch; if anything fails, the old access is
+ * untouched and a newly allocated WDTT key is revoked best-effort.
+ */
+async function migrateOlcRtcSlotsToWdttNode(
+  input: { slotIds: string[]; targetNodeId: string },
+  target: Awaited<ReturnType<typeof prisma.wdttNode.findUnique>> & {}
+): Promise<MigrateOlcRtcSlotsResult> {
+  if (!target) throw new Error("Целевая WDTT-нода не найдена");
+  if (!target.apiUrl.trim() || !target.apiKey.trim()) throw new Error("На целевой WDTT-ноде не настроены URL или API-ключ");
+
+  const result: MigrateOlcRtcSlotsResult = { migrated: [], failed: [], cleanupWarnings: [] };
+  for (const slotId of [...new Set(input.slotIds)]) {
+    const slot = await prisma.wdttSlot.findUnique({
+      where: { id: slotId },
+      include: { node: { select: { id: true, olcrtcProvisionMode: true, olcrtcProvisionerUrl: true, olcrtcProvisionerToken: true, apiUrl: true, apiKey: true } } },
+    });
+    if (!slot) { result.failed.push({ slotId, error: "Подписка не найдена" }); continue; }
+    if (!["ACTIVE", "PENDING_CONFIG", "PROVISION_FAILED"].includes(slot.status)) {
+      result.failed.push({ slotId, error: "Переносятся только действующие оплаченные подключения" }); continue;
+    }
+    if (slot.nodeId === target.id || slot.node.olcrtcProvisionMode === "WDTT_COMPAT") {
+      result.failed.push({ slotId, error: "Подключение уже является WDTT-доступом" }); continue;
+    }
+    if (slot.expiresAt <= new Date()) {
+      result.failed.push({ slotId, error: "Срок действия подключения уже закончился" }); continue;
+    }
+
+    let issued: WdttIssuedAccess;
+    try {
+      issued = await issueWdttAccess(target, slot.expiresAt);
+    } catch (error) {
+      result.failed.push({ slotId, error: error instanceof Error ? `WDTT: ${error.message}` : "WDTT-нода не выдала ключ" });
+      continue;
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (target.capacity !== null) {
+          const reserved = await tx.wdttNode.updateMany({ where: { id: target.id, currentSlots: { lt: target.capacity } }, data: { currentSlots: { increment: 1 } } });
+          if (reserved.count !== 1) throw new Error("На целевой WDTT-ноде больше нет свободных мест");
+        } else {
+          await tx.wdttNode.update({ where: { id: target.id }, data: { currentSlots: { increment: 1 } } });
+        }
+        const released = await tx.wdttNode.updateMany({ where: { id: slot.nodeId, currentSlots: { gte: 1 } }, data: { currentSlots: { decrement: 1 } } });
+        if (released.count !== 1) throw new Error("На исходной ноде некорректный счётчик слотов; миграция отменена");
+        await tx.wdttSlot.update({
+          where: { id: slot.id },
+          data: {
+            nodeId: target.id,
+            password: issued.password,
+            vkHash: issued.vkHash || "wdtt",
+            wdttLink: issued.link,
+            olcrtcProvider: null,
+            olcrtcRoomId: null,
+            status: "ACTIVE",
+            revokeReason: null,
+            revokedAt: null,
+          },
+        });
+        await tx.wdttSlotBackup.create({
+          data: { slotId: slot.id, clientId: slot.clientId, reason: "MIGRATED_TO_WDTT", provider: slot.olcrtcProvider, roomId: slot.olcrtcRoomId, wdttLink: slot.wdttLink, expiresAt: slot.expiresAt },
+        });
+      });
+      result.migrated.push({ slotId: slot.id, clientId: slot.clientId, link: issued.link });
+      if (!await deprovisionOlcRtcSlot(slot)) result.cleanupWarnings.push({ slotId, warning: "WDTT-ключ уже выдан, но старый личный OlcRTC-контейнер не удалось остановить автоматически" });
+    } catch (error) {
+      await revokeWdttAccess({ id: slot.id, status: "ACTIVE", password: issued.password, node: target }).catch(() => false);
+      result.failed.push({ slotId, error: error instanceof Error ? error.message : "Не удалось сохранить WDTT-доступ" });
     }
   }
   return result;
