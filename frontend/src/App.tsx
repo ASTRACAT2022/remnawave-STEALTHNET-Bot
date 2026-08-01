@@ -67,25 +67,10 @@ const MarketplaceHubInstallationsPage = lazy(() => import("@/pages/marketplace/m
 const MarketplaceHubReportsPage = lazy(() => import("@/pages/marketplace/marketplace-hub-reports").then((m) => ({ default: m.MarketplaceHubReportsPage })));
 const MarketplaceHubCategoriesPage = lazy(() => import("@/pages/marketplace/marketplace-hub-categories").then((m) => ({ default: m.MarketplaceHubCategoriesPage })));
 const DashboardLayout = lazy(() => import("@/components/layout/dashboard-layout").then((m) => ({ default: m.DashboardLayout })));
-const CabinetLayout = lazy(() => import("@/pages/cabinet/cabinet-layout").then((m) => ({ default: m.CabinetLayout })));
 const ClientLoginPage = lazy(() => import("@/pages/cabinet/client-login").then((m) => ({ default: m.ClientLoginPage })));
 const ClientRegisterPage = lazy(() => import("@/pages/cabinet/client-register").then((m) => ({ default: m.ClientRegisterPage })));
-const ClientOnboardingPage = lazy(() => import("@/pages/cabinet/client-onboarding").then((m) => ({ default: m.ClientOnboardingPage })));
 const ClientVerifyEmailPage = lazy(() => import("@/pages/cabinet/client-verify-email").then((m) => ({ default: m.ClientVerifyEmailPage })));
 const ClientVerifyLinkEmailPage = lazy(() => import("@/pages/cabinet/client-verify-link-email").then((m) => ({ default: m.ClientVerifyLinkEmailPage })));
-const ClientDashboardPage = lazy(() => import("@/pages/cabinet/client-dashboard").then((m) => ({ default: m.ClientDashboardPage })));
-const ClientTariffsPage = lazy(() => import("@/pages/cabinet/client-tariffs").then((m) => ({ default: m.ClientTariffsPage })));
-const ClientProfilePage = lazy(() => import("@/pages/cabinet/client-profile").then((m) => ({ default: m.ClientProfilePage })));
-const ClientReferralPage = lazy(() => import("@/pages/cabinet/client-referral").then((m) => ({ default: m.ClientReferralPage })));
-const ClientSubscribePage = lazy(() => import("@/pages/cabinet/client-subscribe").then((m) => ({ default: m.ClientSubscribePage })));
-const ClientYooMoneyPayPage = lazy(() => import("@/pages/cabinet/client-yoomoney-pay").then((m) => ({ default: m.ClientYooMoneyPayPage })));
-const ClientExtraOptionsPage = lazy(() => import("@/pages/cabinet/client-extra-options").then((m) => ({ default: m.ClientExtraOptionsPage })));
-const ClientProxyPage = lazy(() => import("@/pages/cabinet/client-proxy").then((m) => ({ default: m.ClientProxyPage })));
-const ClientSingboxPage = lazy(() => import("@/pages/cabinet/client-singbox").then((m) => ({ default: m.ClientSingboxPage })));
-const ClientWdttPage = lazy(() => import("@/pages/cabinet/client-wdtt").then((m) => ({ default: m.ClientWdttPage })));
-const ClientTicketsPage = lazy(() => import("@/pages/cabinet/client-tickets").then((m) => ({ default: m.ClientTicketsPage })));
-const ClientCustomBuildPage = lazy(() => import("@/pages/cabinet/client-custom-build").then((m) => ({ default: m.ClientCustomBuildPage })));
-const ClientGiftsPage = lazy(() => import("@/pages/cabinet/client-gifts").then((m) => ({ default: m.ClientGiftsPage })));
 const GiftActivatePage = lazy(() => import("@/pages/gift-activate").then((m) => ({ default: m.GiftActivatePage })));
 const LandingPage = lazy(() => import("@/pages/landing").then((m) => ({ default: m.LandingPage })));
 const PwaUpdatePrompt = lazy(() => import("@/components/pwa/pwa-update-prompt").then((m) => ({ default: m.PwaUpdatePrompt })));
@@ -138,14 +123,6 @@ function AdminShell() {
 
 function ClientGuestRoute({ children }: { children: React.ReactNode }) {
   return <ClientAuthProvider>{children}</ClientAuthProvider>;
-}
-
-function ClientCabinetShell() {
-  return (
-    <ClientAuthProvider>
-      <CabinetLayout />
-    </ClientAuthProvider>
-  );
 }
 
 function IdlePwaUpdatePrompt() {
@@ -213,19 +190,11 @@ function RequireClientAuth({ children }: { children: React.ReactNode }) {
   if (!state.token) {
     return <Navigate to="/cabinet/login" replace />;
   }
-  // Проверяем серверный флаг onboardingCompleted ИЛИ эфемерный isNewTelegramUser
+  // Dragon-кабинет содержит обязательные настройки в профиле, поэтому
+  // старый onboarding больше не открываем даже для новых Telegram-пользователей.
   const needsOnboarding = state.client?.onboardingCompleted === false || state.isNewTelegramUser;
-  if (needsOnboarding && location.pathname !== "/cabinet/onboarding") {
-    return <Navigate to="/cabinet/onboarding" replace />;
-  }
-  return <>{children}</>;
-}
-
-function RequireOnboarding({ children }: { children: React.ReactNode }) {
-  const { state } = useClientAuth();
-  const needsOnboarding = state.client?.onboardingCompleted === false || state.isNewTelegramUser;
-  if (!needsOnboarding) {
-    return <Navigate to="/cabinet/dashboard" replace />;
+  if (needsOnboarding && location.pathname.startsWith("/cabinet")) {
+    return <Navigate to="/billing" replace />;
   }
   return <>{children}</>;
 }
@@ -242,7 +211,30 @@ function CabinetIndexRedirect() {
       </div>
     );
   }
-  return <Navigate to={state.token ? "/cabinet/dashboard" : "/cabinet/login"} replace />;
+  return <Navigate to={state.token ? "/billing" : "/cabinet/login"} replace />;
+}
+
+const legacyBillingPages: Record<string, string> = {
+  dashboard: "home",
+  tariffs: "subscriptions",
+  profile: "profile",
+  referral: "referrals",
+  tickets: "tickets",
+  subscribe: "subscriptions",
+  "yoomoney-pay": "payments",
+  "custom-build": "subscriptions",
+  "extra-options": "subscriptions",
+  proxy: "subscriptions",
+  singbox: "subscriptions",
+  olcrtc: "olcrtc",
+  gifts: "help",
+};
+
+function LegacyCabinetRedirect() {
+  const location = useLocation();
+  const section = location.pathname.replace(/^\/cabinet\/?/, "").split("/")[0];
+  const page = legacyBillingPages[section] ?? "home";
+  return <Navigate to={`/billing?page=${page}`} replace />;
 }
 
 function RootRoute() {
@@ -363,17 +355,13 @@ function AppRoutes() {
           <Route path="hub/categories" element={<MarketplaceHubCategoriesPage />} />
         </Route>
       </Route>
-      {/* Онбординг — вне CabinetLayout (без навбара) */}
+      {/* Старый onboarding заменён профилем в Dragon-кабинете. */}
       <Route
         path="/cabinet/onboarding"
         element={
-          <ClientAuthProvider>
-            <RequireClientAuth>
-              <RequireOnboarding>
-                <ClientOnboardingPage />
-              </RequireOnboarding>
-            </RequireClientAuth>
-          </ClientAuthProvider>
+          <ClientGuestRoute>
+            <CabinetIndexRedirect />
+          </ClientGuestRoute>
         }
       />
 
@@ -400,115 +388,17 @@ function AppRoutes() {
       <Route path="/cabinet/verify-email" element={<ClientGuestRoute><ClientVerifyEmailPage /></ClientGuestRoute>} />
       <Route path="/cabinet/verify-link-email" element={<ClientGuestRoute><ClientVerifyLinkEmailPage /></ClientGuestRoute>} />
 
+      {/* Старые ссылки сохраняем рабочими, но больше никогда не показываем classic-кабинет. */}
       <Route
-        path="/cabinet"
-        element={<ClientCabinetShell />}
-      >
-        <Route
-          path="dashboard"
-          element={
+        path="/cabinet/*"
+        element={
+          <ClientGuestRoute>
             <RequireClientAuth>
-              <ClientDashboardPage />
+              <LegacyCabinetRedirect />
             </RequireClientAuth>
-          }
-        />
-        <Route
-          path="tariffs"
-          element={
-            <RequireClientAuth>
-              <ClientTariffsPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="profile"
-          element={
-            <RequireClientAuth>
-              <ClientProfilePage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="referral"
-          element={
-            <RequireClientAuth>
-              <ClientReferralPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="tickets"
-          element={
-            <RequireClientAuth>
-              <ClientTicketsPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="subscribe"
-          element={
-            <RequireClientAuth>
-              <ClientSubscribePage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="yoomoney-pay"
-          element={
-            <RequireClientAuth>
-              <ClientYooMoneyPayPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="custom-build"
-          element={
-            <RequireClientAuth>
-              <ClientCustomBuildPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="extra-options"
-          element={
-            <RequireClientAuth>
-              <ClientExtraOptionsPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="proxy"
-          element={
-            <RequireClientAuth>
-              <ClientProxyPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="singbox"
-          element={
-            <RequireClientAuth>
-              <ClientSingboxPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="olcrtc"
-          element={
-            <RequireClientAuth>
-              <ClientWdttPage />
-            </RequireClientAuth>
-          }
-        />
-        <Route
-          path="gifts"
-          element={
-            <RequireClientAuth>
-              <ClientGiftsPage />
-            </RequireClientAuth>
-          }
-        />
-      </Route>
+          </ClientGuestRoute>
+        }
+      />
       {/* Всё неизвестное тоже ведём в кабинет */}
       <Route path="*" element={<Navigate to="/cabinet" replace />} />
       </Routes>

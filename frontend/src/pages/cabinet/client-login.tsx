@@ -165,7 +165,7 @@ export function ClientLoginPage() {
             if (tgFallbackTimerRef.current) clearTimeout(tgFallbackTimerRef.current);
             loginByTelegramDeepLink(res);
             setTgAuthPending(false);
-            navigate("/cabinet", { replace: true });
+            navigate("/billing", { replace: true });
           }
         } catch {
           // Ошибка поллинга — продолжаем
@@ -241,7 +241,7 @@ export function ClientLoginPage() {
         telegramId: String(authData.id),
         telegramUsername: authData.username,
       })
-        .then(() => navigate("/cabinet", { replace: true }))
+        .then(() => navigate("/billing", { replace: true }))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_telegram")));
     },
     [registerByTelegram, navigate, t],
@@ -356,7 +356,7 @@ export function ClientLoginPage() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setLoading(true);
     loginByGoogle(idToken)
-      .then(() => navigate("/cabinet", { replace: true }))
+      .then(() => navigate("/billing", { replace: true }))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_google")))
       .finally(() => setLoading(false));
   }, [loginByGoogle, navigate, t]);
@@ -396,7 +396,7 @@ export function ClientLoginPage() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setLoading(true);
     loginByApple(idToken)
-      .then(() => navigate("/cabinet", { replace: true }))
+      .then(() => navigate("/billing", { replace: true }))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_apple")))
       .finally(() => setLoading(false));
   }, [loginByApple, navigate, t]);
@@ -412,7 +412,7 @@ export function ClientLoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate("/cabinet", { replace: true });
+      navigate("/billing", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("cabinet.login.error_login"));
     } finally {
@@ -421,7 +421,7 @@ export function ClientLoginPage() {
   }
 
   return (
-    <div className="astracat-auth min-h-svh flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <div className="astracat-auth ac-auth--login min-h-svh flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background blobs */}
       <div className="ac-auth-orb ac-auth-orb--one absolute -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none" />
       <div className="ac-auth-orb ac-auth-orb--two absolute -bottom-40 -right-40 w-96 h-96 rounded-full pointer-events-none" />

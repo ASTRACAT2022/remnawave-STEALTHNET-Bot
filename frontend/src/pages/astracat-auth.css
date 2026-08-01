@@ -1,133 +1,168 @@
 .astracat-auth {
   isolation: isolate;
-  color: #20364c;
-  background:
-    radial-gradient(circle at 12% 10%, rgba(11, 112, 216, 0.13), transparent 30rem),
-    radial-gradient(circle at 88% 88%, rgba(43, 174, 202, 0.11), transparent 26rem),
-    #eef2f5;
+  color: #1f364a;
+  background: #f6f8fb;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .astracat-auth::before {
   position: absolute;
   inset: 0;
   z-index: -1;
-  pointer-events: none;
   content: "";
-  opacity: 0.45;
-  background-image:
-    linear-gradient(rgba(80, 115, 145, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(80, 115, 145, 0.055) 1px, transparent 1px);
-  background-size: 36px 36px;
-}
-
-.ac-auth-shell {
-  position: relative;
-  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, #ffffff 0, #f6f8fb 100%);
 }
 
 .ac-auth-orb {
-  opacity: 0.8;
-  filter: blur(66px);
+  display: none;
 }
 
-.ac-auth-orb--one {
-  background: rgba(10, 122, 211, 0.19) !important;
-}
-
-.ac-auth-orb--two {
-  background: rgba(52, 178, 201, 0.15) !important;
+.ac-auth-shell {
+  width: min(100%, 25rem) !important;
 }
 
 .ac-auth-brand {
-  color: #19354f;
-  letter-spacing: -0.025em;
+  min-height: 5.75rem !important;
+  margin-bottom: 1.75rem !important;
+  color: #1f364a;
 }
 
 .ac-auth-brand > span {
-  border-color: #c6e0f4 !important;
-  background: #e8f3fd !important;
-  color: #0877cc !important;
-  box-shadow: 0 5px 15px rgba(8, 119, 204, 0.12);
+  border: 0 !important;
+  background: transparent !important;
+  color: #1f364a !important;
+  box-shadow: none !important;
+}
+
+.ac-auth-brand > span:has(img) {
+  height: 5.75rem !important;
+  padding: 0 !important;
+}
+
+.ac-auth-brand img {
+  width: auto;
+  height: 5.75rem !important;
+  max-width: 15rem !important;
+  object-fit: contain;
 }
 
 .ac-auth-card {
-  border-color: #d7e1e9 !important;
-  border-radius: 16px !important;
+  border: 1px solid #e2e8ef !important;
+  border-radius: 4px !important;
   background: #ffffff !important;
-  box-shadow: 0 22px 55px rgba(26, 59, 86, 0.14) !important;
+  box-shadow: 0 7px 22px rgba(31, 54, 74, 0.08) !important;
 }
 
 .ac-auth-card > .absolute {
-  background: linear-gradient(135deg, rgba(7, 118, 205, 0.035), transparent 48%, rgba(42, 184, 202, 0.055)) !important;
+  display: none;
 }
 
 .ac-auth-card__body {
-  padding: 2.25rem !important;
+  padding: 2rem !important;
 }
 
 .ac-auth-card__intro {
-  color: #657a8d !important;
+  margin-bottom: 1.5rem !important;
+  color: #60758a !important;
 }
 
 .ac-auth-card__icon {
-  border: 1px solid #c7e1f6 !important;
-  background: #e8f3fd !important;
-  color: #0877cc !important;
+  display: none !important;
+}
+
+.ac-auth--login .ac-auth-card__intro {
+  display: none;
 }
 
 .ac-auth-title {
-  color: #1d354c !important;
-  letter-spacing: -0.025em;
+  color: #1f364a !important;
+  font-size: 1.375rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
 }
 
 .astracat-auth label {
-  color: #4c6276 !important;
-  font-weight: 600;
+  color: #1f364a !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
 }
 
 .astracat-auth .ac-auth-input {
-  border-color: #d3dee7 !important;
-  background: #f8fafb !important;
-  color: #20364c !important;
+  height: 2.5rem !important;
+  border: 1px solid #b9c5d0 !important;
+  border-radius: 3px !important;
+  background: #ffffff !important;
+  color: #1f364a !important;
   box-shadow: none !important;
 }
 
 .astracat-auth .ac-auth-input::placeholder {
-  color: #94a3b0 !important;
+  color: #9aa8b6 !important;
 }
 
 .astracat-auth .ac-auth-input:focus {
-  border-color: #1688da !important;
-  box-shadow: 0 0 0 3px rgba(22, 136, 218, 0.14) !important;
+  border-color: #1683d8 !important;
+  box-shadow: 0 0 0 1px #1683d8 !important;
 }
 
 .astracat-auth .ac-auth-submit {
-  border-color: #0877cc !important;
-  background: #0877cc !important;
+  min-height: 2.5rem !important;
+  border-color: #1683d8 !important;
+  border-radius: 3px !important;
+  background: #1683d8 !important;
   color: #ffffff !important;
-  box-shadow: 0 10px 20px rgba(8, 119, 204, 0.22) !important;
+  box-shadow: none !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
 }
 
 .astracat-auth .ac-auth-submit:hover:not(:disabled) {
-  border-color: #0667b2 !important;
-  background: #0667b2 !important;
+  border-color: #0f72bd !important;
+  background: #0f72bd !important;
+}
+
+.astracat-auth form > .space-y-4 {
+  row-gap: 1.5rem;
+}
+
+.astracat-auth [class*="border-border"] {
+  border-color: #dce4eb !important;
+}
+
+.astracat-auth button[class*="variant-outline"],
+.astracat-auth button:not(.ac-auth-submit)[class*="border"] {
+  border-color: #b9c5d0 !important;
+  border-radius: 3px !important;
+  background: #ffffff !important;
+  color: #1f364a !important;
 }
 
 .astracat-auth .text-muted-foreground {
-  color: #6d8090 !important;
+  color: #718295 !important;
 }
 
 .astracat-auth a {
-  color: #0877cc;
+  color: #1683d8;
 }
 
 .astracat-auth a:hover {
-  color: #0667b2;
+  color: #0f72bd;
 }
 
 @media (max-width: 640px) {
-  .ac-auth-card {
-    border-radius: 14px !important;
+  .astracat-auth {
+    padding: 1.25rem !important;
+  }
+
+  .ac-auth-brand {
+    min-height: 4.5rem !important;
+    margin-bottom: 1.25rem !important;
+  }
+
+  .ac-auth-brand > span:has(img),
+  .ac-auth-brand img {
+    height: 4.5rem !important;
   }
 
   .ac-auth-card__body {

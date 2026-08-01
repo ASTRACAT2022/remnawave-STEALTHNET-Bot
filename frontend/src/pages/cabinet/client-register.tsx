@@ -213,7 +213,7 @@ export function ClientRegisterPage() {
             if (tgFallbackTimerRef.current) clearTimeout(tgFallbackTimerRef.current);
             loginByTelegramDeepLink(res);
             setTgAuthPending(false);
-            navigate("/cabinet/onboarding", { replace: true });
+            navigate("/billing", { replace: true });
           }
         } catch {
           // Ошибка поллинга — продолжаем
@@ -289,7 +289,7 @@ export function ClientRegisterPage() {
         referralCode: refCode,
         ...utm,
       })
-        .then(() => navigate("/cabinet/dashboard", { replace: true }))
+        .then(() => navigate("/billing", { replace: true }))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_telegram")));
     },
     [registerByTelegram, navigate, refCode, utm, t],
@@ -404,7 +404,7 @@ export function ClientRegisterPage() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setLoading(true);
     loginByGoogle(idToken)
-      .then(() => navigate("/cabinet/dashboard", { replace: true }))
+      .then(() => navigate("/billing", { replace: true }))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_google")))
       .finally(() => setLoading(false));
   }, [loginByGoogle, navigate, t]);
@@ -444,7 +444,7 @@ export function ClientRegisterPage() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setLoading(true);
     loginByApple(idToken)
-      .then(() => navigate("/cabinet/dashboard", { replace: true }))
+      .then(() => navigate("/billing", { replace: true }))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : t("cabinet.login.error_apple")))
       .finally(() => setLoading(false));
   }, [loginByApple, navigate, t]);
@@ -471,7 +471,7 @@ export function ClientRegisterPage() {
       if (result?.requiresVerification) {
         setEmailSent(true);
       } else {
-        navigate("/cabinet/onboarding", { replace: true });
+        navigate("/billing", { replace: true });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("cabinet.register.error"));
@@ -481,7 +481,7 @@ export function ClientRegisterPage() {
   }
 
   return (
-    <div className="astracat-auth min-h-svh flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <div className="astracat-auth ac-auth--register min-h-svh flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background blobs */}
       <div className="ac-auth-orb ac-auth-orb--one absolute -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none" />
       <div className="ac-auth-orb ac-auth-orb--two absolute -bottom-40 -right-40 w-96 h-96 rounded-full pointer-events-none" />
