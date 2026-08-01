@@ -14,6 +14,7 @@ import { useTheme, ACCENT_PALETTES, type ThemeMode, type ThemeAccent } from "@/c
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCabinetDesign } from "@/lib/use-cabinet-design";
+import { BrandLoadingScreen } from "@/components/brand-loading-screen";
 
 const StealthLayout = lazy(() => import("@/pages/cabinet/stealth/stealth-layout").then((m) => ({ default: m.StealthLayout })));
 const FloatingChat = lazy(() => import("@/components/floating-chat").then((m) => ({ default: m.FloatingChat })));
@@ -117,14 +118,7 @@ function IdleFloatingChat({ force = false }: { force?: boolean }) {
 }
 
 function CabinetPageLoader() {
-  return (
-    <div className="flex min-h-[55vh] w-full items-center justify-center px-4">
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-border/50 bg-card/40 px-6 py-5 text-muted-foreground shadow-xl backdrop-blur-xl">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <span className="text-sm font-medium">Загрузка раздела...</span>
-      </div>
-    </div>
-  );
+  return <BrandLoadingScreen compact label="Загрузка раздела…" />;
 }
 
 const IsMiniappContext = createContext(false);

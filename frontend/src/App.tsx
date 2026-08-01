@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "@/contexts/auth";
 import { ClientAuthProvider, useClientAuth } from "@/contexts/client-auth";
 import { ThemeProvider } from "@/contexts/theme";
 import { AnimatedBackground } from "@/components/animated-background";
+import { BrandLoadingScreen } from "@/components/brand-loading-screen";
 import { api } from "@/lib/api";
 import type { PublicConfig } from "@/lib/api";
 
@@ -77,12 +78,7 @@ const PwaUpdatePrompt = lazy(() => import("@/components/pwa/pwa-update-prompt").
 const AstracatBillingPage = lazy(() => import("@/pages/astracat-billing").then((m) => ({ default: m.AstracatBillingPage })));
 
 function LoadingScreen({ label = "Загрузка…" }: { label?: string }) {
-  return (
-    <div className="min-h-svh flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-background to-muted/20">
-      <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <p className="text-muted-foreground">{label}</p>
-    </div>
-  );
+  return <BrandLoadingScreen label={label} />;
 }
 
 function AdminCommandPalette() {

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api, type AdminNotificationCounters } from "@/lib/api";
 import { InboxBell } from "@/components/inbox-bell";
+import { BrandLoadingScreen } from "@/components/brand-loading-screen";
 
 const PANEL_VERSION = "5.0.0";
 const GITHUB_URL = "https://github.com/systemmaster1200-eng/remnawave-STEALTHNET-Bot";
@@ -165,14 +166,7 @@ function NavItems({ onClick }: { onClick?: () => void }) {
 }
 
 function AdminPageLoader() {
-  return (
-    <div className="flex min-h-[55vh] w-full items-center justify-center px-4">
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-5 text-muted-foreground shadow-sm">
-        <RefreshCw className="h-6 w-6 animate-spin text-primary" />
-        <span className="text-sm font-medium">Загрузка раздела...</span>
-      </div>
-    </div>
-  );
+  return <BrandLoadingScreen compact label="Загрузка раздела…" />;
 }
 
 export function DashboardLayout() {
