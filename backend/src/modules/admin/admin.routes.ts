@@ -1236,6 +1236,7 @@ adminRouter.get("/clients/:id", async (req, res) => {
 
 const updateClientSchema = z.object({
   email: z.string().email().nullable().optional(),
+  telegramId: z.string().nullable().optional(),
   preferredLang: z.string().max(5).optional(),
   preferredCurrency: z.string().max(5).optional(),
   balance: z.number().optional(),
@@ -1257,6 +1258,7 @@ adminRouter.patch("/clients/:id", async (req, res) => {
   if (!client) return res.status(404).json({ message: "Клиент не найден" });
   const updates: Record<string, unknown> = {};
   if (body.data.email !== undefined) updates.email = body.data.email;
+  if (body.data.telegramId !== undefined) updates.telegramId = body.data.telegramId;
   if (body.data.preferredLang !== undefined) updates.preferredLang = body.data.preferredLang;
   if (body.data.preferredCurrency !== undefined) updates.preferredCurrency = body.data.preferredCurrency;
   if (body.data.balance !== undefined) updates.balance = body.data.balance;

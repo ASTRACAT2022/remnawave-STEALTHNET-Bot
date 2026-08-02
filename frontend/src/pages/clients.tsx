@@ -238,6 +238,7 @@ export function ClientsPage() {
     setEditing(c);
     setEditForm({
       email: c.email ?? undefined,
+      telegramId: c.telegramId ?? undefined,
       preferredLang: c.preferredLang,
       preferredCurrency: c.preferredCurrency,
       balance: c.balance,
@@ -256,6 +257,7 @@ export function ClientsPage() {
     try {
       const updated = await api.updateClient(token, editing.id, {
         email: editForm.email ?? null,
+        telegramId: editForm.telegramId ?? null,
         preferredLang: editForm.preferredLang,
         preferredCurrency: editForm.preferredCurrency,
         balance: editForm.balance,
@@ -269,6 +271,7 @@ export function ClientsPage() {
       // показали бы пустые значения после save, и нужно было бы переоткрыть карточку.
       setEditForm({
         email: updated.email ?? undefined,
+        telegramId: updated.telegramId ?? undefined,
         preferredLang: updated.preferredLang,
         preferredCurrency: updated.preferredCurrency,
         balance: updated.balance,
@@ -1316,6 +1319,14 @@ function ClientEditModal({
                       value={editForm.email ?? ""}
                       onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value || undefined }))}
                       placeholder="email@example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Telegram ID</Label>
+                    <Input
+                      value={editForm.telegramId ?? ""}
+                      onChange={(e) => setEditForm((f) => ({ ...f, telegramId: e.target.value || undefined }))}
+                      placeholder="telegram ID"
                     />
                   </div>
                   <div className="space-y-2">
