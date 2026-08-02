@@ -1372,6 +1372,38 @@ adminRouter.delete("/clients/:id", async (req, res) => {
   return res.json({ success: true });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Отвязка почты / Telegram от аккаунта клиента.
+// Аккаунт остаётся в панели, но соответствующий способ входа становится недоступен.
+// ─────────────────────────────────────────────────────────────────────────────
+adminRouter.post("/clients/:id/unlink-email", async (req, res) => {
+  const parsed = clientIdParam.safeParse(req.params);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
+  const client = await prisma.client.findUnique({ where: { id: parsed.data.id } });
+  if (!client) return res.status(404).json({ message: "Клиент не найден" });
+  if (!client.email) return res.status(400).json({ message: "У клиента нет привязанной почты" });
+  const updated = await prisma.client.update({
+    where: { id: parsed.data.id },
+    data: { email: null },
+    select: { id: true, email: true, telegramId: true, telegramUsername: true },
+  });
+  return res.json({ success: true, client: updated });
+});
+
+adminRouter.post("/clients/:id/unlink-telegram", async (req, res) => {
+  const parsed = clientIdParam.safeParse(req.params);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid client id" });
+  const client = await prisma.client.findUnique({ where: { id: parsed.data.id } });
+  if (!client) return res.status(404).json({ message: "Клиент не найден" });
+  if (!client.telegramId) return res.status(400).json({ message: "У клиента нет привязанного Telegram" });
+  const updated = await prisma.client.update({
+    where: { id: parsed.data.id },
+    data: { telegramId: null, telegramUsername: null },
+    select: { id: true, email: true, telegramId: true, telegramUsername: true },
+  });
+  return res.json({ success: true, client: updated });
+});
+
 // сначала смотрим primary-подписку (subscriptionIndex=0),
 // fallback на legacy Client.remnawaveUuid. После унификации UUID у новых клиентов живёт в
 // Subscription, legacy field остался ради старых юзеров до бэкфилла.

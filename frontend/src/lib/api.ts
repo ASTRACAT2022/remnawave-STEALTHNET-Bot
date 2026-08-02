@@ -864,6 +864,14 @@ export const api = {
     return request(`/admin/clients/${id}`, { method: "DELETE", token });
   },
 
+  async unlinkClientEmail(token: string, id: string): Promise<{ success: boolean; client?: ClientRecord }> {
+    return request(`/admin/clients/${id}/unlink-email`, { method: "POST", token });
+  },
+
+  async unlinkClientTelegram(token: string, id: string): Promise<{ success: boolean; client?: ClientRecord }> {
+    return request(`/admin/clients/${id}/unlink-telegram`, { method: "POST", token });
+  },
+
   async getClientRemna(token: string, clientId: string): Promise<unknown> {
     return request(`/admin/clients/${clientId}/remna`, { token });
   },

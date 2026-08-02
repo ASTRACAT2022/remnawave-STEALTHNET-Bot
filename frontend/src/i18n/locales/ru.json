@@ -430,7 +430,11 @@
       "grant_tariff_note": "Комментарий (необязательно)",
       "grant_tariff_note_ph": "Например: компенсация за простой",
       "grant_tariff_success": "Тариф «{{name}}» выдан ({{days}} дн.)",
-      "grant_tariff_error": "Не удалось выдать тариф"
+      "grant_tariff_error": "Не удалось выдать тариф",
+      "danger_zone": "Опасная зона",
+      "unlink_email": "Отвязать почту",
+      "unlink_telegram": "Отвязать Telegram",
+      "delete_permanent": "Удалить навсегда"
     },
     "tariffs": {
       "title": "Тарифы",

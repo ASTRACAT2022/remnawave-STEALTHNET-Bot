@@ -27,7 +27,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Pencil, Trash2, Ban, ShieldCheck, Wifi, Ticket, KeyRound, Search,
   Copy, Check, Smartphone, Activity, User, Users, Settings, HardDrive, Link, Unlink,
-  RefreshCw, Loader2, Package, Gift, Coins, MailX, MailCheck, RotateCw,
+  RefreshCw, Loader2, Package, Gift, Coins, MailX, MailCheck, RotateCw, AlertTriangle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -313,6 +313,26 @@ export function ClientsPage() {
       loadClients();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Ошибка удаления");
+    }
+  }
+
+  async function unlinkClient(kind: "email" | "telegram") {
+    if (!editing) return;
+    const isEmail = kind === "email";
+    const target = isEmail ? "почту" : "Telegram";
+    const okMsg = isEmail ? "Почта отвязана" : "Telegram отвязан";
+    if (!confirm(`Отвязать ${target} от клиента? Аккаунт останется в панели, вход по ${target} станет недоступен.`)) return;
+    setActionMessage(null);
+    try {
+      const res = isEmail ? await api.unlinkClientEmail(token, editing.id) : await api.unlinkClientTelegram(token, editing.id);
+      if (res.client) {
+        setEditing((prev) => (prev && prev.id === editing.id ? { ...prev, ...res.client } : prev));
+        setEditForm((f) => ({ ...f, email: res.client!.email ?? undefined }));
+      }
+      setActionMessage(`${okMsg} — ок`);
+      loadClients();
+    } catch (e) {
+      setActionMessage(`${okMsg}: ${e instanceof Error ? e.message : "ошибка"}`);
     }
   }
 
@@ -753,6 +773,9 @@ export function ClientsPage() {
           passwordMessage={passwordMessage}
           savingPassword={savingPassword}
           token={token}
+          onUnlinkEmail={() => unlinkClient("email")}
+          onUnlinkTelegram={() => unlinkClient("telegram")}
+          onDeletePermanent={() => (editing ? deleteClient(editing) : Promise.resolve())}
         />
       )}
     </div>
@@ -781,6 +804,9 @@ function ClientEditModal({
   activeLanguages,
   activeCurrencies,
   clientRemnaSquads,
+  onUnlinkEmail,
+  onUnlinkTelegram,
+  onDeletePermanent,
 }: {
   client: ClientRecord;
   editForm: UpdateClientPayload & Partial<UpdateClientRemnaPayload>;
@@ -803,6 +829,9 @@ function ClientEditModal({
   passwordMessage: string | null;
   savingPassword: boolean;
   token: string;
+  onUnlinkEmail: () => Promise<void>;
+  onUnlinkTelegram: () => Promise<void>;
+  onDeletePermanent: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState("profile");
@@ -1428,6 +1457,35 @@ function ClientEditModal({
                   >
                     {savingPassword ? t("admin.clients.saving") : t("admin.clients.set_password")}
                   </Button>
+                </div>
+
+                <hr />
+                <div>
+                  <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm text-destructive">
+                    <AlertTriangle className="h-4 w-4" /> {t("admin.clients.danger_zone", "Опасная зона")}
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <Button
+                      variant="outline" className="justify-start gap-2 rounded-xl border-white/10 bg-foreground/[0.03] dark:bg-white/[0.03] hover:bg-foreground/[0.06] dark:hover:bg-white/[0.08] transition-all"
+                      onClick={onUnlinkEmail}
+                      disabled={!editing.email}
+                    >
+                      <MailX className="h-4 w-4" /> {t("admin.clients.unlink_email", "Отвязать почту")}
+                    </Button>
+                    <Button
+                      variant="outline" className="justify-start gap-2 rounded-xl border-white/10 bg-foreground/[0.03] dark:bg-white/[0.03] hover:bg-foreground/[0.06] dark:hover:bg-white/[0.08] transition-all"
+                      onClick={onUnlinkTelegram}
+                      disabled={!editing.telegramId}
+                    >
+                      <Unlink className="h-4 w-4" /> {t("admin.clients.unlink_telegram", "Отвязать Telegram")}
+                    </Button>
+                    <Button
+                      variant="outline" className="justify-start gap-2 text-destructive border-destructive/30 hover:bg-destructive/10 rounded-xl transition-all"
+                      onClick={onDeletePermanent}
+                    >
+                      <Trash2 className="h-4 w-4" /> {t("admin.clients.delete_permanent", "Удалить навсегда")}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </TabsContent>

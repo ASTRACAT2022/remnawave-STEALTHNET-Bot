@@ -430,7 +430,11 @@
       "grant_tariff_note": "Note (optional)",
       "grant_tariff_note_ph": "E.g.: compensation for downtime",
       "grant_tariff_success": "Tariff \"{{name}}\" granted ({{days}} days)",
-      "grant_tariff_error": "Failed to grant tariff"
+      "grant_tariff_error": "Failed to grant tariff",
+      "danger_zone": "Danger zone",
+      "unlink_email": "Unlink email",
+      "unlink_telegram": "Unlink Telegram",
+      "delete_permanent": "Delete permanently"
     },
     "tariffs": {
       "title": "Tariffs",
