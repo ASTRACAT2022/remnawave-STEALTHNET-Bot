@@ -1185,6 +1185,9 @@ model Subscription {
   /// Синхронизируется при каждом upsert/extend через extractCurrentExpireAt из Remna-ответа.
   /// null = подписка ещё не привязана к Remna user или дата неизвестна.
   expireAt                 DateTime? @map("expire_at")
+  /// Кастомное имя подписки (задаётся пользователем при покупке или позже).
+  /// Если null — отображается «Подписка #N».
+  customName               String?   @map("custom_name")
   createdAt                DateTime  @default(now()) @map("created_at")
   updatedAt                DateTime  @updatedAt @map("updated_at")
 

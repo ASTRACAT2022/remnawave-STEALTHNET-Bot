@@ -460,6 +460,14 @@ const awaitingWithdrawAmount = new Set<number>();
 const awaitingWithdrawWallet = new Map<number, number>();
 // ожидание ввода кастомной суммы пополнения.
 const awaitingCustomTopup = new Set<number>();
+// Ожидание ввода кастомного имени подписки.
+// Хранит { subType, subId } — куда сохранить имя после ввода.
+const awaitingSubscriptionName = new Map<number, { subType: "root" | "secondary"; subId: string }>();
+// Кастомное имя для НОВОЙ подписки (пока юзер не дошёл до оплаты).
+// Хранит имя, введённое на экране «Купить новую → ввести название».
+const pendingNewSubName = new Map<number, string>();
+// Ожидание ввода имени для НОВОЙ подписки — хранит tariffId (чтобы продолжить флоу после ввода).
+const awaitingNewSubName = new Map<number, string>();
 
 // Админ: ожидание ввода поиска; последний поиск по userId для пагинации
 const awaitingAdminSearch = new Set<number>();
@@ -953,6 +961,8 @@ function parseSubInfo(item: {
   tariffDisplayName?: string | null;
   /** эмодзи-префикс из админки (Tariff.menuEmoji) — приоритетнее name-matching. */
   tariffMenuEmoji?: string | null;
+  /** кастомное имя подписки (задано пользователем). */
+  customName?: string | null;
 }, botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null): {
   idx: number;
   typeEmoji: string;
@@ -968,6 +978,8 @@ function parseSubInfo(item: {
   trafficSuffix: string;
   /** true если подписка EXPIRED/DISABLED или expireAt в прошлом. */
   isExpired: boolean;
+  /** кастомное имя подписки (задано пользователем). */
+  customName: string | null;
 } {
   const subData = item.subscription as Record<string, unknown> | null;
   const inner = subData ? ((subData.response ?? subData.data ?? subData) as Record<string, unknown>) : null;
@@ -1040,7 +1052,7 @@ function parseSubInfo(item: {
     trafficSuffix = ` | ${u}/${l} ГБ`;
   }
 
-  return { idx, typeEmoji, statusEmojiBig, statusEmojiSmall, daysStr, dateStr, trafficSuffix, isExpired };
+  return { idx, typeEmoji, statusEmojiBig, statusEmojiSmall, daysStr, dateStr, trafficSuffix, isExpired, customName: item.customName ?? null };
 }
 
 /**
@@ -1055,9 +1067,12 @@ function formatSubLine(item: {
   /** T16 (12.05.2026) — название тарифа и кастомный эмодзи для главного меню. */
   tariffDisplayName?: string | null;
   tariffMenuEmoji?: string | null;
+  /** кастомное имя подписки (задано пользователем). */
+  customName?: string | null;
 }, botEmojis?: Record<string, { unicode?: string; tgEmojiId?: string }> | null): string {
-  const { idx, typeEmoji, statusEmojiBig, daysStr, dateStr, trafficSuffix } = parseSubInfo(item, botEmojis);
-  return `${statusEmojiBig} ${typeEmoji} Подписка #${idx} — **${daysStr}** до ${dateStr}${trafficSuffix}`;
+  const { idx, typeEmoji, statusEmojiBig, daysStr, dateStr, trafficSuffix, customName } = parseSubInfo(item, botEmojis);
+  const nameSuffix = customName ? ` — ${customName}` : "";
+  return `${statusEmojiBig} ${typeEmoji} Подписка #${idx}${nameSuffix} — **${daysStr}** до ${dateStr}${trafficSuffix}`;
 }
 
 function buildMainMenuText(opts: {
@@ -1087,6 +1102,8 @@ function buildMainMenuText(opts: {
       tariffDisplayName: string;
       /** T16 (12.05.2026) — эмодзи-префикс тарифа для главного меню бота. */
       tariffMenuEmoji?: string | null;
+      /** кастомное имя подписки (задано пользователем). */
+      customName?: string | null;
     }>;
   } | null;
 }): { text: string; entities: CustomEmojiEntity[] } {
@@ -3637,9 +3654,11 @@ composer.on("callback_query:data", async (ctx) => {
           // ошибочно попадали в «🎁 Мои подарки» вместо «📋 Мои подписки»).
           const discountInfoBal = activeDiscountCode.get(userId);
           const promoCode = discountInfoBal?.code;
-          const result = await api.payByBalance(token, { tariffId, tariffPriceOptionId, deviceCount: extraDevices, promoCode, asAdditional: true });
+          const customName = pendingNewSubName.get(userId) || undefined;
+          const result = await api.payByBalance(token, { tariffId, tariffPriceOptionId, deviceCount: extraDevices, promoCode, asAdditional: true, customName });
           if (promoCode) activeDiscountCode.delete(userId);
           addsubPending.delete(userId);
+          if (customName) pendingNewSubName.delete(userId);
           resultMessage = result.message;
         } else {
           const discountInfoBal = activeDiscountCode.get(userId);
@@ -3702,6 +3721,7 @@ composer.on("callback_query:data", async (ctx) => {
         const me = await api.getMe(token);
         const pd = me?.personalDiscountPercent ?? 0;
         const { discountArg: discountArgYm, finalPrice: priceWithDiscount } = buildTariffDiscountArg(totalPrice, pd, discountInfoYm, tariff.currency);
+        const customNameYM = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createYoomoneyPayment(token, {
           amount: totalPrice,
           paymentType: "AC",
@@ -3712,12 +3732,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameYM,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameYM) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -3785,6 +3807,7 @@ composer.on("callback_query:data", async (ctx) => {
         const { discountArg: discountArgYk, finalPrice: priceWithDiscountYk } = buildTariffDiscountArg(totalPrice, pdYk, discountInfoYk, tariff.currency);
         // 54-ФЗ: перед созданием платежа спрашиваем, нужен ли чек.
         const savedEmailYk = (meYk?.email ?? null);
+        const customNameYK = pendingNewSubName.get(userId) || undefined;
         const tokRcptT = storePendingReceipt({
           userId,
           savedEmail: savedEmailYk,
@@ -3799,6 +3822,7 @@ composer.on("callback_query:data", async (ctx) => {
             extendsSecondarySubId,
             removeExtrasOnActivate,
             receiptEmail,
+            customName: customNameYK,
           }),
           finalize: async (payment, { receiptSentTo }) => {
             if (promoCode) activeDiscountCode.delete(userId);
@@ -3806,6 +3830,7 @@ composer.on("callback_query:data", async (ctx) => {
             if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
             if (asAdditional) addsubPending.delete(userId);
             if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+            if (customNameYK) pendingNewSubName.delete(userId);
             const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
               ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
               : tariff.name;
@@ -3876,6 +3901,7 @@ composer.on("callback_query:data", async (ctx) => {
         const meFk = await api.getMe(token);
         const pdFk = meFk?.personalDiscountPercent ?? 0;
         const { discountArg: discountArgFk, finalPrice: priceWithDiscountFk } = buildTariffDiscountArg(totalPrice, pdFk, discountInfoFk, tariff.currency);
+        const customNameFK = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createFreekassaPayment(token, {
           amount: totalPrice,
           currency: "RUB",
@@ -3887,12 +3913,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameFK,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameFK) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -3954,6 +3982,7 @@ composer.on("callback_query:data", async (ctx) => {
         const meCp = await api.getMe(token);
         const pdCp = meCp?.personalDiscountPercent ?? 0;
         const { discountArg: discountArgCp, finalPrice: priceWithDiscountCp } = buildTariffDiscountArg(totalPrice, pdCp, discountInfoCp, tariff.currency);
+        const customNameCP = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createCryptopayPayment(token, {
           amount: totalPrice,
           currency: tariff.currency,
@@ -3964,12 +3993,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameCP,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameCP) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -4026,6 +4057,7 @@ composer.on("callback_query:data", async (ctx) => {
         const meLava = await api.getMe(token);
         const pdLava = meLava?.personalDiscountPercent ?? 0;
         const { discountArg, finalPrice: priceWithDiscountLava } = buildTariffDiscountArg(totalPrice, pdLava, discountInfo, tariff.currency);
+        const customNameLava = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createLavaPayment(token, {
           amount: totalPrice,
           currency: tariff.currency,
@@ -4036,12 +4068,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameLava,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameLava) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -4097,6 +4131,7 @@ composer.on("callback_query:data", async (ctx) => {
         const meLavatop = await api.getMe(token);
         const pdLavatop = meLavatop?.personalDiscountPercent ?? 0;
         const { discountArg, finalPrice: priceWithDiscountLavatop } = buildTariffDiscountArg(totalPrice, pdLavatop, discountInfo, tariff.currency);
+        const customNameLavatop = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createLavatopPayment(token, {
           amount: totalPrice,
           currency: tariff.currency,
@@ -4107,12 +4142,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameLavatop,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameLavatop) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -4169,6 +4206,7 @@ composer.on("callback_query:data", async (ctx) => {
         const meHeleket = await api.getMe(token);
         const pdHeleket = meHeleket?.personalDiscountPercent ?? 0;
         const { discountArg, finalPrice: priceWithDiscountHeleket } = buildTariffDiscountArg(totalPrice, pdHeleket, discountInfo, tariff.currency);
+        const customNameHeleket = pendingNewSubName.get(userId) || undefined;
         const payment = await api.createHeleketPayment(token, {
           amount: totalPrice,
           currency: tariff.currency,
@@ -4179,12 +4217,14 @@ composer.on("callback_query:data", async (ctx) => {
           asAdditional: asAdditional || undefined,
           extendsSecondarySubId,
           removeExtrasOnActivate,
+          customName: customNameHeleket,
         });
         if (promoCode) activeDiscountCode.delete(userId);
         selectedTariffOption.delete(userId);
         if (extendsSecondarySubId && removeExtrasOnActivate) extendingSecondaryPending.delete(userId);
         if (asAdditional) addsubPending.delete(userId);
         if (removeExtrasOnActivate) pendingDropExtras.delete(userId);
+        if (customNameHeleket) pendingNewSubName.delete(userId);
         const nameWithDays = (opts.length > 1 || (sel?.tariffId === tariff.id))
           ? `${tariff.name} · ${formatRuDays(effectiveDays)}`
           : tariff.name;
@@ -5163,14 +5203,17 @@ composer.on("callback_query:data", async (ctx) => {
           const info = parseSubInfo(s, config?.botEmojis);
           const idx = s.subscriptionIndex ?? 0;
           // primary slot = «Главная», остальные = «#N»
+          const customName = s.customName?.trim() || null;
+          const nameSuffix = customName ? ` (${customName})` : "";
           const typeText = idx === 0 ? "🌟 Главная" : `Подписка #${idx}`;
           const isBlocked = blockedSet.has(s.id);
           const blockedPrefix = isBlocked ? "🚫 " : "";
-          bodyLines.push(`${blockedPrefix}${info.statusEmojiSmall} ${typeText} — ${info.daysStr} до ${info.dateStr}${info.trafficSuffix}`);
+          bodyLines.push(`${blockedPrefix}${info.statusEmojiSmall} ${typeText}${nameSuffix} — ${info.daysStr} до ${info.dateStr}${info.trafficSuffix}`);
           // ВСЕ подписки идут через pay_tariff_ext:<id> — единый flow продления.
           // Заблокированные тоже ведут в pay_tariff_ext — там pre-check покажет сообщение.
           const callback = `pay_tariff_ext:${s.id}`;
-          const btnLabel = `${blockedPrefix}${idx === 0 ? "🌟 Главная" : "#" + idx} ${info.daysStr}`;
+          const namePart = customName ? ` ${customName}` : "";
+          const btnLabel = `${blockedPrefix}${idx === 0 ? "🌟 Главная" : "#" + idx}${namePart} ${info.daysStr}`;
           rows.push([{ text: btnLabel.slice(0, 60), callback_data: callback.slice(0, 64) }]);
         }
         { const bk = backButton(config?.botEmojis ?? null); rows.push([{ text: bk.text, callback_data: `pay_tariff:${tariffId}` }]); }
@@ -5186,8 +5229,6 @@ composer.on("callback_query:data", async (ctx) => {
       const rest = data.slice("pay_tariff:".length);
       const parts = rest.split(":");
       const tariffId = parts[0];
-      // TEMP DEBUG: log incoming pay_tariff callback (to be removed after diagnosing).
-      console.log(`[pay_tariff] user=${userId} data="${data}" parts=${JSON.stringify(parts)} tariffId="${tariffId}"`);
       // (bypass-маркеры из tariffActionChoiceButtons.
       // burn  → юзер выбрал «🔥 Сменить основную (сжечь дни)» — пропускаем диалог,
       //            идём в обычный flow (proration backend'а конвертирует/сжигает дни).
@@ -5234,11 +5275,42 @@ composer.on("callback_query:data", async (ctx) => {
       } else if (isBurnBypass || methodIdFromBtn == null) {
         addsubPending.delete(userId);
       }
+      // Очищаем «висящее» кастомное имя от предыдущего флоу покупки, КРОМЕ случаев:
+      //  - `pay_tariff:<id>:add:done` — юзер только что ввёл имя и продолжил (его сохраняем);
+      //  - Platega-метод (`pay_tariff:<id>:<methodId>`) в активном add-флоу — addsubPending
+      //    всё ещё держит этот тариф, имя нужно передать в createPlategaPayment.
+      const isAddFlowContinuation = isAddBypass && parts[2] === "done";
+      const isAddFlowPlatega = methodIdFromBtn != null && addsubPending.get(userId) === tariffId;
+      if (!(isAddFlowContinuation || isAddFlowPlatega)) {
+        pendingNewSubName.delete(userId);
+      }
       const { items } = await api.getPublicTariffs();
       const tariff = items?.flatMap((c: TariffCategory) => c.tariffs).find((t: TariffItem) => t.id === tariffId);
       if (!tariff) {
         await editMessageContent(ctx, "Тариф не найден.", backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
         return;
+      }
+
+      // Если юзер выбрал «Купить новую» (isAddBypass) — запрашиваем кастомное имя.
+      // Это первый экран перед выбором длительности.
+      if (isAddBypass && methodIdFromBtn == null && parts[2] !== "noname" && parts[2] !== "done") {
+        const desc = ((tariff as TariffItem & { description?: string | null }).description ?? "").trim();
+        const introText = desc ? desc : tariff.name;
+        awaitingNewSubName.set(userId, tariffId);
+        await editMessageContent(ctx, `${introText}\n\n📝 Введите название для новой подписки (до 64 символов)\nили нажмите «Без названия»:`, {
+          inline_keyboard: [
+            [{ text: "Без названия", callback_data: `pay_tariff:${tariffId}:add:noname` }],
+            [{ text: backButton(config?.botEmojis ?? null).text, callback_data: `pay_tariff:${tariffId}` }],
+          ],
+        });
+        return;
+      }
+      // :noname → пропускаем ввод имени, чистим стейт.
+      // :done  → юзер уже ввёл имя (pendingNewSubName) и нажал «Продолжить» — не чистим.
+      const isAddNoname = parts[1] === "add" && parts[2] === "noname";
+      if (isAddNoname) {
+        awaitingNewSubName.delete(userId);
+        pendingNewSubName.delete(userId);
       }
 
       // диалог «Покупка тарифа из другой категории» УБРАН.
@@ -5279,12 +5351,23 @@ composer.on("callback_query:data", async (ctx) => {
             ? `${desc}\n\nВыберите тариф:`
             : `${tariff.name}\n\nВыберите длительность подписки:`;
           // проверяем, есть ли у клиента подписки с ЭТИМ tariffId.
-          // Если есть → сверху picker'а длительностей появится кнопка «🔌 Продлить подписку».
+          // Если есть → показываем экран «Продлить / Купить новую» (вместо picker'а длительностей).
           let hasOwnSubsWithThisTariff = false;
           try {
             const all = await api.getAllSubscriptions(token);
             hasOwnSubsWithThisTariff = (all.items ?? []).some((it) => it.tariffId === tariff.id);
           } catch { /* ignore — не блокируем покупку */ }
+          if (hasOwnSubsWithThisTariff && !isBypass) {
+            const introText = desc ? desc : tariff.name;
+            await editMessageContent(ctx, `${introText}\n\nУ вас уже есть подписка с этим тарифом. Что хотите сделать?`, {
+              inline_keyboard: [
+                [{ text: "🔌 Продлить подписку", callback_data: `renew_pick:${tariff.id}` }],
+                [{ text: "🛒 Купить новую", callback_data: `pay_tariff:${tariff.id}:add` }],
+                [{ text: backButton(config?.botEmojis ?? null).text, callback_data: "menu:tariffs" }],
+              ],
+            });
+            return;
+          }
           await editMessageContent(
             ctx,
             text,
@@ -5295,7 +5378,7 @@ composer.on("callback_query:data", async (ctx) => {
               null,
               innerStyles,
               innerEmojiIds,
-              hasOwnSubsWithThisTariff ? tariff.id : null,
+              null,
               config?.botEmojis ?? null,
             ),
           );
@@ -5399,6 +5482,7 @@ composer.on("callback_query:data", async (ctx) => {
         } catch { /* ignore */ }
       }
       const totalPricePlatega = effectivePrice + subExtrasForPeriodPlatega;
+      const customNamePlatega = pendingNewSubName.get(userId) || undefined;
       const payment = await api.createPlategaPayment(token, {
         amount: totalPricePlatega,
         currency: tariff.currency,
@@ -5411,10 +5495,12 @@ composer.on("callback_query:data", async (ctx) => {
         asAdditional: asAdditionalPlatega || undefined,
         extendsSecondarySubId: extendsSecondarySubIdPlatega,
         removeExtrasOnActivate: removeExtrasOnActivatePlatega,
+        customName: customNamePlatega,
       });
       if (promoCode) activeDiscountCode.delete(userId);
       selectedTariffOption.delete(userId);
       if (asAdditionalPlatega) addsubPending.delete(userId);
+      if (customNamePlatega) pendingNewSubName.delete(userId);
       if (extendsSecondarySubIdPlatega && removeExtrasOnActivatePlatega) extendingSecondaryPending.delete(userId);
       if (removeExtrasOnActivatePlatega) pendingDropExtras.delete(userId);
       const discountArgTariffUpdated = discountInfoTariff ? {
@@ -6273,12 +6359,15 @@ composer.on("callback_query:data", async (ctx) => {
           // везде единый формат «Подписка #N» (включая root).
           // Body: «Подписка #0 (🌐 Стандартная) — 120 дн. до 07.09.2026»
           //       «Подписка #2 (🔒 Unblock) — 30 дн. до 09.06.2026 | 0/90 ГБ»
+          const customName = s.customName?.trim() || null;
+          const nameSuffix = customName ? ` — ${customName}` : "";
           const typeText = `Подписка #${idx}`;
-          bodyLines.push(`${info.statusEmojiSmall} ${typeText}${trialMark} ${tariff}`);
+          bodyLines.push(`${info.statusEmojiSmall} ${typeText}${nameSuffix}${trialMark} ${tariff}`);
           bodyLines.push(`    📅 ${info.daysStr} до ${info.dateStr}${info.trafficSuffix}`);
           bodyLines.push("");
           // Button label остаётся коротким — иначе не влезает в 64 байта callback.
-          const btnLabel = `#${idx}${trialMark} ${tariff}`;
+          const namePart = customName ? ` ${customName}` : "";
+          const btnLabel = `#${idx}${namePart}${trialMark} ${tariff}`;
           rows.push([{ text: btnLabel.slice(0, 60), callback_data: `sub:connect:${s.type}:${s.id}`.slice(0, 64) }]);
         }
         rows.push([{ text: "🏠 Главное меню", callback_data: "menu:main" }]);
@@ -6321,20 +6410,23 @@ composer.on("callback_query:data", async (ctx) => {
           // T15.4: маркер 🎁 для триал-подписок в текстовой строке (под лимит callback_data
           // в кнопках уже не влезает, поэтому только в body).
           const trialBodyMark = it.trialId ? " 🎁" : "";
+          const customName = it.customName?.trim() || null;
+          const nameSuffix = customName ? ` (${customName})` : "";
           // без названия тарифа в текстовой строке —
           // для истёкших «❌ истекла», для активных «N дн. до DD.MM.YYYY [+трафик]».
           if (info.isExpired) {
-            bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — ❌ истекла`);
+            bodyLines.push(`${info.typeEmoji} #${info.idx}${nameSuffix}${trialBodyMark} — ❌ истекла`);
           } else {
-            bodyLines.push(`${info.typeEmoji} #${info.idx}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
+            bodyLines.push(`${info.typeEmoji} #${info.idx}${nameSuffix}${trialBodyMark} — **${info.daysStr}** до ${info.dateStr}${info.trafficSuffix}`);
           }
           // tariffDisplayName уже содержит эмодзи категории (🌐/🔒) в начале — не дублируем
           // typeEmoji в лейбле кнопки. Slice 38 → запас под Telegram-лимит 64 байта.
-          const tariff = (it.tariffDisplayName || "—").slice(0, 38);
+          const tariff = (it.tariffDisplayName || "—").slice(0, 28);
           // T15.4: для trial — компактный маркер 🎁 в конце лейбла кнопки.
           const trialBtnMark = it.trialId ? " 🎁" : "";
           const lifetimeStr = info.isExpired ? "истекла" : info.daysStr;
-          const label = `${info.statusEmojiSmall} #${info.idx} ${tariff} (${lifetimeStr})${trialBtnMark}`;
+          const namePart = customName ? ` ${customName}` : "";
+          const label = `${info.statusEmojiSmall} #${info.idx}${namePart} ${tariff} (${lifetimeStr})${trialBtnMark}`;
           return { type: it.type, id: it.id, label };
         });
         const { text, entities } = applyMarkdownAndEmoji(bodyLines.join("\n"), config?.botEmojis ?? null);
@@ -6434,8 +6526,10 @@ composer.on("callback_query:data", async (ctx) => {
         // все подписки равные. Триал-метка остаётся (это отдельная семантика, не root/secondary).
         const isTrialSub = !!item.trialId;
         const trialMark = isTrialSub ? "🎁 Пробная" : "";
+        const customName = item.customName?.trim() || null;
+        const subHeader = customName ? `📲 Подписка #${idx} — ${customName}` : `📲 Подписка #${idx}`;
         const lines = [
-          `📲 Подписка #${idx}`,
+          subHeader,
           "",
         ];
         if (trialMark) lines.push(trialMark);
@@ -6481,6 +6575,46 @@ composer.on("callback_query:data", async (ctx) => {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Ошибка";
         await editMessageContent(ctx, `❌ ${msg}`, backToMenu(config?.botBackLabel ?? null, innerStyles?.back, innerEmojiIds));
+      }
+      return;
+    }
+
+    // «✏️ Изменить название» — запрашиваем ввод текста у юзера.
+    // callback_data: sub:setname:<type>:<id>
+    if (data.startsWith("sub:setname:")) {
+      const rest = data.slice("sub:setname:".length);
+      const sep = rest.indexOf(":");
+      if (sep === -1) return;
+      const subType = rest.slice(0, sep) as "root" | "secondary";
+      const subId = rest.slice(sep + 1);
+      awaitingSubscriptionName.set(userId, { subType, subId });
+      await editMessageContent(ctx, "✏️ Введите название для этой подписки (до 64 символов):\n\nИли нажмите «Без названия» чтобы сбросить.", {
+        inline_keyboard: [
+          [{ text: "❌ Без названия", callback_data: `sub:setname_clear:${subType}:${subId}` }],
+          [{ text: "← Назад", callback_data: `sub:detail:${subType}:${subId}` }],
+        ],
+      });
+      return;
+    }
+    // «Без названия» — сброс customName.
+    if (data.startsWith("sub:setname_clear:")) {
+      const rest = data.slice("sub:setname_clear:".length);
+      const sep = rest.indexOf(":");
+      if (sep === -1) return;
+      const subType = rest.slice(0, sep) as "root" | "secondary";
+      const subId = rest.slice(sep + 1);
+      try {
+        await api.updateSubscriptionName(token, subType, subId, null);
+        await editMessageContent(ctx, "✅ Название подписки сброшено.", {
+          inline_keyboard: [
+            [{ text: "← К подписке", callback_data: `sub:detail:${subType}:${subId}` }],
+          ],
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Ошибка";
+        await editMessageContent(ctx, `❌ ${msg}`, {
+          inline_keyboard: [[{ text: "← К подписке", callback_data: `sub:detail:${subType}:${subId}` }]],
+        });
       }
       return;
     }
@@ -7632,6 +7766,59 @@ composer.on("message:text", async (ctx) => {
         },
       },
     );
+    return;
+  }
+
+  // Кастомное имя для НОВОЙ подписки — ждём текстовый ввод.
+  if (awaitingNewSubName.has(userId)) {
+    const tariffId = awaitingNewSubName.get(userId)!;
+    const nameInput = ctx.message.text.trim();
+    if (!nameInput || nameInput.length > 64) {
+      await ctx.reply("❌ Имя должно быть от 1 до 64 символов. Попробуйте снова или нажмите /start для отмены.");
+      return;
+    }
+    awaitingNewSubName.delete(userId);
+    // Сохраняем имя и предлагаем продолжить выбор длительности.
+    pendingNewSubName.set(userId, nameInput);
+    await ctx.reply(`✅ Название подписки: «${nameInput}»\n\nПродолжаем покупку…`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➡️ Продолжить", callback_data: `pay_tariff:${tariffId}:add:done` }],
+          [{ text: "🏠 Главное меню", callback_data: "menu:main" }],
+        ],
+      },
+    });
+    return;
+  }
+
+  // Кастомное имя подписки — ждём текстовый ввод.
+  if (awaitingSubscriptionName.has(userId)) {
+    const { subType, subId } = awaitingSubscriptionName.get(userId)!;
+    const nameInput = ctx.message.text.trim();
+    if (!nameInput || nameInput.length > 64) {
+      await ctx.reply("❌ Имя должно быть от 1 до 64 символов. Попробуйте снова или нажмите /start для отмены.");
+      return;
+    }
+    awaitingSubscriptionName.delete(userId);
+    try {
+      await api.updateSubscriptionName(token, subType, subId, nameInput);
+      await ctx.reply(`✅ Название подписки установлено: «${nameInput}»`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "← К подписке", callback_data: `sub:detail:${subType}:${subId}` }],
+          ],
+        },
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка";
+      await ctx.reply(`❌ ${msg}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "← К подписке", callback_data: `sub:detail:${subType}:${subId}` }],
+          ],
+        },
+      });
+    }
     return;
   }
 

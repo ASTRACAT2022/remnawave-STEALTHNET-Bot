@@ -2841,6 +2841,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
     extraDevices: number;
     /** суммарная цена за все доп. устройства на 30 дней. */
     extraDevicesMonthlyPrice: number;
+    /** кастомное имя подписки (задано пользователем). */
+    customName: string | null;
   };
 
   const allSubs = await prisma.subscription.findMany({
@@ -2859,6 +2861,7 @@ clientRouter.get("/subscription/all", async (req, res) => {
       autoRenewEnabled: true,
       extraDevices: true,
       extraDevicesMonthlyPrice: true,
+      customName: true,
       tariff: { select: { id: true, name: true, menuEmoji: true } },
     },
     orderBy: { subscriptionIndex: "asc" },
@@ -2897,6 +2900,7 @@ clientRouter.get("/subscription/all", async (req, res) => {
       tariffMenuEmoji: sub.tariff?.menuEmoji?.trim() || null,
       extraDevices: sub.extraDevices ?? 0,
       extraDevicesMonthlyPrice: sub.extraDevicesMonthlyPrice ?? 0,
+      customName: sub.customName ?? null,
     });
   }
 
@@ -3189,6 +3193,48 @@ clientRouter.post("/subscription/:type/:id/remove-extra-devices", async (req, re
     hwidKicked: removedHwids,
     newDeviceLimit: includedDevices,
   });
+});
+
+/**
+ * PATCH /api/client/subscription/:type/:id/name
+ * Установить кастомное имя подписки (customName).
+ * body: { customName: string | null } — null сбросит имя.
+ */
+clientRouter.patch("/subscription/:type/:id/name", async (req, res) => {
+  const subType = req.params.type;
+  const subId = req.params.id;
+  if (subType !== "root" && subType !== "secondary") {
+    return res.status(400).json({ message: "Неверный тип подписки" });
+  }
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const { customName } = req.body as { customName?: string | null };
+
+  // Валидация: строка до 64 символов или null.
+  const nameValue = (typeof customName === "string" ? customName.trim() : null);
+  if (nameValue !== null && nameValue.length > 64) {
+    return res.status(400).json({ message: "Имя подписки не должно превышать 64 символа" });
+  }
+
+  const sub = subType === "root"
+    ? await prisma.subscription.findUnique({
+        where: { ownerId_subscriptionIndex: { ownerId: clientId, subscriptionIndex: 0 } },
+        select: { id: true, ownerId: true, giftedToClientId: true },
+      })
+    : await prisma.subscription.findUnique({
+        where: { id: subId },
+        select: { id: true, ownerId: true, giftedToClientId: true },
+      });
+  if (!sub) return res.status(404).json({ message: "Подписка не найдена" });
+  if (sub.ownerId !== clientId && sub.giftedToClientId !== clientId) {
+    return res.status(403).json({ message: "Нет доступа" });
+  }
+
+  await prisma.subscription.update({
+    where: { id: sub.id },
+    data: { customName: nameValue || null },
+  });
+
+  return res.json({ ok: true, customName: nameValue || null });
 });
 
 /** GET /api/client/devices — список устройств (HWID) пользователя в Remna */
@@ -3733,6 +3779,8 @@ const payByBalanceSchema = z.object({
   asAdditional: z.boolean().optional(),
   // покупка подарочной подписки — будет создана с purchasedAsGift=true.
   asGift: z.boolean().optional(),
+  // кастомное имя подписки (задаётся пользователем при покупке).
+  customName: z.string().max(64).nullable().optional(),
 }).refine((d) => (d.tariffId ? 1 : 0) + (d.proxyTariffId ? 1 : 0) + (d.singboxTariffId ? 1 : 0) + (d.wdttTariffId ? 1 : 0) === 1, { message: "Укажите tariffId, proxyTariffId, singboxTariffId или wdttTariffId" });
 
 clientRouter.post("/payments/balance", async (req, res) => {
@@ -3740,7 +3788,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   const parsed = payByBalanceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
 
-  const { tariffId, tariffPriceOptionId, deviceCount, proxyTariffId, singboxTariffId, wdttTariffId, promoCode: promoCodeStr, extendsSecondarySubId, removeExtrasOnActivate, asAdditional } = parsed.data;
+  const { tariffId, tariffPriceOptionId, deviceCount, proxyTariffId, singboxTariffId, wdttTariffId, promoCode: promoCodeStr, extendsSecondarySubId, removeExtrasOnActivate, asAdditional, customName } = parsed.data;
 
   if (proxyTariffId) {
     const tariff = await prisma.proxyTariff.findUnique({ where: { id: proxyTariffId } });
@@ -4117,6 +4165,17 @@ clientRouter.post("/payments/balance", async (req, res) => {
     return res.status(activateResult.status).json({ message: activateResult.error });
   }
   // NB: списание уже сделано атомарно выше — повторного decrement тут НЕ надо.
+
+  // Устанавливаем кастомное имя подписки (если передано).
+  if (customName && createdSubscriptionId) {
+    const nameValue = typeof customName === "string" ? customName.trim().slice(0, 64) : null;
+    if (nameValue) {
+      await prisma.subscription.update({
+        where: { id: createdSubscriptionId },
+        data: { customName: nameValue },
+      }).catch((e) => console.error("[balance pay] set customName failed:", e));
+    }
+  }
 
   // если юзер выбрал «продлить без устройств»
   // — после успешного extending удаляем все доп. устройства.
@@ -4927,13 +4986,15 @@ const yookassaCreatePaymentSchema = z.object({
   // (используется рандомный placeholder вида randomname@gmail.com — см. yookassa.service.ts).
   // Если client.email пустой, а тут пришёл валидный — сохраним в clients.email.
   receiptEmail: z.string().max(254).optional(),
+  // кастомное имя подписки (задаётся пользователем при покупке).
+  customName: z.string().max(64).nullable().optional(),
 });
 clientRouter.post("/yookassa/create-payment", async (req, res) => {
   try {
     const clientId = (req as unknown as { clientId: string }).clientId;
     const parsed = yookassaCreatePaymentSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: "Неверные параметры", errors: parsed.error.flatten() });
-    const { amount: amountBody, currency: currencyBody, tariffId: tariffIdBody, proxyTariffId: proxyTariffIdBody, singboxTariffId: singboxTariffIdBody, wdttTariffId: wdttTariffIdBody, promoCode, extraOption, customBuild: customBuildBody, extendsSecondarySubId, removeExtrasOnActivate, asGift, asAdditional } = parsed.data;
+    const { amount: amountBody, currency: currencyBody, tariffId: tariffIdBody, proxyTariffId: proxyTariffIdBody, singboxTariffId: singboxTariffIdBody, wdttTariffId: wdttTariffIdBody, promoCode, extraOption, customBuild: customBuildBody, extendsSecondarySubId, removeExtrasOnActivate, asGift, asAdditional, customName } = parsed.data;
     const config = await getSystemConfig();
     const shopId = config.yookassaShopId?.trim();
     const secretKey = config.yookassaSecretKey?.trim();
@@ -5191,6 +5252,10 @@ clientRouter.post("/yookassa/create-payment", async (req, res) => {
             if (removeExtrasOnActivate === true) {
               meta.removeExtrasOnActivate = true;
             }
+          }
+          // кастомное имя подписки (передаётся из бота при покупке).
+          if (customName && typeof customName === "string" && customName.trim()) {
+            meta.customName = customName.trim().slice(0, 64);
           }
           return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
         })(),
@@ -6741,6 +6806,8 @@ const freekassaCreatePaymentSchema = z.object({
     devices: z.number().int().min(1).max(20),
     trafficGb: z.number().min(0).nullable().optional(),
   }).optional(),
+  // кастомное имя подписки (задаётся пользователем при покупке).
+  customName: z.string().max(64).nullable().optional(),
 });
 
 const FREEKASSA_WEBHOOK_URL = "https://cabinet.astracat.ru/api/kassaai";
@@ -6772,6 +6839,7 @@ clientRouter.post("/freekassa/create-payment", async (req, res) => {
       asGift,
       extendsSecondarySubId,
       removeExtrasOnActivate,
+      customName,
     } = parsed.data;
 
     let amountRounded: number;
@@ -6933,6 +7001,9 @@ clientRouter.post("/freekassa/create-payment", async (req, res) => {
     if (extendsSecondarySubId) {
       meta.extendsSecondarySubId = extendsSecondarySubId;
       if (removeExtrasOnActivate === true) meta.removeExtrasOnActivate = true;
+    }
+    if (customName && typeof customName === "string" && customName.trim()) {
+      meta.customName = customName.trim().slice(0, 64);
     }
 
     const payment = await createPayment({

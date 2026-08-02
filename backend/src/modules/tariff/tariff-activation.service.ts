@@ -797,6 +797,7 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
       }, selectedOption, payment.deviceCount ?? undefined, removeExtrasAfter);
       if (result.ok) {
         await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: extendsSecondaryId } }).catch(() => {});
+        await applyCustomNameToSubscription(extendsSecondaryId, payment.metadata);
         await resetOneTimeDiscount();
       }
       return result;
@@ -820,6 +821,7 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
       }, { extraDevices: payment.deviceCount ?? 0, purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
       if (result.ok) {
         await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+        await applyCustomNameToSubscription(result.data.subscriptionId, payment.metadata);
         await resetOneTimeDiscount();
       }
       return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
@@ -848,6 +850,7 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
       }, selectedOption, payment.deviceCount ?? undefined);
       if (result.ok) {
         await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: existingSub.id } }).catch(() => {});
+        await applyCustomNameToSubscription(existingSub.id, payment.metadata);
         await resetOneTimeDiscount();
       }
       return result;
@@ -867,6 +870,7 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
     }, { extraDevices: payment.deviceCount ?? 0, purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
     if (result.ok) {
       await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+      await applyCustomNameToSubscription(result.data.subscriptionId, payment.metadata);
       await resetOneTimeDiscount();
     }
     return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
@@ -931,6 +935,29 @@ function shouldRemoveExtrasOnActivate(metadata: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+/** metadata.customName → кастомное имя подписки (задано пользователем при покупке). */
+function getCustomNameFromMetadata(metadata: string | null): string | null {
+  if (!metadata?.trim()) return null;
+  try {
+    const o = JSON.parse(metadata) as Record<string, unknown>;
+    const v = o?.customName;
+    return typeof v === "string" && v.trim() ? v.trim().slice(0, 64) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Применить кастомное имя к подписке после создания/продления (если задано). */
+async function applyCustomNameToSubscription(subscriptionId: string | null | undefined, metadata: string | null): Promise<void> {
+  if (!subscriptionId) return;
+  const name = getCustomNameFromMetadata(metadata);
+  if (!name) return;
+  await prisma.subscription.update({
+    where: { id: subscriptionId },
+    data: { customName: name },
+  }).catch((e) => console.error("[applyCustomNameToSubscription]", e));
 }
 
 function parseCustomBuildMetadata(metadata: string | null): { durationDays: number; trafficLimitBytes: bigint | null; deviceLimit: number | null; internalSquadUuids: string[] } | null {

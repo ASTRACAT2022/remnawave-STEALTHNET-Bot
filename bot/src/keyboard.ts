@@ -1213,17 +1213,24 @@ export function subDetailButtons(
     rows.push([btn("🌐 Локации", `loc:${tariffId}:${compactType}:${id}`, undefined, undefined)]);
   }
   // новый порядок по запросу клиента —
-  // Инструкции / Локации / Продлить / Автосписание / Обновить подписку / К списку подписок.
+  // Инструкции / Локации / Продлить / Купить новую / Автосписание / Обновить подписку / К списку подписок.
   // T15.4: для trial-подписок — иконка карты (оплата конвертирует триал в платную подписку).
   // Тех. flow тот же: pay_tariff_ext / pay_tariff — после успешной оплаты trial_id → null.
-  const renewLabel = isTrial ? "💳 Продлить" : "💰 Продлить";
+  // Две кнопки: «Продлить эту подписку» (продлевает существующую) и «Купить новую» (создаёт параллельную).
+  const renewLabel = isTrial ? "💳 Продлить" : "🔌 Продлить";
+  const newLabel = isTrial ? "💳 Конвертировать в платную" : "🛒 Купить новую";
   rows.push([btn(renewLabel, extendCallback, undefined, tariffEmoji)]);
+  if (tariffId) {
+    rows.push([btn(newLabel, `pay_tariff:${tariffId}:add`, undefined, tariffEmoji)]);
+  }
   // кнопка «🔄 Включить/выключить автосписание».
   // Не показываем для триал-подписок (там нет смысла — это бесплатная конвертация в платную).
   if (!isTrial && tariffId) {
     const arLabel = autoRenewEnabled ? "🛑 Выключить автосписание" : "♻️ Включить автосписание с баланса";
     rows.push([btn(arLabel, `sub:autorenew:${type}:${id}`, undefined, undefined)]);
   }
+  // «✏️ Изменить название» — задать кастомное имя подписки.
+  rows.push([btn("✏️ Изменить название", `sub:setname:${type}:${id}`, undefined, undefined)]);
   // Предпоследняя: «🔄 Обновить подписку».
   rows.push([btn("🔄 Обновить подписку", `sub:reissue:${type}:${id}`, undefined, undefined)]);
   // кнопка убрать ВСЕ доп. устройства (если есть).

@@ -473,6 +473,8 @@ export async function createPlategaPayment(
     extendsSecondarySubId?: string;
     /** удалить доп. устройства после активации подписки в бэке */
     removeExtrasOnActivate?: boolean;
+    /** кастомное имя новой подписки */
+    customName?: string | null;
   }
 ): Promise<{ paymentUrl: string; orderId: string; paymentId: string }> {
   return fetchJson("/api/client/payments/platega", { method: "POST", body, token });
@@ -481,7 +483,7 @@ export async function createPlategaPayment(
 /** Создать платёж ЮMoney (оплата картой). Для тарифа — tariffId, для прокси — proxyTariffId, для опции — extraOption. */
 export async function createYoomoneyPayment(
   token: string,
-  body: { amount?: number; paymentType: "PC" | "AC"; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
+  body: { amount?: number; paymentType: "PC" | "AC"; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ paymentId: string; paymentUrl: string }> {
   return fetchJson("/api/client/yoomoney/create-form-payment", { method: "POST", body, token });
 }
@@ -491,7 +493,7 @@ export async function createYoomoneyPayment(
  *  и email сохраняется в client.email для будущих покупок. Если пусто/невалидно — placeholder (без чека юзеру). */
 export async function createYookassaPayment(
   token: string,
-  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; receiptEmail?: string }
+  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; receiptEmail?: string; customName?: string | null }
 ): Promise<{ paymentId: string; confirmationUrl: string }> {
   return fetchJson("/api/client/yookassa/create-payment", { method: "POST", body, token });
 }
@@ -499,7 +501,7 @@ export async function createYookassaPayment(
 /** Crypto Pay (Crypto Bot) — создать инвойс, вернуть ссылку на оплату */
 export async function createCryptopayPayment(
   token: string,
-  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
+  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ paymentId: string; payUrl: string }> {
   const res = await fetchJson<{ paymentId: string; payUrl: string }>("/api/client/cryptopay/create-payment", { method: "POST", body, token });
   return { paymentId: res.paymentId, payUrl: res.payUrl };
@@ -508,7 +510,7 @@ export async function createCryptopayPayment(
 /** Heleket — создать инвойс на крипту, вернуть ссылку на оплату */
 export async function createHeleketPayment(
   token: string,
-  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
+  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ paymentId: string; payUrl: string }> {
   return fetchJson("/api/client/heleket/create-payment", { method: "POST", body, token });
 }
@@ -516,7 +518,7 @@ export async function createHeleketPayment(
 /** LAVA Business — создать счёт (RUB: СБП / Карты / СберPay) */
 export async function createLavaPayment(
   token: string,
-  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
+  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ paymentId: string; payUrl: string }> {
   return fetchJson("/api/client/lava/create-payment", { method: "POST", body, token });
 }
@@ -541,6 +543,7 @@ export async function createFreekassaPayment(
     extendsSecondarySubId?: string;
     asGift?: boolean;
     removeExtrasOnActivate?: boolean;
+    customName?: string | null;
   }
 ): Promise<{ paymentId: string; payUrl: string; freekassaOrderId: number }> {
   return fetchJson("/api/client/freekassa/create-payment", { method: "POST", body, token });
@@ -554,7 +557,7 @@ export async function completeOnboarding(token: string): Promise<{ message: stri
 /** Lava.top — создать invoice через product/offer модель (RUB/USD/EUR) */
 export async function createLavatopPayment(
   token: string,
-  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; email?: string; offerId?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean }
+  body: { amount?: number; currency?: string; tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; email?: string; offerId?: string; extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string }; asAdditional?: boolean; extendsSecondarySubId?: string; asGift?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ paymentId: string; payUrl: string }> {
   return fetchJson("/api/client/lavatop/create-payment", { method: "POST", body, token });
 }
@@ -583,7 +586,7 @@ export async function activateTrial(token: string): Promise<{ message: string }>
 /** Оплата тарифа или прокси-тарифа балансом */
 export async function payByBalance(
   token: string,
-  opts: { tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extendsSecondarySubId?: string; asAdditional?: boolean; removeExtrasOnActivate?: boolean }
+  opts: { tariffId?: string; tariffPriceOptionId?: string; deviceCount?: number; proxyTariffId?: string; singboxTariffId?: string; promoCode?: string; extendsSecondarySubId?: string; asAdditional?: boolean; removeExtrasOnActivate?: boolean; customName?: string | null }
 ): Promise<{ message: string; paymentId?: string; newBalance?: number }> {
   return fetchJson("/api/client/payments/balance", { method: "POST", body: opts, token });
 }
@@ -1109,6 +1112,8 @@ export type SubscriptionListItem = {
   extraDevices?: number;
   /** цена за все доп. устройства на 30 дней. */
   extraDevicesMonthlyPrice?: number;
+  /** кастомное имя подписки (задано пользователем). null = показывать «Подписка #N». */
+  customName?: string | null;
 };
 
 /** Убрать ВСЕ доп. устройства с подписки (extraDevices=0, hwid kick в Remna). */
@@ -1122,6 +1127,21 @@ export async function removeExtraDevices(
     token,
   });
 }
+
+/** Установить кастомное имя подписки (customName). null — сбросить имя. */
+export async function updateSubscriptionName(
+  token: string,
+  subType: "root" | "secondary",
+  subId: string,
+  customName: string | null,
+): Promise<{ ok: boolean; customName: string | null }> {
+  return fetchJson(`/api/client/subscription/${subType}/${subId}/name`, {
+    method: "PATCH",
+    body: { customName },
+    token,
+  });
+}
+
 export async function getAllSubscriptions(
   token: string
 ): Promise<{ items: SubscriptionListItem[] }> {

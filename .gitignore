@@ -1,6 +1,8 @@
 node_modules/
 backend/dist/
 frontend/dist/
+bot/dist/
+wdtt-node/wdtt-api
 .env
 .env.local
 .env.*.local
@@ -11,3 +13,4 @@ olcrtc-node/.env
 olcrtc-node/.env.local
 .codex-*
 **/.codex-*
+**/.DS_Store
