@@ -118,6 +118,12 @@ function ClassicTariffsPage() {
   const [selectedPriceOptionId, setSelectedPriceOptionId] = useState<string | null>(null);
   /** Сколько ДОП. устройств клиент докупает поверх tariff.includedDevices (0..maxExtraDevices). */
   const [selectedExtraDevices, setSelectedExtraDevices] = useState<number>(0);
+  // Список всех подписок клиента (для выбора «Продлить / Купить новую» по tariffId).
+  const [allSubs, setAllSubs] = useState<Array<{ id: string; tariffId: string | null }>>([]);
+  // Экран выбора «Продлить подписку / Купить новую» (как в боте) — когда у клиента уже есть
+  // подписка с выбранным тарифом. kind "renew" → extendsSecondarySubId; kind "add" → asAdditional.
+  const [renewChoice, setRenewChoice] = useState<{ tariff: TariffForPay; matching: Array<{ id: string; label: string }> } | null>(null);
+  const [renewMode, setRenewMode] = useState<{ kind: "renew"; subscriptionId: string } | { kind: "add" } | null>(null);
 
   // Промокод
   const [promoInput, setPromoInput] = useState("");
@@ -166,7 +172,6 @@ function ClassicTariffsPage() {
   useEffect(() => {
     if (!token) return;
     api.clientSubscription(token).then((res) => {
-      // Remna возвращает данные в subscription.response (или subscription напрямую)
       const sub = res?.subscription as Record<string, unknown> | null;
       const payload = (sub && typeof sub === "object" && sub.response && typeof sub.response === "object")
         ? (sub.response as Record<string, unknown>)
@@ -189,6 +194,14 @@ function ClassicTariffsPage() {
         tariffName: res?.tariffDisplayName ?? null,
         currentPricePerDay: res?.currentPricePerDay ?? null,
       });
+    }).catch(() => { /* not critical */ });
+  }, [token]);
+
+  // Загружаем все подписки клиента (для выбора «Продлить / Купить новую» по tariffId).
+  useEffect(() => {
+    if (!token) return;
+    api.clientAllSubscriptions(token).then((res) => {
+      setAllSubs((res.items ?? []).map((it) => ({ id: it.id, tariffId: it.tariffId ?? null })));
     }).catch(() => { /* not critical */ });
   }, [token]);
 
@@ -218,10 +231,36 @@ function ClassicTariffsPage() {
     };
     setSelectedPriceOptionId(opt?.id ?? null);
     setPurchaseModal(null);
+    setRenewMode(null);
+    // Если у клиента уже есть подписка с этим тарифом — предлагаем «Продлить / Купить новую» (как в боте).
+    const matching = allSubs.filter((s) => s.tariffId === baseTariff.id);
+    if (matching.length > 0) {
+      const withLabels = matching.map((s) => ({ ...s, label: s.id }));
+      setRenewChoice({ tariff: tariffWithOption, matching: withLabels });
+      return;
+    }
     if (activeSubInfo.hasActive) {
       setWarnModal({ tariff: tariffWithOption });
     } else {
       setPayModal({ tariff: tariffWithOption });
+    }
+  }
+
+  // Выбор из экрана «Продлить / Купить новую».
+  function confirmRenewChoice(kind: "renew" | "add", subscriptionId: string | null) {
+    if (!renewChoice) return;
+    const t = renewChoice.tariff;
+    setRenewChoice(null);
+    if (kind === "add") {
+      setRenewMode({ kind: "add" });
+      setPayModal({ tariff: t });
+      return;
+    }
+    setRenewMode({ kind: "renew", subscriptionId: subscriptionId ?? "" });
+    if (activeSubInfo.hasActive) {
+      setWarnModal({ tariff: t });
+    } else {
+      setPayModal({ tariff: t });
     }
   }
 
@@ -285,6 +324,13 @@ function ClassicTariffsPage() {
     return Math.max(0, Math.round(final * 100) / 100);
   }
 
+  // Флаги мульти-подписки: продлить конкретную (extendsSecondarySubId) или купить новую (asAdditional).
+  const multiFlags = renewMode?.kind === "renew" && renewMode.subscriptionId
+    ? { extendsSecondarySubId: renewMode.subscriptionId }
+    : renewMode?.kind === "add"
+      ? { asAdditional: true }
+      : {};
+
   async function startPayment(tariff: TariffForPay, methodId: number) {
     if (!token) return;
     setPayError(null);
@@ -299,6 +345,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.paymentUrl) setReadyUrl({ url: res.paymentUrl, provider: "Platega" });
     } catch (e) {
@@ -318,6 +365,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       setPayModal(null);
       setPromoInput("");
@@ -347,6 +395,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.paymentUrl) setReadyUrl({ url: res.paymentUrl, provider: "ЮMoney" });
     } catch (e) {
@@ -372,6 +421,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.confirmationUrl) setReadyUrl({ url: res.confirmationUrl, provider: "ЮKassa" });
     } catch (e) {
@@ -393,6 +443,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Crypto Bot" });
     } catch (e) {
@@ -414,6 +465,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Heleket" });
     } catch (e) {
@@ -435,6 +487,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "LAVA" });
     } catch (e) {
@@ -456,6 +509,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Lava.top" });
     } catch (e) {
@@ -477,6 +531,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: "Overpay" });
     } catch (e) {
@@ -499,6 +554,7 @@ function ClassicTariffsPage() {
         tariffPriceOptionId: selectedPriceOptionId ?? undefined,
         deviceCount: selectedExtraDevices,
         promoCode: promoResult ? promoInput.trim() : undefined,
+        ...multiFlags,
       });
       if (res.payUrl) setReadyUrl({ url: res.payUrl, provider: method === "cardRub" ? "KASSA Карта" : "KASSA СБП QR" });
     } catch (e) {
@@ -515,6 +571,7 @@ function ClassicTariffsPage() {
     setPromoError(null);
     setPayError(null);
     setReadyUrl(null);
+    setRenewMode(null);
   };
 
   // === КОНТЕНТ ОПЛАТЫ (ОБЩИЙ ДЛЯ MOBILE VIEW И DESKTOP DIALOG) ===
@@ -1204,6 +1261,64 @@ function ClassicTariffsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Экран выбора «Продлить подписку / Купить новую» — когда у клиента уже есть подписка с этим тарифом */}
+      <Dialog open={!!renewChoice} onOpenChange={(open) => !open && setRenewChoice(null)}>
+        <DialogContent className="bg-background/85 backdrop-blur-3xl border-white/10 rounded-[2rem] sm:max-w-md overflow-hidden">
+          <DialogHeader className="relative">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/30 to-fuchsia-500/15 border border-white/10 flex items-center justify-center shadow-inner shrink-0">
+                <Package className="h-6 w-6 text-primary" />
+              </div>
+              <DialogTitle className="text-xl font-bold tracking-tight">
+                У вас уже есть подписка с этим тарифом
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-sm text-muted-foreground leading-relaxed pt-2">
+              {renewChoice?.tariff.name} — выберите, что сделать с покупкой.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="relative space-y-3 mt-1">
+            <button
+              type="button"
+              onClick={() => confirmRenewChoice("renew", renewChoice?.matching[0]?.id ?? null)}
+              className="w-full text-left rounded-2xl border border-white/10 bg-foreground/[0.03] dark:bg-white/[0.02] p-4 hover:border-primary/50 hover:bg-primary/5 transition-all"
+            >
+              <div className="flex items-start gap-3">
+                <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/15 border border-primary/20 flex items-center justify-center mt-0.5">
+                  <Calendar className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold leading-tight">Продлить подписку</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Дни добавятся к существующей подписке этого тарифа</p>
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmRenewChoice("add", null)}
+              className="w-full text-left rounded-2xl border border-white/10 bg-foreground/[0.03] dark:bg-white/[0.02] p-4 hover:border-primary/50 hover:bg-primary/5 transition-all"
+            >
+              <div className="flex items-start gap-3">
+                <div className="h-8 w-8 shrink-0 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/20 flex items-center justify-center mt-0.5">
+                  <Sparkles className="h-4 w-4 text-fuchsia-500 dark:text-fuchsia-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold leading-tight">Купить новую подписку</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Создаст дополнительную подписку — можно иметь несколько</p>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setRenewChoice(null)} className="rounded-xl">
+              Отмена
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Унифицированная модалка покупки: длительность + ДОП. устройства + total */}
       <UnifiedPurchaseModal
         modal={purchaseModal}
@@ -1217,8 +1332,6 @@ function ClassicTariffsPage() {
     </>
   );
 }
-
-// ─────────────── Унифицированная модалка покупки тарифа ───────────────
 // Длительность (chips) → Устройства (плитки со скидкой) → итог + кнопка дальше.
 function UnifiedPurchaseModal({
   modal,
