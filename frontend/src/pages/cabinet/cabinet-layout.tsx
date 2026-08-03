@@ -19,6 +19,7 @@ import { BrandLoadingScreen } from "@/components/brand-loading-screen";
 const StealthLayout = lazy(() => import("@/pages/cabinet/stealth/stealth-layout").then((m) => ({ default: m.StealthLayout })));
 const FloatingChat = lazy(() => import("@/components/floating-chat").then((m) => ({ default: m.FloatingChat })));
 const DashboardTour = lazy(() => import("@/components/tour/dashboard-tour").then((m) => ({ default: m.DashboardTour })));
+const ClientNotificationsBell = lazy(() => import("@/components/client-notifications-bell").then((m) => ({ default: m.ClientNotificationsBell })));
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat("ru-RU", {
@@ -529,6 +530,9 @@ function MobileCabinetShell() {
             {serviceName ? <span className="truncate">{serviceName}</span> : null}
           </Link>
           <div className="flex items-center gap-1.5 shrink-0">
+            <Suspense fallback={null}>
+              <ClientNotificationsBell />
+            </Suspense>
             <ThemePopover />
             <SettingsPopover />
             {!isMiniapp && (
@@ -747,6 +751,9 @@ function CabinetShell() {
             )}
           </nav>
           <div className="flex items-center gap-2 shrink-0">
+            <Suspense fallback={null}>
+              <ClientNotificationsBell />
+            </Suspense>
             <ThemePopover />
             <SettingsPopover />
             <div className="hidden lg:flex h-9 items-center gap-3 rounded-full border border-border bg-background px-4 shadow-sm transition-colors hover:bg-muted">

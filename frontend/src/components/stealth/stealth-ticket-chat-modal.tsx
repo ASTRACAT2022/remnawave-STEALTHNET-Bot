@@ -209,14 +209,15 @@ export function StealthTicketChatModal({ open, ticketId, onClose }: Props) {
       )}
 
       {/* Reply form */}
-      {isClosed ? (
-        <div className="rounded-2xl border border-white/[0.06] bg-zinc-950/40 p-3 text-xs text-zinc-400 text-center">
-          Тикет закрыт. Напишите новое обращение если нужна дополнительная помощь.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {/* File previews */}
-          {files.length > 0 && (
+      <div className="space-y-2">
+        {isClosed && (
+          <div className="rounded-xl border border-white/[0.06] bg-zinc-950/40 px-3 py-2 text-[10px] text-zinc-400 text-center">
+            Тикет закрыт — отправка ответа откроет его заново.
+          </div>
+        )}
+
+        {/* File previews */}
+        {files.length > 0 && (
             <div className="grid grid-cols-3 gap-1.5">
               {files.map((f, idx) => (
                 <div key={idx} className="relative rounded-xl border border-white/[0.06] bg-zinc-950/60 p-1.5 flex flex-col items-center gap-0.5">
@@ -283,8 +284,7 @@ export function StealthTicketChatModal({ open, ticketId, onClose }: Props) {
             <RefreshCw className="h-2.5 w-2.5" />
             Обновить
           </button>
-        </div>
-      )}
+      </div>
     </StealthModal>
   );
 }

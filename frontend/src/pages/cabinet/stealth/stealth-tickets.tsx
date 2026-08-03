@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, Mail, ChevronRight, Loader2 } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api } from "@/lib/api";
@@ -44,6 +45,7 @@ function fmtDate(iso: string): string {
 
 export function StealthTickets() {
   const { state } = useClientAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<TicketItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -61,6 +63,16 @@ export function StealthTickets() {
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [state.token]);
+
+  // Открытие тикета из уведомления (?ticket=<id>)
+  useEffect(() => {
+    const ticketId = searchParams.get("ticket");
+    if (ticketId && state.token) {
+      setChatTicketId(ticketId);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, state.token]);
 
   const goNew = () => setShowNew(true);
   const goTicket = (id: string) => setChatTicketId(id);

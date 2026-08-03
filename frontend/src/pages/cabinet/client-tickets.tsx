@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MessageSquarePlus, Inbox, Loader2, Send, ArrowLeft, CircleDot, CircleCheck, User, Paperclip, X as XIcon, ImageIcon } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api, type TicketAttachmentDto, type TicketMessageDto } from "@/lib/api";
@@ -51,6 +52,7 @@ export function ClientTicketsPage() {
 function ClassicTicketsPage() {
   const { state } = useClientAuth();
   const token = state.token ?? null;
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [list, setList] = useState<TicketItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +132,16 @@ function ClassicTicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Открытие тикета из уведомления (?ticket=<id>)
+  useEffect(() => {
+    const ticketId = searchParams.get("ticket");
+    if (ticketId && token) {
+      setDetailId(ticketId);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, token]);
+
   useEffect(() => {
     if (!detailId || !token) {
       setDetail(null);
@@ -158,7 +170,7 @@ function ClassicTicketsPage() {
     api
       .replyTicket(token, detailId, { content: replyText.trim(), files: replyFiles })
       .then((msg) => {
-        setDetail((d) => (d ? { ...d, messages: [...d.messages, msg] } : d));
+        setDetail((d) => (d ? { ...d, messages: [...d.messages, msg], status: "open" } : d));
         setReplyText("");
         setReplyFiles([]);
         if (replyInputRef.current) replyInputRef.current.value = "";
@@ -282,8 +294,12 @@ function ClassicTicketsPage() {
           )}
         </div>
 
-        {detail.status === "open" && (
-          <div className="p-4 sm:p-5 border-t border-border/50 bg-background/40 backdrop-blur-md shrink-0">
+        <div className="p-4 sm:p-5 border-t border-border/50 bg-background/40 backdrop-blur-md shrink-0">
+          {detail.status === "closed" && (
+            <p className="max-w-4xl mx-auto mb-2.5 text-[11px] text-muted-foreground font-semibold text-center">
+              Тикет закрыт — отправка ответа откроет его заново.
+            </p>
+          )}
             {replyFiles.length > 0 && (
               <div className="max-w-4xl mx-auto mb-2.5 flex flex-wrap gap-2">
                 {replyFiles.map((f, i) => (
@@ -358,8 +374,7 @@ function ClassicTicketsPage() {
             </div>
             <p className="hidden sm:block text-center text-[10px] text-muted-foreground mt-2 font-medium">Enter — отправить · Shift+Enter — перенос · 📎 — до {MAX_FILES} фото</p>
           </div>
-        )}
-      </div>
+        </div>
     );
   }
 

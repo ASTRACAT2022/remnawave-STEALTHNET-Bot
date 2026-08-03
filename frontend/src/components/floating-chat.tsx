@@ -273,7 +273,7 @@ function SupportTab({ headerProps, onRefreshUnread }: { headerProps: any, onRefr
     setUploadError(null);
     api.replyTicket(token, detailId, { content: replyText.trim(), files: replyFiles })
       .then((msg) => {
-        setDetail((d: any) => (d ? { ...d, messages: [...d.messages, msg] } : d));
+        setDetail((d: any) => (d ? { ...d, messages: [...d.messages, msg], status: "open" } : d));
         setReplyText("");
         setReplyFiles([]);
         if (replyInputRef.current) replyInputRef.current.value = "";
@@ -375,9 +375,13 @@ function SupportTab({ headerProps, onRefreshUnread }: { headerProps: any, onRefr
         </div>
 
         {/* Input area */}
-        {detail?.status === "open" && (
-          <div className="p-3 sm:p-4 border-t border-black/5 dark:border-white/5 bg-background/80 sm:bg-background/50 backdrop-blur-xl shrink-0 pb-[max(env(safe-area-inset-bottom),16px)] sm:pb-4">
-            {replyFiles.length > 0 && (
+        <div className="p-3 sm:p-4 border-t border-black/5 dark:border-white/5 bg-background/80 sm:bg-background/50 backdrop-blur-xl shrink-0 pb-[max(env(safe-area-inset-bottom),16px)] sm:pb-4">
+          {detail?.status === "closed" && (
+            <p className="text-center text-[10px] text-muted-foreground font-semibold mb-2">
+              Тикет закрыт — отправка ответа откроет его заново.
+            </p>
+          )}
+          {replyFiles.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {replyFiles.map((f, i) => (
                   <div
@@ -450,7 +454,6 @@ function SupportTab({ headerProps, onRefreshUnread }: { headerProps: any, onRefr
               </Button>
             </div>
           </div>
-        )}
       </div>
     );
   }

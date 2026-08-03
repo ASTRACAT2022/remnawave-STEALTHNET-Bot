@@ -22,9 +22,10 @@ import {
   notifyAdminsAboutClientTicketMessage,
   notifyAdminsAboutNewClient,
   notifyAdminsAboutNewTicket,
+  notifyAdminsAboutTicketStatusChange,
 } from "../notification/telegram-notify.service.js";
 import { requireClientAuth } from "./client.middleware.js";
-import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, extractRemnaUuid, remnaUsernameFromClient, remnaGetUserHwidDevices, remnaDeleteUserHwidDevice, encryptSubscriptionUrlInPlace, remnaRevokeUserSubscription } from "../remna/remna.client.js";
+import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, extractRemnaUuid, remnaUsernameFromClient, remnaGetUserHwidDevices, remnaDeleteUserHwidDevice, encryptSubscriptionUrlInPlace, remnaRevokeUserSubscription, remnaDeleteUser } from "../remna/remna.client.js";
 import { sendVerificationEmail, sendLinkEmailVerification, sendPasswordResetEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
 import { activateTariffForClient, activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
@@ -3077,6 +3078,88 @@ clientRouter.get("/subscription/all", async (req, res) => {
 });
 
 /**
+ * POST /api/client/subscription/:id/delete — удалить свою НЕАКТИВНУЮ подписку.
+ *
+ * Разрешено только для неактивных (истёкших) подписок: expireAt в прошлом либо статус
+ * Remna-юзера EXPIRED/DISABLED/ON_HOLD/PENDING. Активную подписку удалить нельзя —
+ * иначе клиент потеряет работающий VPN и оплаченные дни.
+ *
+ * Владелец: подписка должна принадлежать клиенту (ownerId) или быть подарена ему (GIFTED).
+ */
+clientRouter.post("/subscription/:id/delete", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const subId = req.params.id;
+
+  const sub = await prisma.subscription.findUnique({
+    where: { id: subId },
+    select: {
+      id: true,
+      ownerId: true,
+      giftedToClientId: true,
+      giftStatus: true,
+      subscriptionIndex: true,
+      remnawaveUuid: true,
+      expireAt: true,
+      autoRenewEnabled: true,
+    },
+  });
+  if (!sub) return res.status(404).json({ message: "Подписка не найдена" });
+
+  const isOwner = sub.ownerId === clientId;
+  const isGifted = sub.giftedToClientId === clientId && sub.giftStatus === "GIFTED";
+  if (!isOwner && !isGifted) {
+    return res.status(403).json({ message: "Подписка не принадлежит вам" });
+  }
+
+  // Определяем, можно ли удалять: подписка истекла по БД (expireAt в прошлом) → точно
+  // неактивна. Если по БД ещё действует — смотрим статус Remna-юзера (EXPIRED/DISABLED/...).
+  const now = Date.now();
+  const dbExpired = sub.expireAt !== null && new Date(sub.expireAt).getTime() <= now;
+  let deletable = dbExpired;
+  if (!deletable) {
+    let status = "PENDING";
+    if (sub.remnawaveUuid) {
+      const r = await remnaGetUser(sub.remnawaveUuid);
+      if (!r.error && r.data && typeof r.data === "object" && typeof (r.data as { status?: unknown }).status === "string") {
+        status = (r.data as { status: string }).status;
+      }
+    }
+    const allowedInactive = ["EXPIRED", "DISABLED", "ON_HOLD", "PENDING"];
+    deletable = allowedInactive.includes(status);
+  }
+  if (!deletable) {
+    return res.status(400).json({ message: "Можно удалять только неактивные (истёкшие) подписки" });
+  }
+
+  // Отзываем Remna-юзера (очищаем HWID-устройства и доступ), если он ещё существует.
+  if (sub.remnawaveUuid) {
+    const del = await remnaDeleteUser(sub.remnawaveUuid);
+    if (del.error) {
+      console.warn(`[client-delete-sub] remnaDeleteUser failed for ${sub.remnawaveUuid}:`, del.error);
+    }
+  }
+
+  await prisma.subscription.delete({ where: { id: sub.id } });
+
+  // Если удалили primary-подписку (idx=0) — синкаем legacy client.remnawaveUuid на
+  // следующую подписку клиента, чтобы кабинет/бот не ссылались на удалённого юзера.
+  if (sub.subscriptionIndex === 0 && isOwner) {
+    const next = await prisma.subscription.findFirst({
+      where: { ownerId: clientId, remnawaveUuid: { not: null } },
+      orderBy: { subscriptionIndex: "asc" },
+      select: { remnawaveUuid: true },
+    });
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { remnawaveUuid: next?.remnawaveUuid ?? null },
+    }).catch(() => { /* legacy поле, не критично */ });
+  }
+
+  console.log(`[client-delete-sub] client=${clientId} deleted subscription=${sub.id} (index=${sub.subscriptionIndex}, dbExpired=${dbExpired})`);
+  return res.json({ ok: true, message: "Подписка удалена" });
+});
+
+/**
  * pre-check кулдауна продления для конкретной подписки.
  * Бот дёргает перед отрисовкой кнопки «💰 Продлить» и при клике на неё — чтобы сразу выдать
  * сообщение «нельзя ещё N дней», не дожидаясь экрана выбора провайдера.
@@ -4291,14 +4374,21 @@ clientRouter.post("/payments/balance", async (req, res) => {
       : { ok: false, error: addResult.error, status: addResult.status };
     if (addResult.ok) createdSubscriptionId = addResult.data.subscriptionId;
   } else {
-    // Нет явного запроса новой подписки → проверяем, есть ли у клиента существующая
+    // Нет явного запроса новой подписки → проверяем, есть ли у клиента АКТИВНАЯ подписка.
+    // Истёкшие (expireAt в прошлом) НЕ продлеваем — иначе новая покупка «утекает» в старую
+    // неактивную подписку и в кабинете не появляется новая ссылка. Если все старые истекли —
+    // создаём свежую подписку (получит свободный subscriptionIndex).
     const { extendSecondarySubscription } = await import("../tariff/tariff-activation.service.js");
     const existingSub = await prisma.subscription.findFirst({
-      where: { ownerId: clientRaw.id, remnawaveUuid: { not: null } },
+      where: {
+        ownerId: clientRaw.id,
+        remnawaveUuid: { not: null },
+        OR: [{ expireAt: null }, { expireAt: { gt: new Date() } }],
+      },
       orderBy: { subscriptionIndex: "asc" },
     });
     if (existingSub) {
-      // У клиента уже есть подписка — продлеваем её (стек дней)
+      // У клиента уже есть АКТИВНАЯ подписка — продлеваем её (стек дней)
       activateResult = await extendSecondarySubscription(
         existingSub.id,
         tariff,
@@ -7815,8 +7905,22 @@ clientRouter.get("/tickets", async (req, res) => {
     orderBy: { updatedAt: "desc" },
     select: { id: true, subject: true, status: true, createdAt: true, updatedAt: true },
   });
+  // Количество непрочитанных ответов поддержки по каждому тикету — для бейджа/списка уведомлений.
+  const unreadGroup = await prisma.ticketMessage.groupBy({
+    by: ["ticketId"],
+    where: { ticket: { clientId }, authorType: "support", isRead: false },
+    _count: { _all: true },
+  });
+  const unreadMap = new Map(unreadGroup.map((u) => [u.ticketId, u._count._all]));
   return res.json({
-    items: list.map((t) => ({ id: t.id, subject: t.subject, status: t.status, createdAt: t.createdAt.toISOString(), updatedAt: t.updatedAt.toISOString() })),
+    items: list.map((t) => ({
+      id: t.id,
+      subject: t.subject,
+      status: t.status,
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString(),
+      unreadCount: unreadMap.get(t.id) ?? 0,
+    })),
   });
 });
 
@@ -7877,19 +7981,33 @@ clientRouter.post("/tickets/:id/messages", uploadTicketAttachment.array("files",
       attachments: serializeAttachments(attachments),
     },
   });
-  await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: new Date() } });
+  // Ответ клиента автоматически открывает закрытый тикет заново.
+  const reopened = ticket.status === "closed";
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: { updatedAt: new Date(), ...(reopened ? { status: "open" } : {}) },
+  });
   notifyAdminsAboutClientTicketMessage({
     ticketId: ticket.id,
     clientId,
     content: trimmed,
     attachmentsCount: attachments.length,
   }).catch(() => {});
+  if (reopened) {
+    notifyAdminsAboutTicketStatusChange({
+      ticketId: ticket.id,
+      clientId,
+      subject: ticket.subject,
+      status: "open",
+    }).catch(() => {});
+  }
   return res.status(201).json({
     id: msg.id,
     authorType: msg.authorType,
     content: msg.content,
     attachments: parseAttachments(msg.attachments),
     createdAt: msg.createdAt.toISOString(),
+    status: reopened ? "open" : ticket.status,
   });
 });
 

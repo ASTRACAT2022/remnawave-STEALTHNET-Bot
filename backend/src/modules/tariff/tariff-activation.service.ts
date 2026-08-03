@@ -827,14 +827,21 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
       return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
     }
 
-    // Нет явного запроса новой подписки → проверяем, есть ли у клиента существующая подписка
+    // Нет явного запроса новой подписки → проверяем, есть ли у клиента АКТИВНАЯ подписка.
+    // Истёкшие (expireAt в прошлом) НЕ продлеваем — иначе новая покупка «утекает» в старую
+    // неактивную подписку и в кабинете не появляется новая ссылка. Если все старые истекли —
+    // создаём свежую подписку (получит свободный subscriptionIndex).
     const existingSub = await prisma.subscription.findFirst({
-      where: { ownerId: client.id, remnawaveUuid: { not: null } },
+      where: {
+        ownerId: client.id,
+        remnawaveUuid: { not: null },
+        OR: [{ expireAt: null }, { expireAt: { gt: new Date() } }],
+      },
       orderBy: { subscriptionIndex: "asc" },
     });
 
     if (existingSub) {
-      // У клиента уже есть подписка — продлеваем её (стек дней), а не создаём новую
+      // У клиента уже есть АКТИВНАЯ подписка — продлеваем её (стек дней), а не создаём новую
       const result = await extendSecondarySubscription(existingSub.id, {
         id: tariff.id,
         durationDays: selectedOption?.durationDays ?? tariff.durationDays,

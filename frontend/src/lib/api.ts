@@ -1916,6 +1916,11 @@ export const api = {
     return request("/client/subscription/all", { token });
   },
 
+  /** Удалить свою НЕАКТИВНУЮ (истёкшую) подписку. Сервер откажет для активных подписок. */
+  async clientDeleteSubscription(token: string, id: string): Promise<{ ok: boolean; message: string }> {
+    return request(`/client/subscription/${encodeURIComponent(id)}/delete`, { method: "POST", token });
+  },
+
   async clientPayments(token: string): Promise<{ items: ClientPayment[] }> {
     return request("/client/payments", { token });
   },
@@ -2494,7 +2499,7 @@ export const api = {
   },
 
   /** Список тикетов клиента (доступно при включённой тикет-системе) */
-  async getTickets(token: string): Promise<{ items: { id: string; subject: string; status: string; createdAt: string; updatedAt: string }[] }> {
+  async getTickets(token: string): Promise<{ items: { id: string; subject: string; status: string; createdAt: string; updatedAt: string; unreadCount?: number }[] }> {
     return request("/client/tickets", { token });
   },
   /** Количество непрочитанных сообщений от поддержки */
