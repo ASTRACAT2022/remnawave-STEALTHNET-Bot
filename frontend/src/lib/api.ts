@@ -1817,6 +1817,22 @@ export const api = {
     });
   },
 
+  /** Запрос ссылки для сброса пароля на почту (Forgot password) */
+  async clientForgotPassword(email: string): Promise<{ message: string }> {
+    return request("/client/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  /** Установка нового пароля по токену из письма сброса */
+  async clientResetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    return request("/client/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    });
+  },
+
   /** Авторизация по initData из Telegram Mini App (Web App) */
   async clientAuthByTelegramMiniapp(initData: string): Promise<ClientAuthResponse | ClientAuthRequires2FA> {
     return request("/client/auth/telegram-miniapp", {
@@ -1891,6 +1907,7 @@ export const api = {
       tariffId?: string | null;
       trialId?: string | null;
       autoRenewEnabled?: boolean;
+      status?: string;
       tariffMenuEmoji?: string | null;
       extraDevices?: number;
       extraDevicesMonthlyPrice?: number;
@@ -1995,6 +2012,31 @@ export const api = {
     }
   ): Promise<{ paymentUrl: string; orderId: string; paymentId: string; discountApplied?: boolean; finalAmount?: number }> {
     return request("/client/payments/platega", { method: "POST", body: JSON.stringify(data), token });
+  },
+
+  /** Telegram Stars (XTR): создать PENDING-платёж + invoice-ссылку для WebApp.openInvoice. */
+  async clientCreateStarsPayment(
+    token: string,
+    data: {
+      amount?: number;
+      currency?: string;
+      description?: string;
+      tariffId?: string;
+      tariffPriceOptionId?: string;
+      deviceCount?: number;
+      proxyTariffId?: string;
+      singboxTariffId?: string;
+      wdttTariffId?: string;
+      promoCode?: string;
+      extraOption?: { kind: "traffic" | "devices" | "servers"; productId: string; targetSubscriptionId?: string };
+      customBuild?: { days: number; devices: number; trafficGb?: number };
+      extendsSecondarySubId?: string;
+      asAdditional?: boolean;
+      asGift?: boolean;
+      removeExtrasOnActivate?: boolean;
+    }
+  ): Promise<{ invoiceUrl: string; orderId: string; paymentId: string; starsCount: number; finalAmount: number; currency: string; discountApplied?: boolean }> {
+    return request("/client/payments/stars", { method: "POST", body: JSON.stringify(data), token });
   },
 
   async getPublicTariffs(): Promise<{ items: PublicTariffCategory[] }> {
@@ -3115,6 +3157,8 @@ export type UpdateSettingsPayload = {
   freekassaShopId?: string | null;
   freekassaApiKey?: string | null;
   freekassaSecretWord2?: string | null;
+  telegramStarsEnabled?: boolean;
+  telegramStarsRateRub?: number;
   paymentProvidersConfig?: string | null;
   groqApiKey?: string | null;
   groqModel?: string | null;
@@ -3577,6 +3621,10 @@ export interface AdminSettings {
   freekassaShopId?: string | null;
   freekassaApiKey?: string | null;
   freekassaSecretWord2?: string | null;
+  /** Telegram Stars: оплата в мини-приложении включена */
+  telegramStarsEnabled?: boolean;
+  /** Telegram Stars: курс, сколько ₽ стоит 1 Star */
+  telegramStarsRateRub?: number;
   paymentProviders?: { id: string; label: string; sortOrder: number }[];
   groqApiKey?: string | null;
   groqModel?: string | null;
@@ -4865,6 +4913,8 @@ export interface PublicConfig {
   lavatopEnabled?: boolean;
   overpayEnabled?: boolean;
   freekassaEnabled?: boolean;
+  telegramStarsEnabled?: boolean;
+  telegramStarsRateRub?: number;
   paymentProviders?: { id: string; label: string; sortOrder: number }[];
   trialEnabled?: boolean;
   trialDays?: number;

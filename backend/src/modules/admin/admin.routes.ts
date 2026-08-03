@@ -2284,6 +2284,9 @@ const updateSettingsSchema = z.object({
   freekassaShopId: z.string().max(100).nullable().optional(),
   freekassaApiKey: z.string().max(500).nullable().optional(),
   freekassaSecretWord2: z.string().max(500).nullable().optional(),
+  // Telegram Stars: включение приёма и курс (₽ за 1 Star).
+  telegramStarsEnabled: z.boolean().optional(),
+  telegramStarsRateRub: z.number().min(0).max(10000).optional(),
   groqApiKey: z.string().max(500).nullable().optional(),
   groqModel: z.string().max(100).nullable().optional(),
   groqFallback1: z.string().max(100).nullable().optional(),
@@ -2880,6 +2883,14 @@ adminRouter.patch("/settings", async (req, res) => {
   if (updates.freekassaSecretWord2 !== undefined) {
     const val = updates.freekassaSecretWord2 ?? "";
     await prisma.systemSetting.upsert({ where: { key: "freekassa_secret_word2" }, create: { key: "freekassa_secret_word2", value: val }, update: { value: val } });
+  }
+  if (updates.telegramStarsEnabled !== undefined) {
+    const val = updates.telegramStarsEnabled ? "true" : "false";
+    await prisma.systemSetting.upsert({ where: { key: "telegram_stars_enabled" }, create: { key: "telegram_stars_enabled", value: val }, update: { value: val } });
+  }
+  if (updates.telegramStarsRateRub !== undefined) {
+    const val = String(updates.telegramStarsRateRub);
+    await prisma.systemSetting.upsert({ where: { key: "telegram_stars_rate_rub" }, create: { key: "telegram_stars_rate_rub", value: val }, update: { value: val } });
   }
   if (updates.groqApiKey !== undefined) {
     const val = updates.groqApiKey ?? "";

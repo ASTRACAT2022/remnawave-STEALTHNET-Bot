@@ -811,6 +811,21 @@ export async function patchBotAdminPaymentMarkPaid(telegramId: number, paymentId
   return data;
 }
 
+export async function confirmStarsPayment(payload: string): Promise<unknown> {
+  const botToken = process.env.BOT_TOKEN || "";
+  const res = await fetch(`${API_URL}${BOT_ADMIN_BASE}/payments/stars/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Telegram-Bot-Token": botToken },
+    body: JSON.stringify({ payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = typeof (data as { message?: string }).message === "string" ? (data as { message: string }).message : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
 export async function getBotAdminBroadcastCount(telegramId: number): Promise<{ withTelegram: number; withEmail: number }> {
   const botToken = process.env.BOT_TOKEN || "";
   const res = await fetch(`${API_URL}${BOT_ADMIN_BASE}/broadcast/count?telegramId=${telegramId}`, {

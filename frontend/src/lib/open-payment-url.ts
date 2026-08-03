@@ -100,3 +100,31 @@ export function openPaymentInBrowser(url: string): void {
   const redirect = preparePaymentRedirect();
   redirect.open(url);
 }
+
+type TelegramWebAppInvoice = {
+  initData?: string;
+  openInvoice?: (url: string, callback?: (status: string) => void) => void;
+};
+
+/**
+ * Открывает счёт Telegram Stars через `WebApp.openInvoice` — нативный платёжный
+ * оверлей Telegram (вызывается только из Mini App). Возвращает `true`, если
+ * счёт открыт, и `false`, если вызвать нельзя (не Telegram / нет `openInvoice`).
+ *
+ * Статусы колбэка: `paid`, `cancelled`, `failed`, `pending`.
+ */
+export function openTelegramStarsInvoice(
+  url: string,
+  onResult?: (status: string) => void,
+): boolean {
+  if (typeof window === "undefined") return false;
+  const raw = (window as { Telegram?: { WebApp?: TelegramWebAppInvoice } }).Telegram?.WebApp;
+  if (!raw || typeof raw.openInvoice !== "function") return false;
+  if (!raw.initData || !raw.initData.trim()) return false;
+  try {
+    raw.openInvoice(url, (status) => onResult?.(status));
+  } catch {
+    return false;
+  }
+  return true;
+}

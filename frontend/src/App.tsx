@@ -72,6 +72,7 @@ const ClientLoginPage = lazy(() => import("@/pages/cabinet/client-login").then((
 const ClientRegisterPage = lazy(() => import("@/pages/cabinet/client-register").then((m) => ({ default: m.ClientRegisterPage })));
 const ClientVerifyEmailPage = lazy(() => import("@/pages/cabinet/client-verify-email").then((m) => ({ default: m.ClientVerifyEmailPage })));
 const ClientVerifyLinkEmailPage = lazy(() => import("@/pages/cabinet/client-verify-link-email").then((m) => ({ default: m.ClientVerifyLinkEmailPage })));
+const ClientResetPasswordPage = lazy(() => import("@/pages/cabinet/client-reset-password").then((m) => ({ default: m.ClientResetPasswordPage })));
 const GiftActivatePage = lazy(() => import("@/pages/gift-activate").then((m) => ({ default: m.GiftActivatePage })));
 const LandingPage = lazy(() => import("@/pages/landing").then((m) => ({ default: m.LandingPage })));
 const PwaUpdatePrompt = lazy(() => import("@/components/pwa/pwa-update-prompt").then((m) => ({ default: m.PwaUpdatePrompt })));
@@ -383,6 +384,7 @@ function AppRoutes() {
       <Route path="/cabinet/register" element={<ClientGuestRoute><ClientRegisterPage /></ClientGuestRoute>} />
       <Route path="/cabinet/verify-email" element={<ClientGuestRoute><ClientVerifyEmailPage /></ClientGuestRoute>} />
       <Route path="/cabinet/verify-link-email" element={<ClientGuestRoute><ClientVerifyLinkEmailPage /></ClientGuestRoute>} />
+      <Route path="/cabinet/reset-password" element={<ClientGuestRoute><ClientResetPasswordPage /></ClientGuestRoute>} />
 
       {/* Старые ссылки сохраняем рабочими, но больше никогда не показываем classic-кабинет. */}
       <Route

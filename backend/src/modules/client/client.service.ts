@@ -123,6 +123,7 @@ const SYSTEM_CONFIG_KEYS = [
   "lavatop_api_key", "lavatop_default_offer_id",
   "overpay_api_url", "overpay_project_id", "overpay_login", "overpay_password",
   "freekassa_shop_id", "freekassa_api_key", "freekassa_secret_word2",
+  "telegram_stars_enabled", "telegram_stars_rate_rub",
   "groq_api_key", "groq_model", "groq_fallback_1", "groq_fallback_2", "groq_fallback_3", "ai_system_prompt",
   "bot_buttons", "bot_buttons_per_row", "bot_back_label", "bot_menu_texts", "bot_menu_line_visibility", "bot_inner_button_styles",
   "bot_tariffs_text", "bot_tariffs_fields", "bot_payment_text",
@@ -621,6 +622,9 @@ async function loadSystemConfigFromDb() {
     freekassaShopId: (map.freekassa_shop_id ?? "").trim() || null,
     freekassaApiKey: (map.freekassa_api_key ?? "").trim() || null,
     freekassaSecretWord2: (map.freekassa_secret_word2 ?? "").trim() || null,
+    /** Telegram Stars: включено и курс (сколько ₽ стоит 1 Star). */
+    telegramStarsEnabled: (map.telegram_stars_enabled ?? "").trim() === "true",
+    telegramStarsRateRub: Number(map.telegram_stars_rate_rub || 0) || 0,
     groqApiKey: (map.groq_api_key ?? "").trim() || null,
     groqModel: (map.groq_model ?? "").trim() || "llama3-8b-8192",
     groqFallback1: (map.groq_fallback_1 ?? "").trim() || null,
@@ -1189,6 +1193,8 @@ export async function getPublicConfig(_forCloneBot?: { markupPercent?: number | 
       (full as { freekassaShopId?: string | null }).freekassaShopId?.trim() &&
       (full as { freekassaApiKey?: string | null }).freekassaApiKey?.trim(),
     ),
+    telegramStarsEnabled: (full as { telegramStarsEnabled?: boolean }).telegramStarsEnabled === true,
+    telegramStarsRateRub: (full as { telegramStarsRateRub?: number }).telegramStarsRateRub || 0,
     paymentProviders: full.paymentProviders,
     skipEmailVerification: full.skipEmailVerification ?? false,
     // фронту нужен флаг — настроен ли SMTP.

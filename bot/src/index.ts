@@ -7951,6 +7951,39 @@ composer.on("message", async (ctx) => {
   await tryAutoDeleteUnknown(ctx);
 });
 
+// ——— Telegram Stars (XTR): оплата ———
+// Telegram требует ответить на pre_checkout_query в течение 10 сек, иначе оплата отменяется.
+composer.on("pre_checkout_query", async (ctx) => {
+  try {
+    await ctx.api.answerPreCheckoutQuery(ctx.update.pre_checkout_query.id, true);
+  } catch (e) {
+    console.error("[stars] answerPreCheckoutQuery error:", e);
+    try {
+      await ctx.api.answerPreCheckoutQuery(ctx.update.pre_checkout_query.id, false, { error_message: "Временно не можем принять оплату, попробуйте позже." }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+});
+
+// Успешная оплата Stars. payload = payment.id (мы задаём его в createInvoiceLink).
+composer.on("message:successful_payment", async (ctx) => {
+  const sp = ctx.update.message.successful_payment;
+  const payload = sp?.invoice_payload ?? "";
+  const chatId = ctx.chat?.id;
+  console.log(`[stars] successful_payment payload=${payload} amount=${sp?.total_amount ?? "?"} charge=${sp?.telegram_payment_charge_id ?? "?"}`);
+  if (!payload) {
+    await ctx.reply("Оплата получена, но не удалось определить платёж. Обратитесь в поддержку.").catch(() => {});
+    return;
+  }
+  try {
+    await api.confirmStarsPayment(payload);
+    const stars = sp?.total_amount ?? 0;
+    await ctx.reply(`✅ Оплата принята! Услуга активирована${stars > 0 ? ` (${stars} ⭐)` : ""}.`).catch(() => {});
+  } catch (e) {
+    console.error("[stars] confirm failed:", e);
+    await ctx.reply("❌ Оплата получена, но активация не прошла. Сохраните чек и обратитесь в поддержку.").catch(() => {});
+  }
+});
+
 // Дожидаемся API чтобы перед стартом получить публичный конфиг и translations.
 console.log("[Bot] Connecting to API...");
 await waitForApi();

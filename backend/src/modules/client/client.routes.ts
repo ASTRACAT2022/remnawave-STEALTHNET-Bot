@@ -25,7 +25,7 @@ import {
 } from "../notification/telegram-notify.service.js";
 import { requireClientAuth } from "./client.middleware.js";
 import { remnaCreateUser, remnaUpdateUser, isRemnaConfigured, remnaGetUser, remnaGetUserByUsername, remnaGetUserByEmail, remnaGetUserByTelegramId, extractRemnaUuid, remnaUsernameFromClient, remnaGetUserHwidDevices, remnaDeleteUserHwidDevice, encryptSubscriptionUrlInPlace, remnaRevokeUserSubscription } from "../remna/remna.client.js";
-import { sendVerificationEmail, sendLinkEmailVerification, isSmtpConfigured } from "../mail/mail.service.js";
+import { sendVerificationEmail, sendLinkEmailVerification, sendPasswordResetEmail, isSmtpConfigured } from "../mail/mail.service.js";
 import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
 import { activateTariffForClient, activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
 import { upsertPrimarySubscription, upsertSubscriptionByRemnaUuid } from "../subscription/subscription.helpers.js";
@@ -44,6 +44,7 @@ import { createLavaInvoice, isLavaConfigured } from "../lava/lava.service.js";
 import { createLavatopInvoice, isLavatopConfigured } from "../lavatop/lavatop.service.js";
 import { createOverpayPayformOrder, isOverpayConfigured } from "../overpay/overpay.service.js";
 import { createFreekassaOrder, isFreekassaConfigured, normalizeFreekassaPaymentSystem, type FreekassaPaymentMethod } from "../freekassa/freekassa.service.js";
+import { createTelegramStarsInvoice } from "../telegram-stars/telegram-stars.service.js";
 import { applyPersonalDiscount } from "./personal-discount.js";
 import { getBotByToken, getPrimaryBot, paymentSnapshotTopup, paymentSnapshotProduct, applyMarkup } from "../bot/bot.service.js";
 import { extractBotTokenFromRequest, optionalBot, type ReqWithBot } from "../bot/bot.middleware.js";
@@ -530,6 +531,84 @@ clientAuthRouter.post("/verify-email", async (req, res) => {
 
   const signToken = signClientToken(client.id);
   return res.status(201).json({ token: signToken, client: toClientShape(client) });
+});
+
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+
+// Запрос ссылки для сброса пароля (Forgot password). Отправляет на почту одноразовую
+// ссылку с токеном. Всегда отвечает одинаково, чтобы не раскрывать, существует ли email.
+clientAuthRouter.post("/forgot-password", async (req, res) => {
+  const body = forgotPasswordSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Invalid input" });
+
+  const email = body.data.email.trim().toLowerCase();
+  const client = await prisma.client.findUnique({ where: { email } });
+
+  if (client && client.passwordHash) {
+    const config = await getSystemConfig();
+    const smtpConfig = {
+      host: config.smtpHost || "",
+      port: config.smtpPort,
+      secure: config.smtpSecure,
+      user: config.smtpUser,
+      password: config.smtpPassword,
+      fromEmail: config.smtpFromEmail,
+      fromName: config.smtpFromName,
+    };
+    if (isSmtpConfigured(smtpConfig)) {
+      const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
+      const token = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 час
+      await prisma.pendingPasswordReset.create({
+        data: { clientId: client.id, token, expiresAt },
+      });
+      if (appUrl) {
+        const resetLink = `${appUrl}/cabinet/reset-password?token=${token}`;
+        const sendResult = await sendPasswordResetEmail(smtpConfig, email, resetLink, config.serviceName);
+        if (!sendResult.ok) {
+          console.warn("[forgot-password] Email send failed:", sendResult.error);
+        }
+      }
+    }
+  }
+
+  return res.json({ message: "Если этот email зарегистрирован, я отправил на него ссылку для сброса пароля." });
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8, "Минимум 8 символов"),
+});
+
+// Установка нового пароля по токену из письма сброса.
+clientAuthRouter.post("/reset-password", async (req, res) => {
+  const body = resetPasswordSchema.safeParse(req.body);
+  if (!body.success) {
+    return res.status(400).json({ message: "Некорректные данные", errors: body.error.flatten() });
+  }
+  const { token, newPassword } = body.data;
+
+  const pending = await prisma.pendingPasswordReset.findUnique({ where: { token } });
+  if (!pending) return res.status(400).json({ message: "Ссылка недействительна или уже использована" });
+  if (new Date() > pending.expiresAt) {
+    await prisma.pendingPasswordReset.delete({ where: { id: pending.id } }).catch(() => {});
+    return res.status(400).json({ message: "Ссылка истекла. Запросите сброс пароля заново." });
+  }
+
+  const client = await prisma.client.findUnique({ where: { id: pending.clientId } });
+  if (!client || client.isBlocked) {
+    await prisma.pendingPasswordReset.delete({ where: { id: pending.id } }).catch(() => {});
+    return res.status(400).json({ message: "Аккаунт не найден или заблокирован" });
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await prisma.$transaction([
+    prisma.client.update({ where: { id: client.id }, data: { passwordHash } }),
+    prisma.pendingPasswordReset.delete({ where: { id: pending.id } }),
+    prisma.pendingPasswordReset.deleteMany({ where: { clientId: client.id } }),
+  ]);
+
+  return res.json({ message: "Пароль успешно изменён. Войдите с новым паролем." });
 });
 
 const loginSchema = z.object({
@@ -2911,6 +2990,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
     tariffId: string | null;
     trialId: string | null;
     autoRenewEnabled: boolean;
+    /** Итоговый статус с учётом БД (expireAt) — чтобы возврат сразу показывал "EXPIRED". */
+    status: string;
     tariffMenuEmoji: string | null;
     /** кол-во докупленных доп. устройств. */
     extraDevices: number;
@@ -2937,6 +3018,7 @@ clientRouter.get("/subscription/all", async (req, res) => {
       extraDevices: true,
       extraDevicesMonthlyPrice: true,
       customName: true,
+      expireAt: true,
       tariff: { select: { id: true, name: true, menuEmoji: true } },
     },
     orderBy: { subscriptionIndex: "asc" },
@@ -2952,11 +3034,21 @@ clientRouter.get("/subscription/all", async (req, res) => {
   for (const sub of visible) {
     let remnaPayload: unknown = null;
     let tariffName = sub.tariff?.name?.trim() ?? "";
+    const now = Date.now();
+    let status = "PENDING";
+    // Итоговый статус: если подписка истекла по БД (refund/expireAt в прошлом) —
+    // показываем EXPIRED, даже если Remna ещё отвечает ACTIVE (revoke не выключает юзера).
+    if (sub.expireAt && new Date(sub.expireAt).getTime() <= now) {
+      status = "EXPIRED";
+    }
     if (sub.remnawaveUuid) {
       const r = await remnaGetUser(sub.remnawaveUuid);
       if (cryptOn) await encryptSubscriptionUrlInPlace(r.data);
       remnaPayload = r.data ?? null;
       if (!tariffName) tariffName = await resolveTariffDisplayName(r.data ?? null);
+      if (status === "PENDING" && r.data && typeof r.data === "object" && typeof (r.data as { status?: unknown }).status === "string") {
+        status = (r.data as { status: string }).status;
+      }
     }
     if (!tariffName) tariffName = "Тариф не выбран";
 
@@ -2972,6 +3064,7 @@ clientRouter.get("/subscription/all", async (req, res) => {
       tariffId: sub.tariff?.id ?? null,
       trialId: sub.trialId ?? null,
       autoRenewEnabled: sub.autoRenewEnabled === true,
+      status,
       tariffMenuEmoji: sub.tariff?.menuEmoji?.trim() || null,
       extraDevices: sub.extraDevices ?? 0,
       extraDevicesMonthlyPrice: sub.extraDevicesMonthlyPrice ?? 0,
@@ -4746,6 +4839,277 @@ clientRouter.post("/yoomoney/process-payment", async (req, res) => {
   await distributeReferralRewards(payment.id).catch((e) => console.error("[referral] yoomoney process-payment:", e));
 
   return res.json({ message: "Баланс пополнен", newBalance: updated.balance });
+});
+
+// ——— Telegram Stars (XTR) ——— приём оплаты Stars через Telegram Bot API.
+// Создаёт PENDING-платёж, конвертирует сумму в целое число Stars
+// (1 Star = telegramStarsRateRub ₽, ceil) и возвращает invoice-ссылку
+// (открывается в Mini App через WebApp.openInvoice или в чате бота).
+const createStarsPaymentSchema = z.object({
+  amount: z.number().positive().max(1e7).optional(),
+  currency: z.string().min(1).max(10).optional(),
+  description: z.string().max(500).optional(),
+  tariffId: z.string().min(1).optional(),
+  tariffPriceOptionId: z.string().min(1).optional(),
+  deviceCount: z.number().int().min(0).max(100).optional(),
+  proxyTariffId: z.string().min(1).optional(),
+  singboxTariffId: z.string().min(1).optional(),
+  wdttTariffId: z.string().min(1).optional(),
+  promoCode: z.string().max(50).optional(),
+  asAdditional: z.boolean().optional(),
+  asGift: z.boolean().optional(),
+  extendsSecondarySubId: z.string().min(1).max(64).optional(),
+  removeExtrasOnActivate: z.boolean().optional(),
+  extraOption: z.object({ kind: z.enum(["traffic", "devices", "servers"]), productId: z.string().min(1), targetSubscriptionId: z.string().min(1).optional() }).optional(),
+  customBuild: z.object({ days: z.number().int().min(1).max(360), devices: z.number().int().min(1).max(20), trafficGb: z.number().min(0).nullable().optional() }).optional(),
+});
+clientRouter.post("/payments/stars", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const parsed = createStarsPaymentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid input", errors: parsed.error.flatten() });
+  }
+  const config = await getSystemConfig();
+  const starsCfg = config as {
+    telegramStarsEnabled?: boolean;
+    telegramStarsRateRub?: number;
+    sellOptionsEnabled?: boolean;
+    sellOptionsTrafficEnabled?: boolean;
+    sellOptionsTrafficProducts?: SellOptionTrafficProduct[];
+    sellOptionsDevicesEnabled?: boolean;
+    sellOptionsDevicesProducts?: SellOptionDeviceProduct[];
+    sellOptionsServersEnabled?: boolean;
+    sellOptionsServersProducts?: SellOptionServerProduct[];
+  };
+  const rateRub = starsCfg.telegramStarsRateRub ?? 0;
+  if (!starsCfg.telegramStarsEnabled || rateRub <= 0) {
+    return res.status(503).json({ message: "Оплата Telegram Stars не настроена" });
+  }
+
+  const { amount: originalAmount, currency, description, tariffId, proxyTariffId, singboxTariffId, wdttTariffId: wdttTariffIdBody, promoCode: promoCodeStr, extraOption, customBuild: customBuildBody } = parsed.data;
+
+  let tariffIdToStore: string | null = null;
+  let proxyTariffIdToStore: string | null = null;
+  let singboxTariffIdToStore: string | null = null;
+  let wdttTariffIdToStore: string | null = null;
+  let finalAmount: number;
+  let currencyToUse: string;
+  let metadataExtra: Record<string, unknown> | null = null;
+
+  if (customBuildBody) {
+    const cfg = getCustomBuildConfig(config);
+    if (!cfg) return res.status(400).json({ message: "Гибкий тариф отключён" });
+    let { days, devices, trafficGb } = customBuildBody;
+    if (days > cfg.maxDays || devices > cfg.maxDevices) {
+      return res.status(400).json({ message: `Дни: 1–${cfg.maxDays}, устройств: 1–${cfg.maxDevices}` });
+    }
+    const trafficLimitBytes =
+      cfg.trafficMode === "per_gb" && trafficGb != null && trafficGb >= 0
+        ? Math.round(trafficGb * 1024 ** 3)
+        : null;
+    let amountCb = days * cfg.pricePerDay + devices * cfg.pricePerDevice;
+    if (cfg.trafficMode === "per_gb" && trafficGb != null && trafficGb > 0) amountCb += trafficGb * cfg.pricePerGb;
+    finalAmount = Math.round(amountCb * 100) / 100;
+    currencyToUse = cfg.currency.toUpperCase();
+    metadataExtra = {
+      customBuild: {
+        durationDays: days,
+        deviceLimit: devices,
+        trafficLimitBytes,
+        internalSquadUuids: [cfg.squadUuid],
+      },
+    };
+  } else if (extraOption) {
+    if (!starsCfg.sellOptionsEnabled) {
+      return res.status(400).json({ message: "Продажа опций отключена" });
+    }
+    if (extraOption.kind === "traffic") {
+      const product = starsCfg.sellOptionsTrafficEnabled && starsCfg.sellOptionsTrafficProducts?.find((p) => p.id === extraOption.productId);
+      if (!product) return res.status(400).json({ message: "Опция не найдена" });
+      finalAmount = Math.round(product.price * 100) / 100;
+      currencyToUse = product.currency.toUpperCase();
+      metadataExtra = { extraOption: { kind: "traffic", trafficBytes: Math.round(product.trafficGb * 1024 ** 3) } };
+    } else if (extraOption.kind === "devices") {
+      const product = starsCfg.sellOptionsDevicesEnabled && starsCfg.sellOptionsDevicesProducts?.find((p) => p.id === extraOption.productId);
+      if (!product) return res.status(400).json({ message: "Опция не найдена" });
+      const prorataCoef = extraOption.targetSubscriptionId ? await calculateDevicesProrataPriceCoefficient(extraOption.targetSubscriptionId) : await calculateDevicesProrataPriceCoefficientForPrimary(clientId);
+      finalAmount = Math.floor(product.price * prorataCoef);
+      currencyToUse = product.currency.toUpperCase();
+      metadataExtra = { extraOption: { kind: "devices", deviceCount: product.deviceCount, productPriceMonthly: product.price } };
+    } else {
+      const product = starsCfg.sellOptionsServersEnabled && starsCfg.sellOptionsServersProducts?.find((p) => p.id === extraOption.productId);
+      if (!product) return res.status(400).json({ message: "Опция не найдена" });
+      finalAmount = Math.round(product.price * 100) / 100;
+      currencyToUse = product.currency.toUpperCase();
+      metadataExtra = {
+        extraOption: {
+          kind: "servers",
+          squadUuid: product.squadUuid,
+          ...((product.trafficGb ?? 0) > 0 && { trafficBytes: Math.round((product.trafficGb ?? 0) * 1024 ** 3) }),
+        },
+      };
+    }
+    if (extraOption.targetSubscriptionId) {
+      metadataExtra = { ...metadataExtra, targetSubscriptionId: extraOption.targetSubscriptionId };
+    }
+  } else {
+    finalAmount = originalAmount ?? 0;
+    currencyToUse = (currency ?? "").toUpperCase();
+    if (tariffId) {
+      const tariff = await prisma.tariff.findUnique({
+        where: { id: tariffId },
+        include: { priceOptions: true },
+      });
+      if (!tariff) return res.status(400).json({ message: "Тариф не найден" });
+      if (parsed.data.extendsSecondarySubId) {
+        const { checkSubscriptionRenewalCooldown } = await import("../tariff/tariff-cooldown.service.js");
+        const cd = await checkSubscriptionRenewalCooldown(parsed.data.extendsSecondarySubId);
+        if (!cd.ok) return res.status(429).json({ message: cd.message, code: "TARIFF_COOLDOWN", daysLeft: cd.daysLeft });
+      }
+      tariffIdToStore = tariffId;
+      let unitPrice = tariff.price;
+      let effectiveDays = tariff.durationDays;
+      if (parsed.data.tariffPriceOptionId) {
+        const opt = (tariff.priceOptions ?? []).find((p) => p.id === parsed.data.tariffPriceOptionId);
+        if (opt) {
+          unitPrice = opt.price;
+          effectiveDays = opt.durationDays;
+        }
+      }
+      if (parsed.data.extendsSecondarySubId) {
+        const sub = await prisma.subscription.findUnique({
+          where: { id: parsed.data.extendsSecondarySubId },
+          select: { extraDevicesMonthlyPrice: true },
+        });
+        const monthlyPrice = sub?.extraDevicesMonthlyPrice ?? 0;
+        if (monthlyPrice > 0 && effectiveDays > 0) {
+          unitPrice += Math.round(monthlyPrice * (effectiveDays / 30) * 100) / 100;
+        }
+      }
+      const newExtras = Math.max(0, parsed.data.deviceCount ?? 0);
+      if (!parsed.data.extendsSecondarySubId && newExtras > 0) {
+        const { calcExtrasPrice } = await import("../tariff/extras-pricing.js");
+        const r = calcExtrasPrice(tariff.pricePerExtraDevice ?? 0, newExtras, tariff.deviceDiscountTiers, effectiveDays);
+        unitPrice += r.extrasTotal;
+      }
+      finalAmount = unitPrice;
+      if (!currency) currencyToUse = tariff.currency.toUpperCase();
+    }
+    if (proxyTariffId) {
+      const proxyTariff = await prisma.proxyTariff.findUnique({ where: { id: proxyTariffId } });
+      if (!proxyTariff || !proxyTariff.enabled) return res.status(400).json({ message: "Прокси-тариф не найден" });
+      proxyTariffIdToStore = proxyTariffId;
+      if (originalAmount == null) finalAmount = proxyTariff.price;
+      if (!currency) currencyToUse = proxyTariff.currency.toUpperCase();
+    }
+    if (singboxTariffId) {
+      const singboxTariff = await prisma.singboxTariff.findUnique({ where: { id: singboxTariffId } });
+      if (!singboxTariff || !singboxTariff.enabled) return res.status(400).json({ message: "Тариф Sing-box не найден" });
+      singboxTariffIdToStore = singboxTariffId;
+      if (originalAmount == null) finalAmount = singboxTariff.price;
+      if (!currency) currencyToUse = singboxTariff.currency.toUpperCase();
+    }
+    if (wdttTariffIdBody) {
+      const wdttTariff = await prisma.wdttTariff.findUnique({ where: { id: wdttTariffIdBody } });
+      if (!wdttTariff || !wdttTariff.enabled) return res.status(400).json({ message: "WDTT тариф не найден" });
+      wdttTariffIdToStore = wdttTariffIdBody;
+      if (originalAmount == null) finalAmount = wdttTariff.price;
+      if (!currency) currencyToUse = wdttTariff.currency.toUpperCase();
+    }
+    if (finalAmount <= 0 || !currencyToUse) {
+      return res.status(400).json({ message: "Укажите сумму и валюту" });
+    }
+  }
+
+  if (finalAmount < 1) {
+    return res.status(400).json({ message: "Минимальная сумма платежа — 1" });
+  }
+
+  const isTopupOnlyStars = !tariffIdToStore && !proxyTariffIdToStore && !singboxTariffIdToStore && !wdttTariffIdToStore && !customBuildBody && !extraOption;
+  let personalDiscountPercent = 0;
+  if (!isTopupOnlyStars) {
+    const pd = await applyPersonalDiscount(finalAmount, clientId);
+    if (pd.personalDiscountPercent > 0) {
+      finalAmount = pd.amount;
+      personalDiscountPercent = pd.personalDiscountPercent;
+    }
+  }
+
+  let promoCodeRecord: { id: string } | null = null;
+  if (promoCodeStr?.trim() && !extraOption) {
+    const result = await validatePromoCode(promoCodeStr.trim(), clientId);
+    if (!result.ok) return res.status(result.status).json({ message: result.error });
+    const promo = result.promo;
+    if (promo.type !== "DISCOUNT") return res.status(400).json({ message: "Этот промокод не даёт скидку на оплату" });
+    if (promo.discountPercent && promo.discountPercent > 0) {
+      finalAmount = Math.max(0, finalAmount - finalAmount * promo.discountPercent / 100);
+    }
+    if (promo.discountFixed && promo.discountFixed > 0) {
+      finalAmount = Math.max(0, finalAmount - promo.discountFixed);
+    }
+    finalAmount = Math.round(finalAmount * 100) / 100;
+    if (finalAmount <= 0) return res.status(400).json({ message: "Итоговая сумма не может быть 0" });
+    promoCodeRecord = promo;
+  }
+
+  const starsCount = Math.max(1, Math.ceil(finalAmount / rateRub));
+
+  const orderId = randomUUID();
+  const personalDiscountMeta = personalDiscountPercent > 0 ? { personalDiscountPercent } : null;
+  const paymentMetaObj: Record<string, unknown> = { starsCount, starsRateRub: rateRub };
+  if (metadataExtra) Object.assign(paymentMetaObj, metadataExtra);
+  if (promoCodeRecord) {
+    paymentMetaObj.promoCodeId = promoCodeRecord.id;
+    paymentMetaObj.originalAmount = metadataExtra ? finalAmount : (originalAmount ?? finalAmount);
+  }
+  if (personalDiscountMeta) Object.assign(paymentMetaObj, personalDiscountMeta);
+  const paymentMeta = Object.keys(paymentMetaObj).length > 0 ? paymentMetaObj : null;
+  const snap = isTopupOnlyStars ? await paymentSnapshotTopup(clientId, finalAmount) : await paymentSnapshotProduct(clientId, finalAmount);
+  const payment = await createPayment({
+    data: asPaymentUncheckedCreate({
+      clientId,
+      orderId,
+      amount: snap.amount,
+      currency: currencyToUse,
+      status: "PENDING",
+      provider: "telegram_stars",
+      tariffId: tariffIdToStore,
+      tariffPriceOptionId: parsed.data.tariffPriceOptionId ?? null,
+      deviceCount: parsed.data.deviceCount ?? null,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      metadata: paymentMeta ? JSON.stringify(paymentMeta) : null,
+    }),
+  });
+
+  const serviceName = config.serviceName?.trim() || "STEALTHNET";
+  const invoice = await createTelegramStarsInvoice({
+    paymentId: payment.id,
+    title: "ASTRACAT",
+    description: description?.trim() || (tariffIdToStore ? `Подписка ${serviceName}` : wdttTariffIdToStore ? `WDTT ${serviceName}` : metadataExtra ? `Опция ${serviceName}` : `Пополнение баланса ${serviceName}`),
+    starsCount,
+    currency: currencyToUse,
+  });
+  if (!invoice.ok) {
+    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } }).catch(() => {});
+    return res.status(502).json({ message: invoice.error });
+  }
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { externalId: invoice.invoiceUrl },
+  });
+
+  return res.status(201).json({
+    invoiceUrl: invoice.invoiceUrl,
+    orderId,
+    paymentId: payment.id,
+    starsCount,
+    finalAmount: snap.amount,
+    currency: currencyToUse,
+    discountApplied: promoCodeRecord ? true : false,
+  });
 });
 
 // ——— ЮMoney: форма перевода (оплата картой). Пополнение баланса, тариф или опция ———

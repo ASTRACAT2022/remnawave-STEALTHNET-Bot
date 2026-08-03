@@ -436,6 +436,8 @@ export function SettingsPage() {
         referralPercentLevel2: (data as AdminSettings).referralPercentLevel2 ?? 10,
         referralPercentLevel3: (data as AdminSettings).referralPercentLevel3 ?? 10,
         plategaMethods: (data as AdminSettings).plategaMethods ?? DEFAULT_PLATEGA_METHODS,
+        telegramStarsEnabled: (data as AdminSettings).telegramStarsEnabled ?? false,
+        telegramStarsRateRub: (data as AdminSettings).telegramStarsRateRub ?? 1,
         botButtons: (() => {
           const raw = (data as AdminSettings).botButtons;
           const loaded = Array.isArray(raw) ? raw : [];
@@ -795,6 +797,8 @@ export function SettingsPage() {
         freekassaShopId: settings.freekassaShopId ?? null,
         freekassaApiKey: settings.freekassaApiKey && settings.freekassaApiKey !== "********" ? settings.freekassaApiKey : undefined,
         freekassaSecretWord2: settings.freekassaSecretWord2 && settings.freekassaSecretWord2 !== "********" ? settings.freekassaSecretWord2 : undefined,
+        telegramStarsEnabled: settings.telegramStarsEnabled ?? false,
+        telegramStarsRateRub: settings.telegramStarsRateRub ?? 1,
         groqApiKey: settings.groqApiKey && settings.groqApiKey !== "********" ? settings.groqApiKey : undefined,
         groqModel: settings.groqModel ?? undefined,
         groqFallback1: settings.groqFallback1 ?? undefined,
@@ -2955,6 +2959,61 @@ export function SettingsPage() {
                         />
                         <p className="text-xs text-muted-foreground">{t("admin.settings.freekassa_secret_word2_hint")}</p>
                       </div>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <Button type="submit" disabled={saving} className="min-w-[140px]">
+                        {saving ? t("admin.settings.saving") : t("admin.settings.save")}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible defaultOpen={false} className="group mt-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-t-lg text-left transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <CardHeader className="pointer-events-none [&_.chevron]:transition-transform [&_.chevron]:duration-200 group-data-[state=open]:[&_.chevron]:rotate-180">
+                      <div className="flex items-center justify-between pr-2">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="h-5 w-5 text-primary" />
+                          <CardTitle>Telegram Stars</CardTitle>
+                          <span className="text-xs font-normal text-muted-foreground">{t("admin.settings.stars_desc_short")}</span>
+                        </div>
+                        <ChevronDown className="chevron h-5 w-5 shrink-0 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {t("admin.settings.stars_register")}
+                      </p>
+                    </CardHeader>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 border-t pt-4">
+                    <div className="flex items-center justify-between gap-4 p-4 rounded-xl border bg-card/50">
+                      <div className="space-y-1">
+                        <Label className="text-base font-semibold">{t("admin.settings.stars_enabled")}</Label>
+                        <p className="text-sm text-muted-foreground">{t("admin.settings.stars_enabled_hint")}</p>
+                      </div>
+                      <Switch
+                        checked={settings.telegramStarsEnabled ?? false}
+                        onCheckedChange={(checked) => setSettings(s => s ? { ...s, telegramStarsEnabled: checked } : s)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("admin.settings.stars_rate")}</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        step="0.1"
+                        value={settings.telegramStarsRateRub ?? 1}
+                        disabled={!settings.telegramStarsEnabled}
+                        onChange={(e) => setSettings(s => s ? { ...s, telegramStarsRateRub: parseFloat(e.target.value) || 0 } : s)}
+                        placeholder={t("admin.settings.stars_rate_placeholder")}
+                      />
+                      <p className="text-xs text-muted-foreground">{t("admin.settings.stars_rate_hint")}</p>
                     </div>
                     <div className="pt-2 border-t">
                       <Button type="submit" disabled={saving} className="min-w-[140px]">

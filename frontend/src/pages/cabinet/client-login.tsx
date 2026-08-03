@@ -29,6 +29,11 @@ export function ClientLoginPage() {
   const [emailError, setEmailError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotError, setForgotError] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
   const [brand, setBrand] = useState<{ serviceName: string; logo: string | null }>({
     serviceName: "",
     logo: null,
@@ -420,6 +425,32 @@ export function ClientLoginPage() {
     }
   }
 
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotError("");
+    const err = validateEmail(forgotEmail);
+    if (err) {
+      setForgotError(err);
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      await api.clientForgotPassword(forgotEmail.trim());
+      setForgotSent(true);
+    } catch (reason) {
+      setForgotError(reason instanceof Error ? reason.message : t("cabinet.login.forgot_password_error"));
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
+  function openForgotMode() {
+    setError("");
+    setForgotError("");
+    setForgotSent(false);
+    setForgotMode(true);
+  }
+
   return (
     <div className="astracat-auth ac-auth--login min-h-svh flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background blobs */}
@@ -458,6 +489,54 @@ export function ClientLoginPage() {
             </div>
 
           
+            {forgotMode ? (
+              <form onSubmit={handleForgotSubmit} className="space-y-4">
+                {forgotSent ? (
+                  <div className="rounded-md bg-primary/10 text-primary text-sm p-3">
+                    {t("cabinet.login.forgot_password_sent")}
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="forgot-email">Email</Label>
+                      <Input
+                        id="forgot-email"
+                        type="email"
+                        name="forgot_email"
+                        placeholder={t("cabinet.login.forgot_password_placeholder")}
+                        value={forgotEmail}
+                        onChange={(e) => {
+                          setForgotEmail(e.target.value);
+                          if (forgotError) setForgotError("");
+                        }}
+                        required
+                        autoComplete="off"
+                        data-form-type="other"
+                        className="ac-auth-input h-12 rounded-xl transition-all"
+                      />
+                    </div>
+                    {forgotError && (
+                      <div className="rounded-md bg-destructive/10 text-destructive text-sm p-3">
+                        {forgotError}
+                      </div>
+                    )}
+                    <Button type="submit" className="ac-auth-submit w-full h-14 rounded-2xl text-base font-bold transition-all gap-2" disabled={forgotLoading}>
+                      {forgotLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {t("cabinet.login.forgot_password_sending")}
+                        </>
+                      ) : (
+                        t("cabinet.login.forgot_password_send")
+                      )}
+                    </Button>
+                    <Button type="button" variant="ghost" className="w-full text-xs text-muted-foreground" onClick={openForgotMode}>
+                      {t("cabinet.login.forgot_password_back")}
+                    </Button>
+                  </>
+                )}
+              </form>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Скрытое поле: iOS/Safari реже выводит панель автозаполнения на каждый символ */}
               <input type="text" name="prevent_autofill" autoComplete="off" tabIndex={-1} className="absolute opacity-0 pointer-events-none h-0 w-0 overflow-hidden" aria-hidden />
@@ -485,6 +564,11 @@ export function ClientLoginPage() {
               <div className="space-y-2">
                 <Label htmlFor="password">{t("cabinet.login.password_label")}</Label>
                 <Input id="password" type="password" name="login_password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="off" data-form-type="other" className="ac-auth-input h-12 rounded-xl transition-all" />
+              </div>
+              <div className="flex justify-end">
+                <button type="button" className="text-sm text-primary hover:underline" onClick={openForgotMode}>
+                  {t("cabinet.login.forgot_password_link")}
+                </button>
               </div>
               <Button type="submit" className="ac-auth-submit w-full h-14 rounded-2xl text-base font-bold transition-all gap-2" disabled={loading}>
                 {loading ? t("cabinet.login.submit_loading") : t("cabinet.login.submit")}
@@ -568,6 +652,7 @@ export function ClientLoginPage() {
                 </Link>
               </p>
             </form>
+            )}
           
         
           </div>

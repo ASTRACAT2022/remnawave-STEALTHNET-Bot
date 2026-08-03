@@ -16,6 +16,8 @@ declare global {
         showPopup?: (params: { title?: string; message?: string }) => void;
         /** Открыть ссылку во внешнем браузере (кастомные URL-схемы не поддерживаются, только https) */
         openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+        /** Открыть счёт Telegram Stars (нативный платёжный оверлей Telegram). Доступен только в Mini App. */
+        openInvoice?: (url: string, callback?: (status: "paid" | "cancelled" | "failed" | "pending" | string) => void) => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
         themeParams?: Record<string, string>;

@@ -127,6 +127,57 @@ export async function sendLinkEmailVerification(
 export type EmailAttachment = { filename: string; content: Buffer };
 
 /**
+ * Письмо для сброса пароля (Forgot password)
+ */
+export async function sendPasswordResetEmail(
+  config: SmtpConfig,
+  to: string,
+  resetLink: string,
+  serviceName: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSmtpConfigured(config)) {
+    return { ok: false, error: "SMTP not configured" };
+  }
+
+  const auth = config.user && config.password ? { user: config.user, pass: config.password } : undefined;
+  const transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+  });
+
+  const from = config.fromName
+    ? `"${config.fromName}" <${config.fromEmail}>`
+    : config.fromEmail!;
+
+  const subject = `Сброс пароля — ${serviceName}`;
+  const html = `
+    <p>Здравствуйте!</p>
+    <p>Вы запросили сброс пароля в ${serviceName}. Перейдите по ссылке, чтобы установить новый пароль:</p>
+    <p><a href="${resetLink}">${resetLink}</a></p>
+    <p>Ссылка действительна 1 час.</p>
+    <p>Если вы не запрашивали сброс пароля, проигнорируйте это письмо.</p>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      html,
+    });
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
+}
+
+/**
  * Отправить произвольное письмо (для рассылки). Опционально — вложения.
  */
 export async function sendEmail(

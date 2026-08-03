@@ -502,6 +502,47 @@ botAdminRouter.patch("/payments/:id/mark-paid", async (req, res) => {
   });
 });
 
+/**
+ * POST /api/bot-admin/payments/stars/confirm
+ * Подтверждение оплаты Telegram Stars. Вызывается ботом из обработчика
+ * message:successful_payment (payload = payment.id). Авторизация — только по
+ * X-Telegram-Bot-Token == BOT_TOKEN (бот сам себе), без роли админа:
+ * плательщик Stars может не быть bot-admin'ом.
+ */
+botAdminRouter.post("/payments/stars/confirm", async (req, res) => {
+  const token = getBotToken(req);
+  const expected = (process.env.BOT_TOKEN ?? "").trim();
+  if (!token || !expected || token !== expected) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const body = (req.body ?? {}) as { payload?: unknown; paymentId?: unknown };
+  const paymentId = typeof body.payload === "string" && body.payload.length > 0
+    ? body.payload
+    : typeof body.paymentId === "string" && body.paymentId.length > 0
+      ? body.paymentId
+      : null;
+  if (!paymentId) return res.status(400).json({ message: "payload/paymentId required" });
+
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    select: { id: true, status: true, provider: true },
+  });
+  if (!payment) return res.status(404).json({ message: "Payment not found" });
+  if (payment.provider !== "telegram_stars") {
+    return res.status(400).json({ message: "Платёж создан не через Telegram Stars" });
+  }
+
+  const result = await markPaymentPaid(paymentId);
+  if (!result.ok) return res.status(404).json({ message: result.error ?? "Payment not found" });
+  return res.json({
+    ok: true,
+    payment: result.payment,
+    activation: result.activation,
+    proxySlots: result.proxySlots,
+    balanceCredited: result.balanceCredited,
+  });
+});
+
 // ——— Рассылка ———
 
 /** GET /api/bot-admin/broadcast/count */

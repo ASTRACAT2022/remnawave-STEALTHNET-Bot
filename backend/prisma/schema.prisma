@@ -233,6 +233,8 @@ model Client {
   wdttCreditsExpiresAt  DateTime? @map("wdtt_credits_expires_at")
   // WDTT слоты
   wdttSlots             WdttSlot[]
+  // Одноразовые токены сброса пароля (Forgot password)
+  pendingPasswordResets PendingPasswordReset[]
 
   // ——— Боты-клоны (clone-bots) ———
   botId                      String?                @map("bot_id")
@@ -389,6 +391,21 @@ model PendingEmailRegistration {
   @@index([verificationToken])
   @@index([email])
   @@map("pending_email_registrations")
+}
+
+// Одноразовый токен для сброса пароля (ссылка из письма «Забыли пароль?»)
+model PendingPasswordReset {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([expiresAt])
+  @@map("pending_password_resets")
 }
 
 model Payment {
