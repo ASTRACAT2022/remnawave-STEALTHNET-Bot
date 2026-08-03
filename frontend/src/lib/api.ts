@@ -2346,8 +2346,14 @@ export const api = {
     return request("/client/set-password", { method: "POST", body: JSON.stringify(data), token });
   },
 
+  /** Возврат платежа: деактивирует подписку в Remna и зачисляет сумму на баланс */
+  async clientRefund(token: string, data: { paymentId: string; subscriptionId?: string }): Promise<{ ok: boolean; message: string; refundedAmount: number; currency: string }> {
+    return request("/client/refund", { method: "POST", body: JSON.stringify(data), token });
+  },
+
   async clientCompleteOnboarding(token: string): Promise<{ message: string }> {
     return request("/client/complete-onboarding", { method: "POST", token });
+
   },
 
   /** Запросить код для привязки Telegram через бота (без авторизации по токену не нужен) */

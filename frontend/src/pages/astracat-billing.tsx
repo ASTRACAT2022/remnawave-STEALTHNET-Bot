@@ -245,34 +245,25 @@ function Refunds({ payments, subscriptions, token, profile, reload, inform }: { 
     setBusy(true);
     setError(null);
     try {
-      // Возврат средств на баланс: используем topup-like механизм через баланс клиента
-      // На практике нужно вызывать реальный API возврата. Здесь — зачисление на баланс через клиентский endpoint.
-      // Если backend поддерживает /client/refund — используй его. Иначе — отражаем локально + уведомляем поддержку.
+      // Вызываем реальный API возврата — деактивирует подписку + зачисляет баланс
+      const result = await api.clientRefund(token, { paymentId: selected.id, subscriptionId: subId || undefined });
+
       const record: RefundRecord = {
         id: `rfnd_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         paymentId: selected.id,
         amount: selected.amount,
         currency: selected.currency,
-        status: "pending",
+        status: result.ok ? "approved" : "pending",
         reason: "Возврат оформлен через личный кабинет",
         subscriptionId: subId,
         subscriptionName: subscriptions.find((s) => s.id === subId)?.plan ?? "—",
         createdAt: new Date().toISOString(),
       };
-      // Попытка вызвать API возврата (если доступен)
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (api as any).clientRequestRefund?.(token, { paymentId: selected.id, subscriptionId: subId });
-        record.status = "approved";
-      } catch {
-        // API не реализован — оставляем статус pending, деньги будут зачислены поддержкой
-        record.status = "pending";
-      }
       const updated = [record, ...history];
       setHistory(updated);
       saveRefunds(updated);
       await reload();
-      inform(record.status === "approved" ? `Возврат ${money(selected.amount, selected.currency)} зачислен на баланс` : "Заявка на возврат принята. Средства будут зачислены на баланс в течение 1-2 рабочих дней");
+      inform(result.message);
       setSelected(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось оформить возврат");
@@ -280,6 +271,7 @@ function Refunds({ payments, subscriptions, token, profile, reload, inform }: { 
       setBusy(false);
     }
   };
+
 
   return (
     <>
@@ -560,7 +552,7 @@ function BillingModal({ name, token, tariffCategories, olcrtcCategories, subscri
   return <OrderModal token={token} tariffCategories={tariffCategories} olcrtcCategories={olcrtcCategories} subscriptions={subscriptions} initialProduct={name === "olcrtcOrder" ? "olcrtc" : "vpn"} close={close} reload={reload} inform={inform} />;
 }
 
-type CheckoutMethod = "balance" | "yookassa" | "yoomoney" | "cryptopay" | "heleket" | "lava" | "lavatop" | "freekassa" | "overpay" | "platega";
+type CheckoutMethod = "balance" | "yookassa" | "yoomoney" | "cryptopay" | "heleket" | "lava" | "lavatop" | "freekassa-sbp" | "freekassa-card" | "overpay" | "platega";
 type CheckoutProduct = "vpn" | "olcrtc";
 
 function useAvailableCheckoutMethods(includeBalance: boolean) {
@@ -575,7 +567,10 @@ function useAvailableCheckoutMethods(includeBalance: boolean) {
     if (config.heleketEnabled) result.push({ id: "heleket", label: "Heleket" });
     if (config.lavaEnabled) result.push({ id: "lava", label: "LAVA" });
     if (config.lavatopEnabled) result.push({ id: "lavatop", label: "Lava.top" });
-    if (config.freekassaEnabled) result.push({ id: "freekassa", label: "FreeKassa" });
+    if (config.freekassaEnabled) {
+      result.push({ id: "freekassa-sbp", label: "FreeKassa (СБП)" });
+      result.push({ id: "freekassa-card", label: "FreeKassa (Карта)" });
+    }
     if (config.overpayEnabled) result.push({ id: "overpay", label: "Overpay" });
     if (config.plategaMethods?.length) result.push({ id: "platega", label: "Platega" });
     return result;
@@ -590,7 +585,8 @@ async function startExternalPayment(token: string, method: Exclude<CheckoutMetho
   if (method === "heleket") { const result = await api.heleketCreatePayment(token, payload); return result.payUrl; }
   if (method === "lava") { const result = await api.lavaCreatePayment(token, payload); return result.payUrl; }
   if (method === "lavatop") { const result = await api.lavatopCreatePayment(token, payload); return result.payUrl; }
-  if (method === "freekassa") { const result = await api.freekassaCreatePayment(token, payload); return result.payUrl; }
+  if (method === "freekassa-sbp") { const result = await api.freekassaCreatePayment(token, { ...payload, method: "sbp" }); return result.payUrl; }
+  if (method === "freekassa-card") { const result = await api.freekassaCreatePayment(token, { ...payload, method: "cardRub" }); return result.payUrl; }
   if (method === "overpay") { const result = await api.overpayCreatePayment(token, payload); return result.payUrl; }
   const result = await api.clientCreatePlategaPayment(token, { ...payload, paymentMethod: plategaMethod }); return result.paymentUrl;
 }

@@ -1508,6 +1508,7 @@ clientRouter.post("/set-password", requireClientAuth, async (req, res) => {
   return res.json({ message: "Пароль установлен" });
 });
 
+
 clientRouter.post("/complete-onboarding", requireClientAuth, async (req, res) => {
   const client = (req as unknown as { client: { id: string } }).client;
   await prisma.client.update({
@@ -1516,6 +1517,91 @@ clientRouter.post("/complete-onboarding", requireClientAuth, async (req, res) =>
   });
   return res.json({ message: "Onboarding завершён" });
 });
+
+// ─── POST /client/refund ────────────────────────────────────────────────────
+// Возврат платежа: деактивирует подписку в Remna, зачисляет сумму на баланс.
+// Условия: платёж PAID, сумма >= 100, не старше 3 дней, не возвращён ранее.
+const refundSchema = z.object({
+  paymentId: z.string().min(1),
+  subscriptionId: z.string().optional(),
+});
+
+const REFUND_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const REFUND_MIN_AMOUNT = 100;
+
+clientRouter.post("/refund", requireClientAuth, async (req, res) => {
+  const client = (req as unknown as { client: { id: string } }).client;
+  const body = refundSchema.safeParse(req.body);
+  if (!body.success) {
+    return res.status(400).json({ message: "Некорректные данные" });
+  }
+
+  const { paymentId, subscriptionId } = body.data;
+
+  // Найти платёж, принадлежащий клиенту
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    select: { id: true, clientId: true, status: true, amount: true, currency: true, paidAt: true, createdAt: true, refundedAt: true },
+  });
+
+  if (!payment) return res.status(404).json({ message: "Платёж не найден" });
+  if (payment.clientId !== client.id) return res.status(403).json({ message: "Нет доступа" });
+  if (payment.status !== "PAID") return res.status(400).json({ message: "Возврат доступен только для оплаченных платежей" });
+  if (payment.refundedAt) return res.status(400).json({ message: "Возврат по этому платежу уже оформлен" });
+
+  const amount = Number(payment.amount);
+  if (amount < REFUND_MIN_AMOUNT) {
+    return res.status(400).json({ message: `Возврат доступен только для платежей от ${REFUND_MIN_AMOUNT} ₽` });
+  }
+
+  const paidAt = payment.paidAt ?? payment.createdAt;
+  if (Date.now() - new Date(paidAt).getTime() > REFUND_WINDOW_MS) {
+    return res.status(400).json({ message: "Срок возврата (3 дня) истёк" });
+  }
+
+  // Если указана подписка — деактивировать её в Remna
+  if (subscriptionId && isRemnaConfigured()) {
+    try {
+      const sub = await prisma.subscription.findUnique({
+        where: { id: subscriptionId },
+        select: { id: true, ownerId: true, remnawaveUuid: true },
+      });
+      if (sub && sub.ownerId === client.id && sub.remnawaveUuid) {
+        await remnaRevokeUserSubscription(sub.remnawaveUuid);
+        // Пометить подписку как отозванную (статус TERMINATED)
+        await prisma.subscription.update({
+          where: { id: sub.id },
+          data: { status: "TERMINATED" },
+        }).catch(() => { /* игнорируем если поле не существует */ });
+      }
+    } catch (e) {
+      console.error("[refund] remna revoke error:", e);
+      // Не прерываем возврат если Remna недоступна
+    }
+  }
+
+  // Зачислить сумму на баланс и пометить платёж как возвращённый
+  await prisma.$transaction([
+    prisma.client.update({
+      where: { id: client.id },
+      data: { balance: { increment: amount } },
+    }),
+    prisma.payment.update({
+      where: { id: paymentId },
+      data: { refundedAt: new Date(), status: "REFUNDED" },
+    }),
+  ]);
+
+  console.log(`[refund] client=${client.id} payment=${paymentId} amount=${amount} sub=${subscriptionId ?? "—"}`);
+
+  return res.json({
+    ok: true,
+    message: `Возврат ${amount} ${payment.currency} зачислен на баланс`,
+    refundedAmount: amount,
+    currency: payment.currency,
+  });
+});
+
 
 const updateProfileSchema = z.object({
   preferredLang: z.string().max(10).optional(),
