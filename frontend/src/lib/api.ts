@@ -2347,7 +2347,7 @@ export const api = {
   },
 
   /** Возврат платежа: деактивирует подписку в Remna и зачисляет сумму на баланс */
-  async clientRefund(token: string, data: { paymentId: string; subscriptionId?: string }): Promise<{ ok: boolean; message: string; refundedAmount: number; currency: string }> {
+  async clientRefund(token: string, data: { paymentId: string; subscriptionId?: string }): Promise<{ ok: boolean; message: string; refundedAmount: number; currency: string; revokedSubscriptions?: string[] }> {
     return request("/client/refund", { method: "POST", body: JSON.stringify(data), token });
   },
 

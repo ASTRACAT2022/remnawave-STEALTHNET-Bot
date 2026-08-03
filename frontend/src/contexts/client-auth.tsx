@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { ClientProfile, ClientAuthResponse } from "@/lib/api";
+import type { ClientProfile, ClientAuthResponse, ClientAuthRequires2FA } from "@/lib/api";
 import { api } from "@/lib/api";
 
 const STORAGE_TOKEN = "stealthnet_client_token";
@@ -26,7 +26,7 @@ type ClientAuthValue = {
   loginByApple: (idToken: string) => Promise<void>;
   /** Авторизация через deep-link (tg:// протокол). Принимает ответ от telegram-login-check */
   loginByTelegramDeepLink: (res: { token?: string; client?: ClientProfile; requires2FA?: boolean; tempToken?: string }) => void;
-  verifyEmail: (token: string) => Promise<void>;
+  verifyEmail: (token: string) => Promise<ClientAuthResponse | ClientAuthRequires2FA | undefined>;
   /** Подтвердить привязку email по токену из письма */
   verifyLinkEmail: (verificationToken: string) => Promise<void>;
   /** Ввести код 2FA после ответа requires2FA (пароль/Telegram уже проверены) */
@@ -211,16 +211,18 @@ export function ClientAuthProvider({ children }: { children: React.ReactNode }) 
     }
   }, []);
 
-  const verifyEmail = useCallback(async (token: string) => {
+  const verifyEmail = useCallback(async (token: string): Promise<ClientAuthResponse | ClientAuthRequires2FA | undefined> => {
     const res = await api.clientVerifyEmail(token);
     if ("requires2FA" in res && res.requires2FA) {
       setState((prev) => ({ ...prev, miniappAuthLoading: false, miniappAuthAttempted: true, pending2FAToken: res.tempToken }));
-      return;
+      return res;
     }
     if (isAuthResponse(res)) {
       setState({ token: res.token, client: res.client, miniappAuthLoading: false, miniappAuthAttempted: true, pending2FAToken: null, isNewTelegramUser: true });
       saveState(res.token, res.client);
+      return res;
     }
+    return undefined;
   }, []);
 
   const verifyLinkEmail = useCallback(async (verificationToken: string) => {

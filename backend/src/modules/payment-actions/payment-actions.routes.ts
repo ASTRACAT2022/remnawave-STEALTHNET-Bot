@@ -15,6 +15,7 @@ import { z } from "zod";
 import { prisma } from "../../db.js";
 import { requireAuth, requireAdminSection } from "../auth/middleware.js";
 import { logAdmin } from "../audit/audit.service.js";
+import { revokePaymentServices } from "../subscription/refund-revoke.service.js";
 
 function asyncRoute(fn: (req: express.Request, res: express.Response) => Promise<void | express.Response>) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -104,6 +105,13 @@ paymentActionsRouter.post(
     let reversedReferralAmount = 0;
     let reversedReferralCount = 0;
 
+    // 0. Отзываем услуги, активированные этим платежом (VPN-подписка в Remna,
+    //    WDTT/proxy/singbox слоты) — иначе после возврата услуги продолжают работать.
+    const revokeResult = await revokePaymentServices(payment.id).catch((e) => {
+      console.error("[refund] revokePaymentServices failed:", e);
+      return { revokedSubscriptions: [], revokedWdttSlots: 0, revokedProxySlots: 0, revokedSingboxSlots: 0 };
+    });
+
     // 1. Зачисление на баланс — если pay-by-balance, увеличиваем (откатываем decrement).
     //    Для других провайдеров — это будет «возврат на счёт» как goodwill credit.
     if (refundToBalance && payment.amount > 0) {
@@ -169,6 +177,10 @@ paymentActionsRouter.post(
       creditedToBalance,
       reversedReferralAmount,
       reversedReferralCount,
+      revokedSubscriptions: revokeResult.revokedSubscriptions,
+      revokedWdttSlots: revokeResult.revokedWdttSlots,
+      revokedProxySlots: revokeResult.revokedProxySlots,
+      revokedSingboxSlots: revokeResult.revokedSingboxSlots,
       reason: reason ?? null,
     });
 
@@ -179,6 +191,10 @@ paymentActionsRouter.post(
         creditedToBalance,
         reversedReferralAmount,
         reversedReferralCount,
+        revokedSubscriptions: revokeResult.revokedSubscriptions,
+        revokedWdttSlots: revokeResult.revokedWdttSlots,
+        revokedProxySlots: revokeResult.revokedProxySlots,
+        revokedSingboxSlots: revokeResult.revokedSingboxSlots,
       },
     });
   }),

@@ -28,9 +28,8 @@ export function ClientVerifyEmailPage() {
     verifiedRef.current = true;
     verifyEmail(token)
       .then((result) => {
-        // verifyEmail может возвращать auth token — пробуем получить его
-        const res = result as unknown as { token?: string; accessToken?: string } | null;
-        const tok = res?.token ?? res?.accessToken ?? null;
+        // verifyEmail возвращает auth token — по нему задаём пароль
+        const tok = result && "token" in result && typeof result.token === "string" ? result.token : null;
         setAuthToken(tok);
         setStatus("set-password");
       })

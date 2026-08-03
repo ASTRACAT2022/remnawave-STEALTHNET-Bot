@@ -29,6 +29,7 @@ import { sendVerificationEmail, sendLinkEmailVerification, isSmtpConfigured } fr
 import { createPlategaTransaction, isPlategaConfigured } from "../platega/platega.service.js";
 import { activateTariffForClient, activateTariffByPaymentId } from "../tariff/tariff-activation.service.js";
 import { upsertPrimarySubscription, upsertSubscriptionByRemnaUuid } from "../subscription/subscription.helpers.js";
+import { revokePaymentServices } from "../subscription/refund-revoke.service.js";
 import { saveRedirectAndBuildUrl } from "../payment-redirect/payment-redirect.util.js";
 import { createProxySlotsByPaymentId } from "../proxy/proxy-slots-activation.service.js";
 import { createSingboxSlotsByPaymentId } from "../singbox/singbox-slots-activation.service.js";
@@ -1541,13 +1542,12 @@ clientRouter.post("/refund", requireClientAuth, async (req, res) => {
   // Найти платёж, принадлежащий клиенту
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
-    select: { id: true, clientId: true, status: true, amount: true, currency: true, paidAt: true, createdAt: true, refundedAt: true },
+    select: { id: true, clientId: true, status: true, amount: true, currency: true, paidAt: true, createdAt: true },
   });
 
   if (!payment) return res.status(404).json({ message: "Платёж не найден" });
   if (payment.clientId !== client.id) return res.status(403).json({ message: "Нет доступа" });
   if (payment.status !== "PAID") return res.status(400).json({ message: "Возврат доступен только для оплаченных платежей" });
-  if (payment.refundedAt) return res.status(400).json({ message: "Возврат по этому платежу уже оформлен" });
 
   const amount = Number(payment.amount);
   if (amount < REFUND_MIN_AMOUNT) {
@@ -1559,26 +1559,14 @@ clientRouter.post("/refund", requireClientAuth, async (req, res) => {
     return res.status(400).json({ message: "Срок возврата (3 дня) истёк" });
   }
 
-  // Если указана подписка — деактивировать её в Remna
-  if (subscriptionId && isRemnaConfigured()) {
-    try {
-      const sub = await prisma.subscription.findUnique({
-        where: { id: subscriptionId },
-        select: { id: true, ownerId: true, remnawaveUuid: true },
-      });
-      if (sub && sub.ownerId === client.id && sub.remnawaveUuid) {
-        await remnaRevokeUserSubscription(sub.remnawaveUuid);
-        // Пометить подписку как отозванную (статус TERMINATED)
-        await prisma.subscription.update({
-          where: { id: sub.id },
-          data: { status: "TERMINATED" },
-        }).catch(() => { /* игнорируем если поле не существует */ });
-      }
-    } catch (e) {
-      console.error("[refund] remna revoke error:", e);
-      // Не прерываем возврат если Remna недоступна
-    }
-  }
+  // Отзываем услуги, активированные этим платежом (VPN-подписка в Remna,
+  // WDTT/proxy/singbox слоты). Подписка определяется по самому платежу
+  // (payment.subscriptionId / relation payments), а не по телу запроса —
+  // иначе возврат не отключает услугу, если клиент прислал неверный ID.
+  const revokeResult = await revokePaymentServices(paymentId, { ownerClientId: client.id }).catch((e) => {
+    console.error("[refund] revokePaymentServices failed:", e);
+    return { revokedSubscriptions: [], revokedWdttSlots: 0, revokedProxySlots: 0, revokedSingboxSlots: 0 };
+  });
 
   // Зачислить сумму на баланс и пометить платёж как возвращённый
   await prisma.$transaction([
@@ -1588,17 +1576,18 @@ clientRouter.post("/refund", requireClientAuth, async (req, res) => {
     }),
     prisma.payment.update({
       where: { id: paymentId },
-      data: { refundedAt: new Date(), status: "REFUNDED" },
+      data: { status: "REFUNDED" },
     }),
   ]);
 
-  console.log(`[refund] client=${client.id} payment=${paymentId} amount=${amount} sub=${subscriptionId ?? "—"}`);
+  console.log(`[refund] client=${client.id} payment=${paymentId} amount=${amount} sub=${subscriptionId ?? "—"} revokedSubs=${revokeResult.revokedSubscriptions.join(",") || "—"}`);
 
   return res.json({
     ok: true,
     message: `Возврат ${amount} ${payment.currency} зачислен на баланс`,
     refundedAmount: amount,
     currency: payment.currency,
+    revokedSubscriptions: revokeResult.revokedSubscriptions,
   });
 });
 
