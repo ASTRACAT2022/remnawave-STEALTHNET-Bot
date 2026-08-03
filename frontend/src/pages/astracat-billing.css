@@ -15,4 +15,27 @@
 @keyframes ac-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 .ac-device-sub-info { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 13px; background:var(--ac-page); border:1px solid var(--ac-border); margin-bottom:14px; }.ac-device-sub-badge { display:flex; align-items:center; gap:7px; font-weight:500; }.ac-device-sub-badge svg { color:var(--ac-primary); }.ac-device-sub-limit { font-size:13px; color:var(--ac-secondary); }.ac-device-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }.ac-device-card { display:flex; align-items:flex-start; gap:12px; padding:14px; border:1px solid var(--ac-border); background:var(--ac-surface); position:relative; transition:border-color .15s,box-shadow .15s; }.ac-device-card:hover { border-color:var(--ac-primary); box-shadow:0 3px 12px #00000010; }.ac-device-card-icon { font-size:28px; line-height:1; flex:0 0 auto; }.ac-device-card-body { flex:1; min-width:0; display:grid; gap:3px; }.ac-device-name { font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.ac-device-os { font-size:12px; color:var(--ac-secondary); }.ac-device-app { font-size:11px; color:var(--ac-primary); }.ac-device-dates { font-size:11px; color:var(--ac-secondary); margin-top:4px; }.ac-device-hwid { font-size:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ac-secondary); background:var(--ac-page); padding:2px 5px; border:1px solid var(--ac-border); display:block; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.ac-device-delete { position:absolute; top:10px; right:10px; border:1px solid var(--ac-border); background:var(--ac-surface); color:var(--ac-danger); width:28px; height:28px; display:grid; place-items:center; cursor:pointer; border-radius:var(--ac-radius); transition:background .12s,color .12s; }.ac-device-delete:hover { background:#fee8ef; border-color:var(--ac-danger); }.ac-device-delete:disabled { opacity:.4; cursor:not-allowed; }.ac-device-loading { display:flex; align-items:center; gap:12px; padding:30px; color:var(--ac-secondary); }.ac-device-spinner { width:20px; height:20px; border:2px solid var(--ac-border); border-top-color:var(--ac-primary); border-radius:50%; animation:ac-spin .7s linear infinite; flex:0 0 auto; }.ac-device-spinner--sm { width:14px; height:14px; }
 @keyframes ac-spin { to{transform:rotate(360deg)} }
+.ac-row-click { cursor:pointer; }
+.ac-chat-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.ac-chat-log { display:flex; flex-direction:column; gap:10px; max-height:46vh; overflow-y:auto; border:1px solid var(--ac-border); background:var(--ac-page); padding:12px; }
+.ac-chat-state { display:flex; align-items:center; justify-content:center; min-height:90px; color:var(--ac-secondary); font-size:13px; }
+.ac-chat-state .ac-device-spinner { width:22px; height:22px; }
+.ac-msg { display:flex; }
+.ac-msg--mine { justify-content:flex-end; }
+.ac-msg--theirs { justify-content:flex-start; }
+.ac-msg-bubble { max-width:82%; display:grid; gap:4px; padding:9px 11px; border:1px solid var(--ac-border); border-radius:var(--ac-radius); background:var(--ac-surface); }
+.ac-msg--mine .ac-msg-bubble { background:var(--ac-selected); border-color:color-mix(in srgb,var(--ac-primary) 30%,transparent); }
+.ac-msg-text { margin:0; font-size:13.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ac-msg-time { font-size:10.5px; color:var(--ac-secondary); text-align:right; }
+.ac-msg-files { display:flex; flex-wrap:wrap; gap:8px; }
+.ac-msg-file { display:block; border:1px solid var(--ac-border); border-radius:var(--ac-radius); overflow:hidden; background:var(--ac-surface); padding:2px; }
+.ac-msg-file img { display:block; max-width:130px; max-height:90px; object-fit:cover; border-radius:calc(var(--ac-radius) - 1px); }
+.ac-msg-file span { display:inline-flex; align-items:center; gap:5px; padding:6px 8px; color:var(--ac-primary); font-size:12px; }
+.ac-msg-file--pending { position:relative; }
+.ac-msg-file--pending img { width:60px; height:48px; }
+.ac-msg-file--pending button { position:absolute; top:-6px; right:-6px; width:18px; height:18px; border:1px solid var(--ac-danger); background:var(--ac-surface); color:var(--ac-danger); border-radius:50%; display:grid; place-items:center; cursor:pointer; padding:0; }
+.ac-chat-reply { display:grid; gap:10px; }
+.ac-chat-reply-row { display:flex; align-items:flex-end; gap:8px; }
+.ac-chat-reply-row .ac-textarea { resize:none; min-height:var(--ac-control); max-height:130px; }
+.ac-chat-reply-row .ac-button { white-space:nowrap; flex:0 0 auto; }
 
