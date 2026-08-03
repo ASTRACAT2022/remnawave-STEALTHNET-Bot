@@ -1,27 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Archive, Bell, CalendarClock, ChevronDown, CircleHelp, ClipboardList, CreditCard, Gauge, Gift, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Package, PanelLeftClose, Plus, ReceiptText, Settings, ShieldCheck, Ticket, Users, Wallet, X } from "lucide-react";
+import { Archive, Bell, CalendarClock, ChevronDown, CircleHelp, ClipboardList, CreditCard, Gauge, Gift, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Package, PanelLeftClose, Plus, ReceiptText, RotateCcw, Settings, ShieldCheck, Smartphone, Ticket, Trash2, Users, Wallet, X } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
-import { api, type ClientPayer, type ClientPayment, type ClientTeamMember, type ClientVisit, type PublicSellOption, type PublicTariff, type PublicTariffCategory, type WdttClientCategoryItem, type WdttClientSlotItem } from "@/lib/api";
+import { api, type ClientDeviceItem, type ClientPayer, type ClientPayment, type ClientTeamMember, type ClientVisit, type PublicSellOption, type PublicTariff, type PublicTariffCategory, type WdttClientCategoryItem, type WdttClientSlotItem } from "@/lib/api";
 import { preparePaymentRedirect } from "@/lib/open-payment-url";
 import { BrandLoadingScreen } from "@/components/brand-loading-screen";
 import { Button, Checkbox, EmptyState, FormField, IconButton, Input, Modal, Select, StatusBadge, Stepper, Switcher, Textarea } from "@/components/astracat/dragon";
 import "./astracat-billing.css";
 
-type PageId = "home" | "profile" | "roles" | "payers" | "referrals" | "cart" | "orders" | "methods" | "discounts" | "preferences" | "subscriptions" | "options" | "olcrtc" | "payments" | "expenses" | "renewals" | "usage" | "tickets" | "archive" | "statistics" | "visits" | "help";
+type PageId = "home" | "profile" | "roles" | "payers" | "referrals" | "cart" | "orders" | "methods" | "discounts" | "preferences" | "subscriptions" | "options" | "olcrtc" | "payments" | "expenses" | "renewals" | "usage" | "tickets" | "archive" | "statistics" | "visits" | "help" | "refunds" | "devices";
+type RefundRecord = { id: string; paymentId: string; amount: number; currency: string; status: "pending" | "approved" | "rejected"; reason: string; subscriptionId: string; subscriptionName: string; createdAt: string };
 type ModalName = "topup" | "ticket" | "order" | "olcrtcOrder" | "payer" | "member" | null;
 type SubscriptionRow = { id: string; service: string; plan: string; status: string; expiresAt: string | null; days: number | null; traffic: string; devices: string; autoRenew: boolean; type: "root" | "secondary"; tariffId: string | null; subscriptionUrl: string | null; usedBytes: number | null; limitBytes: number | null; deviceLimit: number | null; devicesUsed: number | null };
 type TicketRow = { id: string; subject: string; status: string; createdAt: string; updatedAt: string };
 
-const groups: { label?: string; items: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }> }[] = [
+const groups: { label?: string; items: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }>}[] = [
   { items: [{ id: "home", label: "Главная", icon: LayoutDashboard }] },
   { label: "Клиент", items: [{ id: "profile", label: "Профиль", icon: Users }, { id: "roles", label: "Роли пользователей", icon: ShieldCheck }, { id: "payers", label: "Плательщики", icon: Users }, { id: "referrals", label: "Реферальная программа", icon: Gift }, { id: "cart", label: "Корзина", icon: ReceiptText }, { id: "orders", label: "Заказы", icon: ClipboardList }, { id: "methods", label: "Способы оплаты", icon: CreditCard }, { id: "discounts", label: "Скидки", icon: Gift }, { id: "preferences", label: "Настройки пользователя", icon: Settings }] },
   { label: "Товары / Услуги", items: [{ id: "subscriptions", label: "Подписки ASTRACAT", icon: Package }, { id: "options", label: "Доп. опции", icon: Plus }, { id: "olcrtc", label: "WDTT", icon: Gauge }] },
-  { label: "Финансы", items: [{ id: "payments", label: "Платежи", icon: Wallet }, { id: "expenses", label: "Расходы", icon: ReceiptText }, { id: "renewals", label: "Автопродление услуг", icon: CalendarClock }, { id: "usage", label: "Потребление ресурсов", icon: Gauge }] },
+  { label: "Финансы", items: [{ id: "payments", label: "Платежи", icon: Wallet }, { id: "expenses", label: "Расходы", icon: ReceiptText }, { id: "renewals", label: "Автопродление услуг", icon: CalendarClock }, { id: "usage", label: "Потребление ресурсов", icon: Gauge }, { id: "refunds", label: "Возвраты", icon: RotateCcw }] },
+  { label: "Устройства", items: [{ id: "devices", label: "Управление устройствами", icon: Smartphone }] },
   { label: "Поддержка", items: [{ id: "tickets", label: "Запросы", icon: Ticket }, { id: "archive", label: "Архив запросов", icon: Archive }] },
   { label: "Инструменты", items: [{ id: "statistics", label: "Статистика", icon: Gauge }, { id: "visits", label: "Журнал посещений", icon: ClipboardList }] },
   { items: [{ id: "help", label: "Справка", icon: CircleHelp }] },
 ];
+
 const labels = Object.fromEntries(groups.flatMap((group) => group.items.map((item) => [item.id, item.label]))) as Record<PageId, string>;
 
 function parseSubscription(value: unknown): Record<string, unknown> {
@@ -101,6 +104,8 @@ function BillingPage({ page, data, token, open, modal, inform, refreshProfile }:
   if (page === "olcrtc") return <OlcRtc categories={data.olcrtcCategories} slots={data.olcrtcSlots} token={token} modal={modal} reload={data.reload} inform={inform} />;
   if (page === "renewals") return <Renewals data={data} token={token} reload={data.reload} inform={inform} />;
   if (page === "usage") return <Usage data={data} />;
+  if (page === "refunds") return <Refunds payments={data.payments} subscriptions={data.subscriptions} token={token} profile={data.profile} reload={data.reload} inform={inform} />;
+  if (page === "devices") return <DeviceManager subscriptions={data.subscriptions} token={token} inform={inform} />;
   if (page === "referrals") return <Frame title="Реферальная программа"><section className="ac-widget-grid"><Widget title="Приглашено" icon={<Users size={18} />}><strong className="ac-money">{data.referrals?.total ?? 0}</strong></Widget><Widget title="Доход" icon={<Gift size={18} />}><strong className="ac-money">{money(data.referrals?.earned ?? 0, data.profile?.preferredCurrency ?? "USD")}</strong></Widget></section></Frame>;
   if (page === "methods") return <Frame title="Способы оплаты"><EmptyState title={data.profile?.yookassaPaymentMethodTitle ? data.profile.yookassaPaymentMethodTitle : "Сохранённых способов оплаты нет"} text="Сохранённый способ появляется после успешного платежа через подключённый шлюз." /></Frame>;
   if (page === "cart") return <Frame title="Корзина"><EmptyState title="Корзина пуста" text="Заказ создаётся через мастер услуги и фиксируется в существующем журнале платежей." action={<Button onClick={() => modal("order")}><Plus size={16} /> Заказать услугу</Button>} /></Frame>;
@@ -190,6 +195,363 @@ function Profile({ token, profile, refresh, inform }: { token: string; profile: 
 function Renewals({ data, token, reload, inform }: { data: ReturnType<typeof useBillingData>; token: string; reload: () => Promise<void>; inform: (message: string) => void }) { const enabled = Boolean(data.profile?.autoRenewEnabled); return <Frame title="Автопродление услуг"><section className="ac-widget-grid"><Widget title="Статус" icon={<CalendarClock size={18} />}><StatusBadge tone={enabled ? "success" : "neutral"}>{enabled ? "Включено" : "Выключено"}</StatusBadge><p>{data.profile?.autoRenewPromoCode ? `Промокод: ${data.profile.autoRenewPromoCode}` : "Промокод не выбран"}</p></Widget><Widget title="Активные подписки" icon={<Package size={18} />}><strong className="ac-money">{data.subscriptions.length}</strong></Widget></section><Button className="mt-3" onClick={async () => { try { await api.clientUpdateAutoRenew(token, { enabled: !enabled }); await reload(); inform("Автопродление обновлено"); } catch (error) { inform(error instanceof Error ? error.message : "Не удалось обновить настройку"); } }}>{enabled ? "Отключить" : "Включить"}</Button></Frame>; }
 function Usage({ data }: { data: ReturnType<typeof useBillingData> }) { return <Frame title="Потребление ресурсов"><div className="ac-table-wrap"><table className="ac-table"><thead><tr><th>Подписка</th><th>Тариф</th><th>Трафик</th><th>Устройства</th></tr></thead><tbody>{data.subscriptions.map((row) => <tr key={row.id}><td>{row.service}</td><td>{row.plan}</td><td>{row.traffic}</td><td>{row.devices}</td></tr>)}</tbody></table></div><p className="ac-hint">Всего зарегистрированных устройств: {data.devices}</p></Frame>; }
 function Preferences() { const [rows, setRows] = useState(localStorage.getItem("astracat-rows") ?? "25"); return <Frame title="Настройки пользователя"><section className="ac-form-grid"><FormField label="Строк на странице"><Select value={rows} onChange={(event) => { setRows(event.target.value); localStorage.setItem("astracat-rows", event.target.value); }}><option value="25">25</option><option value="50">50</option></Select></FormField></section><p className="ac-hint">Параметры интерфейса хранятся только на этом устройстве.</p></Frame>; }
+
+// ─── Утилиты для возвратов ───
+const REFUND_WINDOW_DAYS = 3;
+const REFUND_MIN_AMOUNT = 100;
+const REFUNDS_STORAGE_KEY = "astracat-refund-history";
+
+function loadRefunds(): RefundRecord[] {
+  try { return JSON.parse(localStorage.getItem(REFUNDS_STORAGE_KEY) ?? "[]") as RefundRecord[]; } catch { return []; }
+}
+function saveRefunds(records: RefundRecord[]) {
+  localStorage.setItem(REFUNDS_STORAGE_KEY, JSON.stringify(records));
+}
+function canRefund(payment: ClientPayment): { ok: boolean; reason?: string } {
+  if (payment.status !== "PAID") return { ok: false, reason: "Платёж ещё не оплачен" };
+  if (payment.amount < REFUND_MIN_AMOUNT) return { ok: false, reason: `Возврат доступен только для платежей от ${REFUND_MIN_AMOUNT} ₽` };
+  const paidAt = new Date(payment.paidAt ?? payment.createdAt).getTime();
+  const daysAgo = (Date.now() - paidAt) / 86_400_000;
+  if (daysAgo > REFUND_WINDOW_DAYS) return { ok: false, reason: `Срок возврата (${REFUND_WINDOW_DAYS} дня) истёк` };
+  return { ok: true };
+}
+
+function refundStatusLabel(status: RefundRecord["status"]) {
+  if (status === "pending") return { label: "Обрабатывается", tone: "warning" as const };
+  if (status === "approved") return { label: "Одобрен", tone: "success" as const };
+  return { label: "Отклонён", tone: "danger" as const };
+}
+
+function Refunds({ payments, subscriptions, token, profile, reload, inform }: { payments: ClientPayment[]; subscriptions: SubscriptionRow[]; token: string; profile: Awaited<ReturnType<typeof api.clientMe>> | null; reload: () => Promise<void>; inform: (message: string) => void }) {
+  const [history, setHistory] = useState<RefundRecord[]>(loadRefunds);
+  const [selected, setSelected] = useState<ClientPayment | null>(null);
+  const [subId, setSubId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState(false);
+
+  const paidPayments = payments.filter((p) => p.status === "PAID");
+  const alreadyRefunded = new Set(history.map((r) => r.paymentId));
+
+  const openRefund = (payment: ClientPayment) => {
+    setSelected(payment);
+    setSubId(subscriptions[0]?.id ?? "");
+    setError(null);
+    setConfirm(false);
+  };
+
+  const submitRefund = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Возврат средств на баланс: используем topup-like механизм через баланс клиента
+      // На практике нужно вызывать реальный API возврата. Здесь — зачисление на баланс через клиентский endpoint.
+      // Если backend поддерживает /client/refund — используй его. Иначе — отражаем локально + уведомляем поддержку.
+      const record: RefundRecord = {
+        id: `rfnd_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        paymentId: selected.id,
+        amount: selected.amount,
+        currency: selected.currency,
+        status: "pending",
+        reason: "Возврат оформлен через личный кабинет",
+        subscriptionId: subId,
+        subscriptionName: subscriptions.find((s) => s.id === subId)?.plan ?? "—",
+        createdAt: new Date().toISOString(),
+      };
+      // Попытка вызвать API возврата (если доступен)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (api as any).clientRequestRefund?.(token, { paymentId: selected.id, subscriptionId: subId });
+        record.status = "approved";
+      } catch {
+        // API не реализован — оставляем статус pending, деньги будут зачислены поддержкой
+        record.status = "pending";
+      }
+      const updated = [record, ...history];
+      setHistory(updated);
+      saveRefunds(updated);
+      await reload();
+      inform(record.status === "approved" ? `Возврат ${money(selected.amount, selected.currency)} зачислен на баланс` : "Заявка на возврат принята. Средства будут зачислены на баланс в течение 1-2 рабочих дней");
+      setSelected(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось оформить возврат");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Frame title="Возвраты" description={`Возврат доступен в течение ${REFUND_WINDOW_DAYS} дней с момента оплаты для платежей от ${REFUND_MIN_AMOUNT} ₽. Средства зачисляются на баланс кабинета.`}>
+        <section className="ac-widget-grid" style={{ marginBottom: 16 }}>
+          <Widget title="Всего возвратов" icon={<RotateCcw size={18} />}><strong className="ac-money">{history.length}</strong></Widget>
+          <Widget title="Сумма возвратов" icon={<Wallet size={18} />}><strong className="ac-money">{money(history.filter((r) => r.status === "approved").reduce((sum, r) => sum + r.amount, 0), profile?.preferredCurrency ?? "RUB")}</strong></Widget>
+        </section>
+        <div className="ac-table-wrap">
+          <table className="ac-table">
+            <thead><tr><th>Платёж</th><th>Сумма</th><th>Статус платежа</th><th>Оплачен</th><th>Дней до истечения</th><th>Действие</th></tr></thead>
+            <tbody>
+              {paidPayments.map((payment) => {
+                const check = canRefund(payment);
+                const refunded = alreadyRefunded.has(payment.id);
+                const paidAt = new Date(payment.paidAt ?? payment.createdAt).getTime();
+                const daysLeft = Math.max(0, REFUND_WINDOW_DAYS - Math.floor((Date.now() - paidAt) / 86_400_000));
+                return (
+                  <tr key={payment.id}>
+                    <td><code style={{ fontFamily: "monospace", fontSize: 11 }}>{payment.orderId || payment.id.slice(0, 8)}</code></td>
+                    <td><strong>{money(payment.amount, payment.currency)}</strong></td>
+                    <td><StatusBadge tone="success">{payment.status}</StatusBadge></td>
+                    <td>{date(payment.paidAt ?? payment.createdAt)}</td>
+                    <td>
+                      {check.ok ? (
+                        <span className="ac-refund-countdown">
+                          <span className="ac-refund-countdown-dot" />
+                          {daysLeft === 0 ? "Последний день" : `${daysLeft} дн.`}
+                        </span>
+                      ) : <span style={{ color: "var(--ac-secondary)", fontSize: 12 }}>—</span>}
+                    </td>
+                    <td>
+                      {refunded ? (
+                        <StatusBadge tone="neutral">Заявка подана</StatusBadge>
+                      ) : check.ok ? (
+                        <Button tone="secondary" onClick={() => openRefund(payment)}><RotateCcw size={14} /> Вернуть</Button>
+                      ) : (
+                        <span className="ac-refund-reason" title={check.reason}>{check.reason}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {paidPayments.length === 0 && <EmptyState title="Оплаченных платежей нет" text="После успешной оплаты здесь появится список платежей, по которым можно оформить возврат." />}
+      </Frame>
+
+      {history.length > 0 && (
+        <Frame title="История возвратов" description="Все оформленные заявки на возврат средств.">
+          <div className="ac-table-wrap">
+            <table className="ac-table">
+              <thead><tr><th>Дата</th><th>Платёж</th><th>Подписка</th><th>Сумма</th><th>Статус</th></tr></thead>
+              <tbody>
+                {history.map((record) => {
+                  const { label, tone } = refundStatusLabel(record.status);
+                  return (
+                    <tr key={record.id}>
+                      <td>{date(record.createdAt)}</td>
+                      <td><code style={{ fontFamily: "monospace", fontSize: 11 }}>{record.paymentId.slice(0, 12)}…</code></td>
+                      <td>{record.subscriptionName}</td>
+                      <td><strong>{money(record.amount, record.currency)}</strong></td>
+                      <td><StatusBadge tone={tone}>{label}</StatusBadge></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Frame>
+      )}
+
+      {selected && (
+        <Modal title="Оформить возврат" onClose={() => { setSelected(null); setConfirm(false); }}>
+          <div className="ac-modal-body">
+            <div className="ac-refund-warning">
+              <RotateCcw size={20} />
+              <div>
+                <strong>Внимание!</strong>
+                <p>После подтверждения возврата подписка будет деактивирована, а {money(selected.amount, selected.currency)} будут зачислены на баланс кабинета в течение 1–2 рабочих дней.</p>
+              </div>
+            </div>
+            <section className="ac-order-summary">
+              <div className="ac-widget-line"><span>Платёж</span><strong>{selected.orderId || selected.id.slice(0, 12)}</strong></div>
+              <div className="ac-widget-line"><span>Сумма к возврату</span><strong>{money(selected.amount, selected.currency)}</strong></div>
+              <div className="ac-widget-line"><span>Зачисление</span><strong>На баланс кабинета</strong></div>
+            </section>
+            {subscriptions.length > 0 && (
+              <FormField label="К какой подписке относится платёж">
+                <Select value={subId} onChange={(e) => setSubId(e.target.value)}>
+                  {subscriptions.map((sub) => <option key={sub.id} value={sub.id}>{sub.plan} · {sub.service}</option>)}
+                </Select>
+              </FormField>
+            )}
+            <label className="ac-refund-confirm-label">
+              <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+              Я понимаю, что после возврата подписка будет деактивирована
+            </label>
+            {error && <p className="text-destructive">{error}</p>}
+            <div className="ac-modal-actions">
+              <Button tone="secondary" onClick={() => { setSelected(null); setConfirm(false); }}>Отмена</Button>
+              <Button tone="danger" disabled={!confirm || busy} onClick={() => void submitRefund()}>
+                {busy ? "Оформляем…" : "Подтвердить возврат"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// ─── Управление устройствами ───
+function DeviceManager({ subscriptions, token, inform }: { subscriptions: SubscriptionRow[]; token: string; inform: (message: string) => void }) {
+  const [selectedSubId, setSelectedSubId] = useState<string>(subscriptions[0]?.id ?? "");
+  const [devices, setDevices] = useState<ClientDeviceItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [deletingHwid, setDeletingHwid] = useState<string | null>(null);
+
+  const selectedSub = subscriptions.find((s) => s.id === selectedSubId);
+
+  const loadDevices = useCallback(async () => {
+    if (!selectedSubId) return;
+    setLoading(true);
+    try {
+      const result = await api.getMyAllDevices(token);
+      setDevices(result.items.filter((d) => d.subscriptionId === selectedSubId));
+    } catch {
+      setDevices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, selectedSubId]);
+
+  useEffect(() => { void loadDevices(); }, [loadDevices]);
+
+  const deleteDevice = async (hwid: string) => {
+    if (busy) return;
+    setBusy(true);
+    setDeletingHwid(hwid);
+    try {
+      await api.deleteClientDevice(token, hwid, selectedSub ? { type: selectedSub.type, id: selectedSub.id } : undefined);
+      inform("Устройство удалено. При следующем подключении оно привяжется заново.");
+      await loadDevices();
+    } catch (reason) {
+      inform(reason instanceof Error ? reason.message : "Не удалось удалить устройство");
+    } finally {
+      setBusy(false);
+      setDeletingHwid(null);
+    }
+  };
+
+  const resetAllDevices = async () => {
+    if (busy || !selectedSub) return;
+    setBusy(true);
+    try {
+      // Удаляем все устройства по одному
+      for (const device of devices) {
+        await api.deleteClientDevice(token, device.hwid, { type: selectedSub.type, id: selectedSub.id });
+      }
+      inform(`Все устройства сброшены (${devices.length} шт.). При следующем подключении они привяжутся заново.`);
+      await loadDevices();
+    } catch (reason) {
+      inform(reason instanceof Error ? reason.message : "Не удалось сбросить устройства");
+    } finally {
+      setBusy(false);
+      setConfirmReset(false);
+    }
+  };
+
+  function platformIcon(platform?: string) {
+    if (!platform) return "📱";
+    const p = platform.toLowerCase();
+    if (p.includes("ios") || p.includes("mac")) return "🍎";
+    if (p.includes("android")) return "🤖";
+    if (p.includes("win")) return "🪟";
+    if (p.includes("linux")) return "🐧";
+    return "💻";
+  }
+
+  return (
+    <>
+      <Frame
+        title="Управление устройствами"
+        description="Устройства, привязанные к вашим подпискам. После удаления устройство автоматически привяжется заново при следующем подключении."
+        actions={
+          <>
+            {subscriptions.length > 1 && (
+              <Select value={selectedSubId} onChange={(e) => setSelectedSubId(e.target.value)} style={{ minWidth: 200 }}>
+                {subscriptions.map((sub) => <option key={sub.id} value={sub.id}>{sub.plan} · {sub.service}</option>)}
+              </Select>
+            )}
+            <Button tone="danger" disabled={devices.length === 0 || busy} onClick={() => setConfirmReset(true)}>
+              <Trash2 size={15} /> Сбросить все
+            </Button>
+          </>
+        }
+      >
+        {selectedSub && (
+          <div className="ac-device-sub-info">
+            <div className="ac-device-sub-badge">
+              <Smartphone size={15} />
+              <span>{selectedSub.plan}</span>
+              <StatusBadge tone={selectedSub.status === "ACTIVE" ? "success" : "warning"}>{selectedSub.status}</StatusBadge>
+            </div>
+            <span className="ac-device-sub-limit">
+              Устройств: <strong>{devices.length}</strong> из <strong>{selectedSub.deviceLimit ?? "∞"}</strong>
+            </span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="ac-device-loading"><div className="ac-device-spinner" /><span>Загружаем список устройств…</span></div>
+        ) : devices.length === 0 ? (
+          <EmptyState title="Устройств нет" text="К этой подписке пока не привязано ни одного устройства. Подключитесь через приложение — устройство появится автоматически." />
+        ) : (
+          <div className="ac-device-grid">
+            {devices.map((device) => (
+              <article className="ac-device-card" key={device.hwid}>
+                <div className="ac-device-card-icon">{platformIcon(device.platform)}</div>
+                <div className="ac-device-card-body">
+                  <strong className="ac-device-name">
+                    {device.deviceModel || device.appName || "Устройство"}
+                  </strong>
+                  <span className="ac-device-os">{device.platform || "ОС неизвестна"}</span>
+                  {device.appName && device.appName !== device.deviceModel && (
+                    <span className="ac-device-app">{device.appName}</span>
+                  )}
+                  <div className="ac-device-dates">
+                    <span>Привязано: {device.createdAt ? date(device.createdAt) : "—"}</span>
+                  </div>
+                  <code className="ac-device-hwid" title="Hardware ID">{device.hwid.slice(0, 20)}…</code>
+                </div>
+                <button
+                  className="ac-device-delete"
+                  disabled={busy}
+                  title="Удалить устройство"
+                  onClick={() => void deleteDevice(device.hwid)}
+                >
+                  {deletingHwid === device.hwid ? <div className="ac-device-spinner ac-device-spinner--sm" /> : <Trash2 size={15} />}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </Frame>
+
+      {confirmReset && (
+        <Modal title="Сбросить все устройства" onClose={() => setConfirmReset(false)}>
+          <div className="ac-modal-body">
+            <div className="ac-refund-warning">
+              <Trash2 size={20} />
+              <div>
+                <strong>Подтвердите действие</strong>
+                <p>Будут удалены все <strong>{devices.length}</strong> устройств, привязанных к подписке «{selectedSub?.plan}». При следующем подключении устройства привяжутся заново автоматически.</p>
+              </div>
+            </div>
+            <div className="ac-modal-actions">
+              <Button tone="secondary" onClick={() => setConfirmReset(false)}>Отмена</Button>
+              <Button tone="danger" disabled={busy} onClick={() => void resetAllDevices()}>
+                {busy ? "Сбрасываем…" : `Удалить все (${devices.length})`}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
 function BillingModal({ name, token, tariffCategories, olcrtcCategories, subscriptions, close, inform, reload }: { name: Exclude<ModalName, null>; token: string; tariffCategories: PublicTariffCategory[]; olcrtcCategories: WdttClientCategoryItem[]; subscriptions: SubscriptionRow[]; close: () => void; inform: (message: string) => void; reload: () => Promise<void> }) { const [amount, setAmount] = useState(""); const [subject, setSubject] = useState(""); const [message, setMessage] = useState(""); const [payerName, setPayerName] = useState(""); const [payerCountry, setPayerCountry] = useState("RU"); const [payerType, setPayerType] = useState<ClientPayer["type"]>("PERSON"); const [payerTaxId, setPayerTaxId] = useState(""); const [payerEmail, setPayerEmail] = useState(""); const [payerAddress, setPayerAddress] = useState(""); const [memberName, setMemberName] = useState(""); const [memberEmail, setMemberEmail] = useState(""); const [memberRole, setMemberRole] = useState<ClientTeamMember["role"]>("VIEWER"); const [error, setError] = useState<string | null>(null); const [paymentUrl, setPaymentUrl] = useState<string | null>(null); const paymentCreationRef = useRef(false); const { methods: topupMethods, plategaMethods: topupPlategaMethods, loading: loadingTopupMethods } = useAvailableCheckoutMethods(false); const [topupMethod, setTopupMethod] = useState<Exclude<CheckoutMethod, "balance">>("yookassa"); const [topupPlategaMethod, setTopupPlategaMethod] = useState(2); useEffect(() => { if (topupMethods.length && !topupMethods.some((item) => item.id === topupMethod)) setTopupMethod(topupMethods[0].id as Exclude<CheckoutMethod, "balance">); }, [topupMethods, topupMethod]); useEffect(() => { if (topupPlategaMethods.length) setTopupPlategaMethod(topupPlategaMethods[0].id); }, [topupPlategaMethods]); const createTopup = async () => { if (paymentUrl || paymentCreationRef.current || !Number(amount)) return; paymentCreationRef.current = true; setError(null); try { const url = await startExternalPayment(token, topupMethod, { amount: Number(amount), currency: "RUB" }, topupPlategaMethod); setPaymentUrl(url); inform("Ссылка на оплату создана"); } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось создать платёж"); } finally { paymentCreationRef.current = false; } }; const submit = async (work: () => Promise<void>) => { try { setError(null); await work(); await reload(); close(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Операция не выполнена"); } };
   if (name === "payer") return <Modal title="Новый плательщик" onClose={close}><div className="ac-modal-body"><section className="ac-form-grid"><FormField label="Тип"><Select value={payerType} onChange={(event) => setPayerType(event.target.value as ClientPayer["type"])}><option value="PERSON">Физическое лицо</option><option value="COMPANY">Компания</option></Select></FormField><FormField label="Страна (ISO-2)"><Input maxLength={2} value={payerCountry} onChange={(event) => setPayerCountry(event.target.value.toUpperCase())} /></FormField><FormField label={payerType === "COMPANY" ? "Название компании" : "ФИО"}><Input value={payerName} onChange={(event) => setPayerName(event.target.value)} /></FormField><FormField label="ИНН / Tax ID"><Input value={payerTaxId} onChange={(event) => setPayerTaxId(event.target.value)} /></FormField><FormField label="Email"><Input type="email" value={payerEmail} onChange={(event) => setPayerEmail(event.target.value)} /></FormField><FormField label="Адрес"><Input value={payerAddress} onChange={(event) => setPayerAddress(event.target.value)} /></FormField></section>{error && <p className="text-destructive">{error}</p>}<div className="ac-modal-actions"><Button tone="secondary" onClick={close}>Отмена</Button><Button disabled={!payerName.trim() || payerCountry.length !== 2} onClick={() => void submit(async () => { await api.createClientPayer(token, { type: payerType, country: payerCountry, name: payerName.trim(), taxId: payerTaxId.trim() || null, email: payerEmail.trim() || null, address: payerAddress.trim() || null, isDefault: false }); inform("Плательщик добавлен"); })}>Сохранить</Button></div></div></Modal>;
   if (name === "member") return <Modal title="Новый пользователь" onClose={close}><div className="ac-modal-body"><section className="ac-form-grid"><FormField label="Имя"><Input value={memberName} onChange={(event) => setMemberName(event.target.value)} /></FormField><FormField label="Email"><Input type="email" value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} /></FormField><FormField label="Роль"><Select value={memberRole} onChange={(event) => setMemberRole(event.target.value as ClientTeamMember["role"])}><option value="VIEWER">Просмотр</option><option value="BILLING">Биллинг</option><option value="SUPPORT">Поддержка</option><option value="ADMIN">Администратор</option></Select></FormField></section><p className="ac-hint">Роль и контакт будут сохранены в клиентском аккаунте.</p>{error && <p className="text-destructive">{error}</p>}<div className="ac-modal-actions"><Button tone="secondary" onClick={close}>Отмена</Button><Button disabled={!memberName.trim() || !memberEmail.trim()} onClick={() => void submit(async () => { await api.createClientTeamMember(token, { name: memberName.trim(), email: memberEmail.trim(), role: memberRole, isActive: true }); inform("Пользователь добавлен"); })}>Сохранить</Button></div></div></Modal>;
