@@ -3047,8 +3047,12 @@ clientRouter.get("/subscription/all", async (req, res) => {
       if (cryptOn) await encryptSubscriptionUrlInPlace(r.data);
       remnaPayload = r.data ?? null;
       if (!tariffName) tariffName = await resolveTariffDisplayName(r.data ?? null);
-      if (status === "PENDING" && r.data && typeof r.data === "object" && typeof (r.data as { status?: unknown }).status === "string") {
-        status = (r.data as { status: string }).status;
+      // Remnawave оборачивает юзера в response (data.response ?? data). Читаем статус
+      // из фактического объекта юзера — иначе ACTIVE-подписка вечно показывалась бы PENDING.
+      if (status === "PENDING" && r.data && typeof r.data === "object") {
+        const user = r.data as Record<string, unknown>;
+        const inner = (user.response ?? user) as Record<string, unknown> | undefined;
+        if (inner && typeof inner.status === "string") status = inner.status;
       }
     }
     if (!tariffName) tariffName = "Тариф не выбран";
@@ -3120,8 +3124,10 @@ clientRouter.post("/subscription/:id/delete", async (req, res) => {
     let status = "PENDING";
     if (sub.remnawaveUuid) {
       const r = await remnaGetUser(sub.remnawaveUuid);
-      if (!r.error && r.data && typeof r.data === "object" && typeof (r.data as { status?: unknown }).status === "string") {
-        status = (r.data as { status: string }).status;
+      if (!r.error && r.data && typeof r.data === "object") {
+        const user = r.data as Record<string, unknown>;
+        const inner = (user.response ?? user) as Record<string, unknown> | undefined;
+        if (inner && typeof inner.status === "string") status = inner.status;
       }
     }
     const allowedInactive = ["EXPIRED", "DISABLED", "ON_HOLD", "PENDING"];
