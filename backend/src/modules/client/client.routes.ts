@@ -3400,7 +3400,7 @@ clientRouter.post("/subscription/:type/:id/remove-extra-devices", async (req, re
   }
 
   const tariff = sub.tariffId
-    ? await prisma.tariff.findUnique({ where: { id: sub.tariffId }, select: { includedDevices: true, deviceLimit: true } })
+    ? await prisma.tariff.findUnique({ where: { id: sub.tariffId }, select: { includedDevices: true, deviceLimit: true, price: true } })
     : null;
   const includedDevices = tariff?.includedDevices ?? tariff?.deviceLimit ?? 1;
 
@@ -3439,9 +3439,19 @@ clientRouter.post("/subscription/:type/:id/remove-extra-devices", async (req, re
   }
 
   // Обнуляем счётчик + monthlyPrice в БД.
+  // FIX (08.2026, autorenew-bugfix): customPrice тоже сбрасываем.
+  // customPrice — накопительная цена покупки (тариф + extras). После удаления
+  // extras старый customPrice содержит уже неактуальную надбавку, и cron
+  // автопродления (auto-renew.cron.ts, processSecondaryAutoRenewals) возьмёт
+  // его как baseRenewPrice → завышенное списание. Сбрасываем на базовую цену
+  // тарифа, чтобы автопродление работало корректно.
   await prisma.subscription.update({
     where: { id: sub.id },
-    data: { extraDevices: 0, extraDevicesMonthlyPrice: 0 },
+    data: {
+      extraDevices: 0,
+      extraDevicesMonthlyPrice: 0,
+      customPrice: tariff?.price ?? null,
+    },
   });
 
   return res.json({

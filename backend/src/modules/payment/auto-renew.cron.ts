@@ -682,11 +682,34 @@ async function processSecondaryAutoRenewals(): Promise<void> {
           personalDiscountPercent: true,
         },
       },
+      // FIX (08.2026, autorenew-bugfix): подтягиваем giftedToClient, чтобы
+      // для подаренных подписок списывать деньги с ПОЛУЧАТЕЛЯ гифта, а не
+      // с покупателя (раньше списание шло с owner — покупателя, который сам
+      // не пользуется подпиской и не подозревает об автопродлении).
+      giftedToClient: {
+        select: {
+          id: true,
+          balance: true,
+          isBlocked: true,
+          telegramId: true,
+          telegramUsername: true,
+          email: true,
+          yookassaPaymentMethodId: true,
+          yookassaPaymentMethodTitle: true,
+          personalDiscountPercent: true,
+        },
+      },
     },
   });
 
   for (const sec of secondaries) {
-    if (!sec.remnawaveUuid || !sec.tariff || !sec.owner || sec.owner.isBlocked) continue;
+    if (!sec.remnawaveUuid || !sec.tariff || !sec.owner) continue;
+    // FIX (08.2026, autorenew-bugfix): определяем фактического плательщика.
+    //   • Подаренная подписка → списываем с giftedToClient (он пользуется).
+    //   • Обычная → с owner.
+    // Если получатель заблокирован — пропускаем. Уведомления шлём плательщику.
+    const billingClient = sec.giftedToClient ?? sec.owner;
+    if (billingClient.isBlocked) continue;
     try {
       // 1. Проверяем срок подписки в Remna
       const remnaUser = await remnaGetUser(sec.remnawaveUuid);
@@ -706,31 +729,74 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       // minutesLeft с offsetMinutes шаблонов (±30 мин) и отправит только подходящие.
       // расчёт цены автопродления с учётом
       // доп. устройств (extraDevicesMonthlyPrice × коэф длительности) и личной скидки.
-      // Старый customPrice (legacy) используется только если extraDevices=0.
-      const renewDurationDays = sec.tariff.durationDays || 30;
+      //
+      // FIX (08.2026, autorenew-bugfix):
+      //  • customPrice теперь имеет приоритет ВСЕГДА, если задан > 0
+      //    (ранее терялся при extras>0 → списание занижалось на дельту extras).
+      //  • duration берём из autoRenewPriceOptionId, если задан (раньше всегда
+      //    tariff.durationDays → юзеры с годовой опцией автопродления
+      //    продлевались на месяц).
+      //  • Округление extras — Math.round (в primary используется applyExtraDevicesPrice
+      //    с Math.round, иначе расхождение в копейку между primary/secondary).
+      //  • Если extraDevicesMonthlyPrice=0, но extraDevices>0 (рассинхрон из-за
+      //    старых бэкапов) — fallback на pricePerExtraDevice + tier discount,
+      //    как в primary-цикле, чтобы cron не списал 0₽.
+      // FIX (08.2026, autorenew-bugfix): подтянуть выбранную клиентом опцию длительности
+      // (autoRenewPriceOptionId) ОДИН РАЗ в начале цикла и переиспользовать и для цены,
+      // и для активации. Раньше было 2-3 разных fetch + selectedOption передавался как
+      // undefined → effectiveDays брался из tariff.durationDays, и юзеры с годовой опцией
+      // автопродления продлевались на месяц (оплачено за год, начислено дней = 1/12).
+      let selectedRenewOption: { id?: string; durationDays: number; price: number } | undefined;
+      if (sec.autoRenewPriceOptionId) {
+        const opt = await prisma.tariffPriceOption.findFirst({
+          where: { id: sec.autoRenewPriceOptionId, tariffId: sec.tariff.id },
+          select: { id: true, durationDays: true, price: true },
+        });
+        if (opt?.durationDays) {
+          selectedRenewOption = { id: opt.id, durationDays: opt.durationDays, price: opt.price };
+        }
+      }
+      const renewDurationDays = selectedRenewOption?.durationDays ?? sec.tariff.durationDays ?? 30;
       const extrasMonthly = sec.extraDevicesMonthlyPrice ?? 0;
-      const extrasForPeriod = extrasMonthly > 0
-        ? Math.floor(extrasMonthly * (renewDurationDays / 30))
-        : 0;
-      const baseRenewPrice = extrasForPeriod > 0
-        ? sec.tariff.price  // если есть новые extras — берём базовую цену тарифа, к ней добавим extras
-        : (sec.customPrice && sec.customPrice > 0 ? sec.customPrice : sec.tariff.price);
-      let priceBeforeDiscount = baseRenewPrice + extrasForPeriod;
-      const pd = sec.owner.personalDiscountPercent ?? 0;
+      let extrasForPeriod = 0;
+      if (extrasMonthly > 0) {
+        // Math.round для consistency с applyExtraDevicesPrice (primary cycle).
+        extrasForPeriod = Math.round(extrasMonthly * (renewDurationDays / 30) * 100) / 100;
+      } else if (sec.extraDevices && sec.extraDevices > 0) {
+        // Fallback: monthlyPrice=0 но extraDevices>0 (legacy/рассинхрон).
+        // Считаем через тариф с tier discount — иначе автопродление подарит бесплатный месяц.
+        const tiers = parseDeviceDiscountTiers(sec.tariff.deviceDiscountTiers);
+        const { extrasTotal } = applyExtraDevicesPrice(
+          sec.tariff.pricePerExtraDevice ?? 0,
+          sec.extraDevices,
+          tiers,
+          renewDurationDays,
+        );
+        extrasForPeriod = extrasTotal;
+      }
+      // customPrice ВСЕГДА приоритетнее tariff.price, если задан.
+      // (Раньше: extras>0 → брали tariff.price → теряли накопленные extras
+      // из истории покупок → занижали цену.)
+      const baseRenewPrice = sec.customPrice && sec.customPrice > 0
+        ? sec.customPrice
+        : sec.tariff.price;
+      const priceBeforeDiscount = baseRenewPrice + extrasForPeriod;
+      const pd = billingClient.personalDiscountPercent ?? 0;
+      // Math.floor (как в applyPercent) — клиент видит целую цену в UI.
       const price = pd > 0
-        ? Math.max(0, Math.floor(priceBeforeDiscount * (1 - pd / 100)))
-        : priceBeforeDiscount;
+        ? applyPercent(priceBeforeDiscount, pd)
+        : Math.round(priceBeforeDiscount * 100) / 100;
 
       if (timeLeft > 0) {
         const minutesLeft = Math.round(timeLeft / 60000);
-        await dispatchAutoRenewNotification(sec.owner.id, "UPCOMING", {
+        await dispatchAutoRenewNotification(billingClient.id, "UPCOMING", {
           tariffName: sec.tariff.name,
           amount: price,
           currency: sec.tariff.currency,
           minutesLeft,
           expireAt: expireAtDate,
           subIndex: sec.subscriptionIndex,
-          balance: sec.owner.balance ?? 0,
+          balance: billingClient.balance ?? 0,
           dedupKeyForSec: { secondarySubscriptionId: sec.id, ttlMs: 60 * 60 * 1000 },
         }).catch(() => {});
       }
@@ -740,12 +806,28 @@ async function processSecondaryAutoRenewals(): Promise<void> {
 
       if (price <= 0) continue;
 
+      // FIX (08.2026, autorenew-bugfix): selectedRenewOption уже подтянут в начале
+      // блока расчёта цены (выше) и переиспользуется для активации. Здесь оставляем
+      // только tariffActivationPayload для DRY (используется в обоих extendSecondarySubscription).
+      const tariffActivationPayload = {
+        id: sec.tariff.id,
+        durationDays: renewDurationDays,
+        trafficLimitBytes: sec.tariff.trafficLimitBytes,
+        deviceLimit: sec.tariff.deviceLimit,
+        includedDevices: sec.tariff.includedDevices ?? undefined,
+        pricePerExtraDevice: sec.tariff.pricePerExtraDevice ?? 0,
+        maxExtraDevices: sec.tariff.maxExtraDevices ?? 0,
+        internalSquadUuids: sec.tariff.internalSquadUuids,
+        trafficResetMode: sec.tariff.trafficResetMode ?? undefined,
+        price,
+      };
+
       // 3. Дедуп: проверяем не было ли успешного YK autopay для этой sec за последние 2 часа.
       // Если был → значит карта уже списала, но activation мог не пройти.
       // Просто пробуем активировать снова через тот payment (не списываем повторно).
       const recentYkPayment = await prisma.payment.findFirst({
         where: {
-          clientId: sec.owner.id,
+          clientId: billingClient.id,
           provider: "yookassa",
           status: "PAID",
           tariffId: sec.tariffId,
@@ -759,19 +841,8 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         const { extendSecondarySubscription } = await import("../tariff/tariff-activation.service.js");
         const retryResult = await extendSecondarySubscription(
           sec.id,
-          {
-            id: sec.tariff.id,
-            durationDays: sec.tariff.durationDays,
-            trafficLimitBytes: sec.tariff.trafficLimitBytes,
-            deviceLimit: sec.tariff.deviceLimit,
-            includedDevices: sec.tariff.includedDevices ?? undefined,
-            pricePerExtraDevice: sec.tariff.pricePerExtraDevice ?? 0,
-            maxExtraDevices: sec.tariff.maxExtraDevices ?? 0,
-            internalSquadUuids: sec.tariff.internalSquadUuids,
-            trafficResetMode: sec.tariff.trafficResetMode ?? undefined,
-            price,
-          },
-          undefined,
+          tariffActivationPayload,
+          selectedRenewOption,
           0,
         );
         if (retryResult.ok) {
@@ -783,7 +854,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       }
 
       // 4. Списание: balance-first, fallback YooKassa.
-      const balanceForUser = sec.owner.balance ?? 0;
+      const balanceForUser = billingClient.balance ?? 0;
       let paidViaBalance = 0;
       let paidViaYookassa = 0;
       let yookassaPaymentId: string | null = null;
@@ -791,7 +862,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
 
       // Phase A: полное списание с баланса (атомарный debit).
       const balanceDebit = await prisma.client.updateMany({
-        where: { id: sec.owner.id, balance: { gte: price } },
+        where: { id: billingClient.id, balance: { gte: price } },
         data: { balance: { decrement: price } },
       });
 
@@ -802,14 +873,14 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         // Phase B: баланса не хватает. Проверяем YooKassa-recurring.
         const ykEnabled =
           config.yookassaRecurringEnabled === true &&
-          !!sec.owner.yookassaPaymentMethodId &&
+          !!billingClient.yookassaPaymentMethodId &&
           !!config.yookassaShopId?.trim() &&
           !!config.yookassaSecretKey?.trim();
 
         if (!ykEnabled) {
           console.log(`[auto-renew/sec] Insufficient balance for sec ${sec.id} (need ${price}, have ${balanceForUser}); YK fallback disabled. Skipping.`);
           // T-autorenew: кастомные FAILED уведомления (когда нет ни баланса, ни YK).
-          await dispatchAutoRenewNotification(sec.owner.id, "FAILED", {
+          await dispatchAutoRenewNotification(billingClient.id, "FAILED", {
             tariffName: sec.tariff.name,
             amount: price,
             currency: sec.tariff.currency,
@@ -826,7 +897,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
 
         if (balancePortion > 0) {
           const partialDebit = await prisma.client.updateMany({
-            where: { id: sec.owner.id, balance: { gte: balancePortion } },
+            where: { id: billingClient.id, balance: { gte: balancePortion } },
             data: { balance: { decrement: balancePortion } },
           });
           if (partialDebit.count > 0) {
@@ -838,22 +909,22 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         try {
           const orderIdForYk = randomUUID();
           // добавили tg:<id> в description (см. /yookassa/create-payment).
-          const tgIdSuffix = sec.owner.telegramId ? ` tg:${sec.owner.telegramId}` : "";
+          const tgIdSuffix = billingClient.telegramId ? ` tg:${billingClient.telegramId}` : "";
           const autopayResult = await createYookassaAutopayment({
             shopId: config.yookassaShopId!.trim(),
             secretKey: config.yookassaSecretKey!.trim(),
             amount: cardPortion,
             currency: sec.tariff.currency.toUpperCase(),
-            paymentMethodId: sec.owner.yookassaPaymentMethodId!,
+            paymentMethodId: billingClient.yookassaPaymentMethodId!,
             description: `Автопродление #${sec.subscriptionIndex} (${sec.tariff.name})${tgIdSuffix}`,
             metadata: {
               orderId: orderIdForYk,
               extendsSecondarySubId: sec.id,
               autoRenew: "true",
-              clientId: sec.owner.id,
+              clientId: billingClient.id,
             },
-            customerEmail: sec.owner.email,
-            customerTelegramUsername: sec.owner.telegramUsername ?? null,
+            customerEmail: billingClient.email,
+            customerTelegramUsername: billingClient.telegramUsername ?? null,
           });
 
           if (autopayResult.ok) {
@@ -864,20 +935,20 @@ async function processSecondaryAutoRenewals(): Promise<void> {
             // YK отказала — возвращаем частично списанный баланс.
             if (paidViaBalance > 0) {
               await prisma.client.update({
-                where: { id: sec.owner.id },
+                where: { id: billingClient.id },
                 data: { balance: { increment: paidViaBalance } },
               }).catch(() => {});
               paidViaBalance = 0;
             }
             console.error(`[auto-renew/sec] YK autopay failed for sec ${sec.id}: ${autopayResult.error}`);
-            await notifyAutoRenewYookassaFailed(sec.owner.id, sec.tariff.name, autopayResult.error).catch(() => {});
-            await dispatchAutoRenewNotification(sec.owner.id, "FAILED", {
+            await notifyAutoRenewYookassaFailed(billingClient.id, sec.tariff.name, autopayResult.error).catch(() => {});
+            await dispatchAutoRenewNotification(billingClient.id, "FAILED", {
               tariffName: sec.tariff.name,
               amount: price,
               currency: sec.tariff.currency,
               expireAt: expireAtDate,
               subIndex: sec.subscriptionIndex,
-              balance: sec.owner.balance ?? 0,
+              balance: billingClient.balance ?? 0,
             }).catch(() => {});
             continue;
           }
@@ -885,14 +956,14 @@ async function processSecondaryAutoRenewals(): Promise<void> {
           // Сетевая / runtime ошибка YooKassa — возвращаем баланс.
           if (paidViaBalance > 0) {
             await prisma.client.update({
-              where: { id: sec.owner.id },
+              where: { id: billingClient.id },
               data: { balance: { increment: paidViaBalance } },
             }).catch(() => {});
             paidViaBalance = 0;
           }
           const errMsg = e instanceof Error ? e.message : "unknown error";
           console.error(`[auto-renew/sec] YK autopay exception for sec ${sec.id}:`, errMsg);
-          await notifyAutoRenewYookassaFailed(sec.owner.id, sec.tariff.name, errMsg).catch(() => {});
+          await notifyAutoRenewYookassaFailed(billingClient.id, sec.tariff.name, errMsg).catch(() => {});
           continue;
         }
       }
@@ -903,7 +974,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       // если activation fail — payment останется, recentYkPayment его найдёт).
       const payment = await prisma.payment.create({
         data: {
-          clientId: sec.owner.id,
+          clientId: billingClient.id,
           orderId: randomUUID(),
           tariffId: sec.tariff.id,
           amount: price,
@@ -928,19 +999,8 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       const { extendSecondarySubscription } = await import("../tariff/tariff-activation.service.js");
       const result = await extendSecondarySubscription(
         sec.id,
-        {
-          id: sec.tariff.id,
-          durationDays: sec.tariff.durationDays,
-          trafficLimitBytes: sec.tariff.trafficLimitBytes,
-          deviceLimit: sec.tariff.deviceLimit,
-          includedDevices: sec.tariff.includedDevices ?? undefined,
-          pricePerExtraDevice: sec.tariff.pricePerExtraDevice ?? 0,
-          maxExtraDevices: sec.tariff.maxExtraDevices ?? 0,
-          internalSquadUuids: sec.tariff.internalSquadUuids,
-          trafficResetMode: sec.tariff.trafficResetMode ?? undefined,
-          price,
-        },
-        undefined,
+        tariffActivationPayload,
+        selectedRenewOption,
         0,
       );
 
@@ -949,7 +1009,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         // Баланс возвращаем (если списали).
         if (paidViaBalance > 0) {
           await prisma.client.update({
-            where: { id: sec.owner.id },
+            where: { id: billingClient.id },
             data: { balance: { increment: paidViaBalance } },
           }).catch(() => {});
         }
@@ -968,26 +1028,26 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       // 7. Success → notif клиенту.
       if (paidViaYookassa > 0) {
         await notifyAutoRenewYookassaSuccess(
-          sec.owner.id,
+          billingClient.id,
           sec.tariff.name,
           price,
           sec.tariff.currency,
-          sec.owner.yookassaPaymentMethodTitle ?? undefined,
+          billingClient.yookassaPaymentMethodTitle ?? undefined,
           paidViaBalance,
           paidViaYookassa,
         ).catch(() => {});
       }
       // T-autorenew: кастомные SUCCESS уведомления.
-      await dispatchAutoRenewNotification(sec.owner.id, "SUCCESS", {
+      await dispatchAutoRenewNotification(billingClient.id, "SUCCESS", {
         tariffName: sec.tariff.name,
         amount: price,
         currency: sec.tariff.currency,
         expireAt: expireAtDate,
         subIndex: sec.subscriptionIndex,
-        balance: Math.max(0, (sec.owner.balance ?? 0) - paidViaBalance),
+        balance: Math.max(0, (billingClient.balance ?? 0) - paidViaBalance),
       }).catch(() => {});
 
-      console.log(`[auto-renew/sec] Renewed sec ${sec.id} for client ${sec.owner.id} — balance:${paidViaBalance}, yk:${paidViaYookassa}, total:${price}`);
+      console.log(`[auto-renew/sec] Renewed sec ${sec.id} for client ${billingClient.id} — balance:${paidViaBalance}, yk:${paidViaYookassa}, total:${price}`);
     } catch (e) {
       console.error(`[auto-renew/sec] Unexpected error processing sec ${sec.id}:`, e);
     }
