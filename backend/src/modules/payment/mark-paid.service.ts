@@ -14,6 +14,7 @@ import { applyExtraOptionByPaymentId } from "../extra-options/extra-options.serv
 import { notifyProxySlotsCreated, notifySingboxSlotsCreated, notifyWdttSlotsCreated } from "../notification/telegram-notify.service.js";
 import { auditPaymentClientBotAlignment } from "./payment-webhook-audit.util.js";
 import { extinguishOneTimeDiscount } from "../client/personal-discount.js";
+import { recordTariffActivation, recordReferralReward } from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -93,6 +94,7 @@ export async function markPaymentPaid(paymentId: string): Promise<MarkPaymentPai
     }
   } else if (payment.tariffId) {
     activation = await activateTariffByPaymentId(paymentId);
+    recordTariffActivation("vpn", activation.ok ? "success" : "failed");
   } else if (payment.proxyTariffId) {
     const proxyResult = await createProxySlotsByPaymentId(paymentId);
     if (proxyResult.ok) {
@@ -109,6 +111,7 @@ export async function markPaymentPaid(paymentId: string): Promise<MarkPaymentPai
     } else {
       proxySlots = { ok: false, error: proxyResult.error };
     }
+    recordTariffActivation("proxy", proxyResult.ok ? "success" : "failed");
   } else if (payment.singboxTariffId) {
     const singboxResult = await createSingboxSlotsByPaymentId(paymentId);
     if (singboxResult.ok) {
@@ -125,6 +128,7 @@ export async function markPaymentPaid(paymentId: string): Promise<MarkPaymentPai
     } else {
       proxySlots = { ok: false, error: singboxResult.error };
     }
+    recordTariffActivation("singbox", singboxResult.ok ? "success" : "failed");
   } else if (payment.wdttTariffId) {
     const wdttResult = await createWdttSlotsByPaymentId(paymentId);
     if (wdttResult.ok) {
@@ -141,6 +145,7 @@ export async function markPaymentPaid(paymentId: string): Promise<MarkPaymentPai
     } else {
       proxySlots = { ok: false, error: wdttResult.error };
     }
+    recordTariffActivation("wdtt", wdttResult.ok ? "success" : "failed");
   }
 
   if (payment.tariffId || payment.proxyTariffId || payment.singboxTariffId || payment.wdttTariffId) {
@@ -157,6 +162,8 @@ export async function markPaymentPaid(paymentId: string): Promise<MarkPaymentPai
   }
 
   const referral = await distributeReferralRewards(paymentId);
+  // referral: { distributed: boolean; message: string } — маппим на наш outcome
+  recordReferralReward(referral?.distributed ? "success" : "failed");
   const updated = await prisma.payment.findUnique({ where: { id: paymentId } });
   return {
     ok: true,

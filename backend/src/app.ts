@@ -56,11 +56,17 @@ import { botMessagesRouter } from "./modules/bot-messages/bot-messages.routes.js
 import { botConversationsRouter } from "./modules/bot-conversations/bot-conversations.routes.js";
 import { requireAuth } from "./modules/auth/middleware.js";
 import { renderSpaIndex } from "./modules/branding/spa-html.js";
+import { httpMetricsMiddleware, renderMetrics, PROMETHEUS_CONTENT_TYPE } from "./lib/metrics.js";
 
 const app = express();
 
 // За nginx: иначе express-rate-limit падает из-за X-Forwarded-For
 app.set("trust proxy", 1);
+
+// Prometheus-метрики HTTP. Должен стоять ДО helmet/cors, чтобы захватить
+// все ответы (включая 4xx/5xx от последующих middleware), но /metrics
+// сам по себе middleware игнорирует (см. httpMetricsMiddleware).
+app.use(httpMetricsMiddleware());
 
 app.use(helmet({
   hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
@@ -281,6 +287,20 @@ app.get("/api/health", (_req, res) => {
   // Версию не отдаём — fingerprint resistance. Внутренний мониторинг получает её
   // через защищённый эндпоинт `/api/admin/version` (требует auth).
   res.json({ status: "ok" });
+});
+
+// Prometheus scrape endpoint. Не считается в http_requests_total (см.
+// httpMetricsMiddleware). Защита на уровне nginx (allow Prometheus IP) —
+// сам по себе endpoint отдаёт только агрегаты, без PII.
+app.get("/metrics", async (_req, res) => {
+  try {
+    const body = await renderMetrics();
+    res.setHeader("Content-Type", PROMETHEUS_CONTENT_TYPE);
+    res.status(200).send(body);
+  } catch (e) {
+    console.error("[metrics] failed to render:", e);
+    res.status(500).send("# failed to render metrics\n");
+  }
 });
 
 // SSR-рендер index.html с подстановкой имени из брендинга (Telegram preview).

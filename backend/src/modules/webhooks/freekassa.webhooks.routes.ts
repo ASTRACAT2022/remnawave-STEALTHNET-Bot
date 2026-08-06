@@ -17,6 +17,13 @@ import {
 import { markPaymentPaid } from "../payment/mark-paid.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { recordWebhook, markOutcome, type WebhookOutcome } from "../webhook-inbox/webhook-inbox.service.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 export const freekassaWebhooksRouter = Router();
 export const freekassaFormParser = multer().none();
@@ -43,6 +50,7 @@ function serializeBody(body: unknown): string {
 }
 
 export async function handleFreekassaWebhook(req: Request, res: Response) {
+  recordPaymentWebhookReceived("freekassa");
   const captured = await recordWebhook("freekassa", req, serializeBody(req.body));
   const respond = async (
     status: number,
@@ -51,6 +59,7 @@ export async function handleFreekassaWebhook(req: Request, res: Response) {
     opts?: { errorMessage?: string; paymentId?: string | null },
   ) => {
     await markOutcome(captured, status, outcome, opts);
+    recordPaymentWebhookOutcome("freekassa", outcome);
     return res.status(status).send(body);
   };
 
@@ -67,6 +76,7 @@ export async function handleFreekassaWebhook(req: Request, res: Response) {
   const secretWord2 = (config as { freekassaSecretWord2?: string | null }).freekassaSecretWord2?.trim();
   if (!merchantId || !secretWord2) {
     console.warn("[FreeKassa Webhook] FreeKassa secret word 2 is not configured");
+    recordPaymentFailed("freekassa", "not_configured");
     return respond(503, "FreeKassa webhook is not configured", "error", { errorMessage: "Secret word 2 is not configured" });
   }
 
@@ -80,32 +90,38 @@ export async function handleFreekassaWebhook(req: Request, res: Response) {
 
   if (!incomingMerchantId || !amount || !orderId || !signature) {
     console.warn("[FreeKassa Webhook] Missing required fields", { bodyKeys: Object.keys(body) });
+    recordPaymentFailed("freekassa", "missing_fields");
     return respond(400, "Bad request", "rejected_payload", { errorMessage: `Missing required fields: ${Object.keys(body).join(",")}` });
   }
   if (incomingMerchantId !== merchantId) {
     console.warn("[FreeKassa Webhook] Merchant mismatch", { incomingMerchantId });
+    recordPaymentFailed("freekassa", "merchant_mismatch");
     return respond(403, "Forbidden", "rejected_signature", { errorMessage: `Merchant mismatch: ${incomingMerchantId}` });
   }
   if (!verifyFreekassaWebhookSignature({ merchantId, amount, secretWord2, merchantOrderId: orderId, signature })) {
     console.warn("[FreeKassa Webhook] Invalid signature", { orderId });
+    recordPaymentFailed("freekassa", "signature_invalid");
     return respond(403, "Wrong sign", "rejected_signature", { errorMessage: `Invalid signature for order ${orderId}` });
   }
 
   const payment = await prisma.payment.findFirst({
     where: { orderId, provider: "freekassa" },
-    select: { id: true, amount: true, status: true, externalId: true },
+    select: { id: true, amount: true, status: true, externalId: true, tariffId: true, proxyTariffId: true, singboxTariffId: true, wdttTariffId: true, metadata: true },
   });
   if (!payment) {
     console.warn("[FreeKassa Webhook] Payment not found", { orderId, fkOrderId });
+    recordPaymentFailed("freekassa", "payment_not_found");
     return respond(200, "YES", "payment_not_found", { errorMessage: `Payment not found: ${orderId}` });
   }
 
   const receivedAmount = Number(amount);
   if (!Number.isFinite(receivedAmount) || Math.abs(receivedAmount - payment.amount) > 0.01) {
     console.warn("[FreeKassa Webhook] Amount mismatch", { paymentId: payment.id, expected: payment.amount, received: amount });
+    recordPaymentFailed("freekassa", "amount_mismatch");
     return respond(400, "Amount mismatch", "rejected_payload", { paymentId: payment.id, errorMessage: `Amount mismatch: expected ${payment.amount}, received ${amount}` });
   }
 
+  const processingStart = process.hrtime.bigint();
   await prisma.payment.update({
     where: { id: payment.id },
     data: { externalId: fkOrderId || payment.externalId },
@@ -115,11 +131,16 @@ export async function handleFreekassaWebhook(req: Request, res: Response) {
     const result = await markPaymentPaid(payment.id);
     if (!result.ok) {
       console.error("[FreeKassa Webhook] mark paid failed", { paymentId: payment.id, error: result.error });
+      recordPaymentFailed("freekassa", "mark_paid_failed");
       return respond(500, "Payment processing error", "error", { paymentId: payment.id, errorMessage: result.error ?? "markPaymentPaid failed" });
     }
     await recordPromoCodeUsageFromPayment(payment.id).catch((e) => console.error("[FreeKassa Webhook] promo usage:", e));
+    const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+    const product = deriveProduct(payment);
+    recordPaymentProcessed("freekassa", product, seconds);
   } else {
     await markOutcome(captured, 200, "payment_already_paid", { paymentId: payment.id });
+    recordPaymentWebhookOutcome("freekassa", "payment_already_paid");
     console.log("[FreeKassa Webhook] Payment already paid", { paymentId: payment.id, orderId, fkOrderId });
     return res.status(200).send("YES");
   }

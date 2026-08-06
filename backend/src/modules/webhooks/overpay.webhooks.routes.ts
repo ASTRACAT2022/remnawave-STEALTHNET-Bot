@@ -24,6 +24,13 @@ import {
 } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -156,12 +163,14 @@ async function ensureTariffActivation(paymentId: string): Promise<void> {
 export const overpayWebhooksRouter = Router();
 
 async function handle(req: Request, res: Response) {
+  recordPaymentWebhookReceived("overpay");
   try {
     const src = (req.body && typeof req.body === "object") ? (req.body as Record<string, unknown>) : {};
     const q = (req.query ?? {}) as Record<string, unknown>;
     const data: Record<string, unknown> = { ...q, ...src };
     if (!data || Object.keys(data).length === 0) {
       console.warn("[Overpay Webhook] Empty body");
+      recordPaymentWebhookOutcome("overpay", "ignored");
       return res.status(200).json({ received: true });
     }
 
@@ -189,6 +198,7 @@ async function handle(req: Request, res: Response) {
 
     if (!orderId && !overpayId) {
       console.warn("[Overpay Webhook] No identifiers", { keys: Object.keys(data) });
+      recordPaymentWebhookOutcome("overpay", "rejected_payload");
       return res.status(200).json({ received: true });
     }
 
@@ -204,6 +214,7 @@ async function handle(req: Request, res: Response) {
           tariffId: string | null;
           proxyTariffId: string | null;
           singboxTariffId: string | null;
+          wdttTariffId: string | null;
           metadata: string | null;
           orderId: string;
           externalId: string | null;
@@ -218,6 +229,7 @@ async function handle(req: Request, res: Response) {
       tariffId: true,
       proxyTariffId: true,
       singboxTariffId: true,
+      wdttTariffId: true,
       metadata: true,
       orderId: true,
       externalId: true,
@@ -243,6 +255,8 @@ async function handle(req: Request, res: Response) {
 
     if (!payment) {
       console.warn("[Overpay Webhook] Payment not found", { orderId, overpayId, status });
+      recordPaymentFailed("overpay", "payment_not_found");
+      recordPaymentWebhookOutcome("overpay", "payment_not_found");
       return res.status(200).json({ received: true });
     }
 
@@ -261,16 +275,19 @@ async function handle(req: Request, res: Response) {
           orderId: payment.orderId,
         });
       }
+      recordPaymentWebhookOutcome("overpay", "processed");
       return res.status(200).json({ received: true });
     }
 
     if (!OVERPAY_SUCCESS_STATUSES.has(status)) {
       console.log("[Overpay Webhook] Ignored status", { status, paymentId: payment.id });
+      recordPaymentWebhookOutcome("overpay", "ignored");
       return res.status(200).json({ received: true });
     }
 
     const isExtraOption = hasExtraOptionInMetadata(payment.metadata);
     const isTopUp = !payment.tariffId && !payment.proxyTariffId && !payment.singboxTariffId && !isExtraOption;
+    const processingStart = process.hrtime.bigint();
     if (isTopUp) {
       const changed = await prisma.$transaction(async (tx) => {
         const upd = await tx.payment.updateMany({
@@ -325,9 +342,14 @@ async function handle(req: Request, res: Response) {
       console.error("[Overpay Webhook] Referral distribution error", { paymentId: payment.id, error: e });
     });
 
+    const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+    recordPaymentProcessed("overpay", deriveProduct(payment), seconds);
+    recordPaymentWebhookOutcome("overpay", "accepted");
     return res.status(200).json({ received: true });
   } catch (e) {
     console.error("[Overpay Webhook] Error:", e);
+    recordPaymentFailed("overpay", "handler_error");
+    recordPaymentWebhookOutcome("overpay", "error");
     return res.status(200).json({ received: true });
   }
 }

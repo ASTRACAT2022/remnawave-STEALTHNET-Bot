@@ -5,6 +5,7 @@
 
 import { Router } from "express";
 import { z } from "zod";
+import { recordPaymentWebhookReceived, recordPaymentWebhookOutcome } from "../../lib/payment-metrics.js";
 
 const webhookBodySchema = z.object({
   scope: z.string(),
@@ -17,8 +18,10 @@ const webhookBodySchema = z.object({
 export const remnaWebhooksRouter = Router();
 
 remnaWebhooksRouter.post("/remna", async (req, res) => {
+  recordPaymentWebhookReceived("remna");
   const parsed = webhookBodySchema.safeParse(req.body);
   if (!parsed.success) {
+    recordPaymentWebhookOutcome("remna", "rejected_payload");
     return res.status(400).json({ message: "Invalid webhook payload", errors: parsed.error.flatten() });
   }
 
@@ -28,5 +31,6 @@ remnaWebhooksRouter.post("/remna", async (req, res) => {
   console.log("[Remna Webhook]", { scope, event, timestamp, dataKeys: data ? Object.keys(data) : [] });
 
   // Подтверждаем приём (Remna может ожидать 2xx)
+  recordPaymentWebhookOutcome("remna", "accepted");
   return res.status(200).json({ received: true, scope, event });
 });

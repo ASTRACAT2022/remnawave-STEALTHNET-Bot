@@ -16,6 +16,12 @@ import { distributeReferralRewards } from "../referral/referral.service.js";
 import { notifyBalanceToppedUp, notifyTariffActivated, notifyProxySlotsCreated, notifySingboxSlotsCreated } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -39,6 +45,7 @@ type HeleketWebhookPayload = {
 
 /** POST /api/webhooks/heleket — вызывается с express.raw(), req.body = Buffer */
 heleketWebhooksRouter.post("/", async (req: Request, res: Response) => {
+  recordPaymentWebhookReceived("heleket");
   const rawBody = req.body;
   const rawString = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : "";
   if (!rawString) {
@@ -64,17 +71,20 @@ heleketWebhooksRouter.post("/", async (req: Request, res: Response) => {
   const signFromBody = body.sign;
   if (!verifyHeleketWebhookSignature(apiKey, rawString, signFromBody)) {
     console.warn("[Heleket Webhook] Invalid signature");
+    recordPaymentFailed("heleket", "signature_invalid");
     return res.status(401).send("Invalid signature");
   }
 
   const status = (body.status ?? "").toLowerCase();
   if (status !== "paid" && status !== "paid_over") {
+    recordPaymentWebhookOutcome("heleket", "ignored");
     return res.status(200).send("OK");
   }
 
   const orderId = body.order_id?.trim();
   if (!orderId) {
     console.warn("[Heleket Webhook] No order_id");
+    recordPaymentFailed("heleket", "missing_order_id");
     return res.status(200).send("OK");
   }
 
@@ -88,6 +98,7 @@ heleketWebhooksRouter.post("/", async (req: Request, res: Response) => {
       tariffId: true,
       proxyTariffId: true,
       singboxTariffId: true,
+      wdttTariffId: true,
       status: true,
       metadata: true,
     },
@@ -95,15 +106,18 @@ heleketWebhooksRouter.post("/", async (req: Request, res: Response) => {
 
   if (!payment) {
     console.warn("[Heleket Webhook] Payment not found", { orderId });
+    recordPaymentFailed("heleket", "payment_not_found");
     return res.status(200).send("OK");
   }
 
   await auditPaymentClientBotAlignment(payment);
 
   if (payment.status === "PAID") {
+    recordPaymentWebhookOutcome("heleket", "payment_already_paid");
     return res.status(200).send("OK");
   }
 
+  const processingStart = process.hrtime.bigint();
   const uuid = body.uuid ?? null;
   await prisma.payment.update({
     where: { id: payment.id },
@@ -151,5 +165,24 @@ heleketWebhooksRouter.post("/", async (req: Request, res: Response) => {
 
   await distributeReferralRewards(payment.id).catch(() => {});
 
+  const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+  recordPaymentProcessed("heleket", deriveProductLite(payment), seconds);
+  recordPaymentWebhookOutcome("heleket", "accepted");
   return res.status(200).send("OK");
 });
+
+// Локальный мини-helper (избегаем круговой импорт типов через payment-metrics)
+function deriveProductLite(p: {
+  tariffId?: string | null;
+  proxyTariffId?: string | null;
+  singboxTariffId?: string | null;
+  wdttTariffId?: string | null;
+  metadata?: string | null;
+}): import("../../lib/payment-metrics.js").PaymentProduct {
+  if (p.proxyTariffId) return "proxy";
+  if (p.singboxTariffId) return "singbox";
+  if (p.wdttTariffId) return "wdtt";
+  if (p.tariffId) return "tariff";
+  if (p.metadata?.includes("\"extraOption\"")) return "extra_option";
+  return "topup";
+}

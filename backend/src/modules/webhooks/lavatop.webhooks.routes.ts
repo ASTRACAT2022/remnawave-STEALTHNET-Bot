@@ -39,6 +39,13 @@ import {
 } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -203,10 +210,12 @@ async function handleRecurringRenewal(event: LavatopWebhookEvent): Promise<void>
 
 /** POST /api/webhooks/lavatop */
 lavatopWebhooksRouter.post("/", async (req: Request, res: Response) => {
+  recordPaymentWebhookReceived("lavatop");
   const config = await getSystemConfig();
   const apiKey = (config as { lavatopApiKey?: string | null }).lavatopApiKey?.trim();
   if (!apiKey) {
     console.warn("[Lava.top Webhook] не настроено (нет lavatop_api_key)");
+    recordPaymentWebhookOutcome("lavatop", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -214,12 +223,15 @@ lavatopWebhooksRouter.post("/", async (req: Request, res: Response) => {
   const auth = req.header("authorization") || undefined;
   if (!verifyLavatopWebhookAuth(apiKey, { xApiKey, authorization: auth })) {
     console.warn("[Lava.top Webhook] неверный X-Api-Key");
+    recordPaymentFailed("lavatop", "auth_invalid");
+    recordPaymentWebhookOutcome("lavatop", "rejected_signature");
     return res.status(401).send("Unauthorized");
   }
 
   const body = req.body;
   if (!body || typeof body !== "object") {
     console.warn("[Lava.top Webhook] пустое body");
+    recordPaymentWebhookOutcome("lavatop", "bad_payload");
     return res.status(200).send("OK");
   }
 
@@ -239,20 +251,28 @@ lavatopWebhooksRouter.post("/", async (req: Request, res: Response) => {
     // Просто фиксируем в логе. Не отменяем уже выданный тариф —
     // он истечёт по своему сроку. Дальше клиент платит новой подпиской если хочет.
     console.log("[Lava.top Webhook] подписка отменена", { contractId: event.contractId });
+    recordPaymentWebhookOutcome("lavatop", "ignored");
     return res.status(200).send("OK");
   }
 
   // Обрабатываем только успешные платежи — failed логируем и игнорим.
   if (event.status !== "success") {
+    recordPaymentWebhookOutcome("lavatop", "ignored");
     return res.status(200).send("OK");
   }
 
   // ─── Recurring renewal: subscription.recurring.payment.success ──
   if (/subscription\.recurring\.payment\.success/i.test(event.eventType)) {
     try {
+      const recurringStart = process.hrtime.bigint();
       await handleRecurringRenewal(event);
+      const seconds = Number(process.hrtime.bigint() - recurringStart) / 1e9;
+      recordPaymentProcessed("lavatop", "topup", seconds);
+      recordPaymentWebhookOutcome("lavatop", "accepted");
     } catch (e) {
       console.error("[Lava.top Webhook] ошибка recurring renewal:", e);
+      recordPaymentFailed("lavatop", "recurring_renewal_error");
+      recordPaymentWebhookOutcome("lavatop", "error");
     }
     return res.status(200).send("OK");
   }
@@ -261,22 +281,29 @@ lavatopWebhooksRouter.post("/", async (req: Request, res: Response) => {
   const orderId = event.contractId?.trim();
   if (!orderId) {
     console.warn("[Lava.top Webhook] нет contractId");
+    recordPaymentWebhookOutcome("lavatop", "ignored");
     return res.status(200).send("OK");
   }
 
   const payment = await prisma.payment.findFirst({
     where: { orderId, provider: "lavatop" },
-    select: { id: true, status: true, clientId: true, amount: true, currency: true, tariffId: true, proxyTariffId: true, singboxTariffId: true, metadata: true },
+    select: { id: true, status: true, clientId: true, amount: true, currency: true, tariffId: true, proxyTariffId: true, singboxTariffId: true, wdttTariffId: true, metadata: true },
   });
 
   if (!payment) {
     console.warn("[Lava.top Webhook] payment не найден", { orderId });
+    recordPaymentFailed("lavatop", "payment_not_found");
+    recordPaymentWebhookOutcome("lavatop", "payment_not_found");
     return res.status(200).send("OK");
   }
 
   await auditPaymentClientBotAlignment(payment);
-  if (payment.status === "PAID") return res.status(200).send("OK"); // already processed
+  if (payment.status === "PAID") {
+    recordPaymentWebhookOutcome("lavatop", "payment_already_paid");
+    return res.status(200).send("OK"); // already processed
+  }
 
+  const processingStart = process.hrtime.bigint();
   await prisma.payment.update({
     where: { id: payment.id },
     data: { status: "PAID", paidAt: new Date(), externalId: event.productId || null },
@@ -284,5 +311,8 @@ lavatopWebhooksRouter.post("/", async (req: Request, res: Response) => {
   await recordPromoCodeUsageFromPayment(payment.id);
   await activatePayment(payment.id);
 
+  const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+  recordPaymentProcessed("lavatop", deriveProduct(payment), seconds);
+  recordPaymentWebhookOutcome("lavatop", "accepted");
   return res.status(200).send("OK");
 });

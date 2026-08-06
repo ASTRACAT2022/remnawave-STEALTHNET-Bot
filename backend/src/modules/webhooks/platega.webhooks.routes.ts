@@ -39,6 +39,13 @@ import { distributeReferralRewards } from "../referral/referral.service.js";
 import { notifyBalanceToppedUp, notifyTariffActivated, notifyProxySlotsCreated, notifySingboxSlotsCreated } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -309,11 +316,16 @@ void isPlategaConfigured;
 plategaWebhooksRouter.post("/platega", async (req, res) => {
   // 1. Получаем raw body (нужен для HMAC если он задан) и парсим JSON.
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === "string" ? req.body : "");
+  recordPaymentWebhookReceived("platega");
 
   // 0. Сохраняем webhook в inbox для аудита/replay. ID нужен чтобы потом markOutcome().
   const captured = await recordWebhook("platega", req, rawBody);
   const ack = (status: number, outcome: Parameters<typeof markOutcome>[2], errorMessage?: string, paymentId?: string | null) => {
     void markOutcome(captured, status, outcome, { errorMessage, paymentId });
+  };
+  const ackAndMetric = (status: number, metricOutcome: string, ackOutcome: Parameters<typeof markOutcome>[2], errorMessage?: string, paymentId?: string | null) => {
+    recordPaymentWebhookOutcome("platega", metricOutcome);
+    void markOutcome(captured, status, ackOutcome, { errorMessage, paymentId });
   };
 
   // 2. Опциональная HMAC проверка — если в админке задан platega_webhook_secret.
@@ -326,7 +338,8 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
     const sigCheck = verifyPlategaHmacSignature(rawBody, headerSig, hmacSecret);
     if (!sigCheck.ok) {
       console.warn(`[Platega Webhook] HMAC signature failed: ${sigCheck.reason}`);
-      ack(401, "rejected_signature", `HMAC: ${sigCheck.reason}`);
+      recordPaymentFailed("platega", `hmac_${sigCheck.reason ?? "invalid"}`);
+      ackAndMetric(401, "rejected_signature", "rejected_signature", `HMAC: ${sigCheck.reason}`);
       return res.status(401).json({ message: "Invalid signature" });
     }
   }
@@ -338,7 +351,8 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
       parsedBody = JSON.parse(rawBody.toString("utf8")) as Record<string, unknown>;
     } catch (e) {
       console.warn("[Platega Webhook] Invalid JSON body", e);
-      ack(400, "rejected_payload", "Invalid JSON");
+      recordPaymentFailed("platega", "bad_payload");
+      ackAndMetric(400, "bad_payload", "rejected_payload", "Invalid JSON");
       return res.status(400).json({ message: "Invalid JSON" });
     }
   }
@@ -348,7 +362,7 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
     const data = parsedBody;
     if (!data || Object.keys(data).length === 0) {
       console.warn("[Platega Webhook] Empty body");
-      ack(200, "rejected_payload", "Empty body");
+      ackAndMetric(200, "ignored", "rejected_payload", "Empty body");
       return res.status(200).json({ received: true });
     }
 
@@ -386,14 +400,15 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
     const candidateIds = [...new Set([payloadId, transactionId, externalId, orderId].filter(Boolean) as string[])];
     if (candidateIds.length === 0) {
       console.warn("[Platega Webhook] No identifiers", { keys: Object.keys(data) });
-      ack(200, "rejected_payload", "no identifiers in payload");
+      ackAndMetric(200, "rejected_payload", "rejected_payload", "no identifiers in payload");
       return res.status(200).json({ received: true });
     }
 
     const payment = await findPlategaPaymentByAnyId(candidateIds);
     if (!payment) {
       console.warn("[Platega Webhook] Payment not found", { candidateIds, status });
-      ack(200, "payment_not_found", `tried: ${candidateIds.join(",")}`);
+      recordPaymentFailed("platega", "payment_not_found");
+      ackAndMetric(200, "payment_not_found", "payment_not_found", `tried: ${candidateIds.join(",")}`);
       return res.status(200).json({ received: true });
     }
 
@@ -407,13 +422,14 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
       if (failed.count > 0) {
         console.log("[Platega Webhook] Payment marked FAILED", { paymentId: payment.id, status, transactionId, orderId: payment.orderId });
       }
-      ack(200, "payment_failed", `provider status=${status}`, payment.id);
+      recordPaymentFailed("platega", `provider_${status.toLowerCase()}`);
+      ackAndMetric(200, "processed", "payment_failed", `provider status=${status}`, payment.id);
       return res.status(200).json({ received: true });
     }
 
     if (!SUCCESS_STATUSES.has(status)) {
       console.log("[Platega Webhook] Ignored status", { status, paymentId: payment.id, candidateIds });
-      ack(200, "ignored_event", `status=${status}`, payment.id);
+      ackAndMetric(200, "ignored", "ignored_event", `status=${status}`, payment.id);
       return res.status(200).json({ received: true });
     }
 
@@ -429,7 +445,8 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
         webhookStatus: status,
         reason: apiVerify.reason,
       });
-      ack(401, "rejected_signature", `API double-check: ${apiVerify.reason}`, payment.id);
+      recordPaymentFailed("platega", `api_${apiVerify.reason}`);
+      ackAndMetric(401, "rejected_signature", "rejected_signature", `API double-check: ${apiVerify.reason}`, payment.id);
       return res.status(401).json({ message: "Platega API does not confirm this transaction" });
     }
     if (apiVerify.trusted === "unverified") {
@@ -440,6 +457,7 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
 
     const isExtraOption = hasExtraOptionInMetadata(payment.metadata);
     const isTopUp = !payment.tariffId && !payment.proxyTariffId && !payment.singboxTariffId && !isExtraOption;
+    const processingStart = process.hrtime.bigint();
     if (isTopUp) {
       const changed = await prisma.$transaction(async (tx) => {
         const upd = await tx.payment.updateMany({
@@ -499,10 +517,15 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
       console.error("[Platega Webhook] Referral distribution error", { paymentId: payment.id, error: e });
     });
 
+    const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+    recordPaymentProcessed("platega", deriveProduct(payment), seconds);
+    recordPaymentWebhookOutcome("platega", "accepted");
     ack(200, "accepted", undefined, payment.id);
     return res.status(200).json({ received: true });
   } catch (e) {
     console.error("[Platega Webhook] Error:", e);
+    recordPaymentFailed("platega", "handler_error");
+    recordPaymentWebhookOutcome("platega", "error");
     ack(200, "error", String(e));
     return res.status(200).json({ received: true });
   }

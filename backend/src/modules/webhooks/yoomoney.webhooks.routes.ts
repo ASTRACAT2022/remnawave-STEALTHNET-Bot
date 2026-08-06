@@ -27,6 +27,13 @@ import { distributeReferralRewards } from "../referral/referral.service.js";
 import { notifyBalanceToppedUp, notifyTariffActivated, notifyProxySlotsCreated, notifySingboxSlotsCreated } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 export const yoomoneyWebhooksRouter = Router();
 
@@ -67,9 +74,11 @@ function computeSha1(
 }
 
 yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
+  recordPaymentWebhookReceived("yoomoney");
   const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
   if (Object.keys(body).length === 0) {
     console.warn("[YooMoney Webhook] Empty body — проверьте Content-Type (должен быть application/x-www-form-urlencoded) и что nginx не съедает тело запроса");
+    recordPaymentWebhookOutcome("yoomoney", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -99,15 +108,19 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
 
   if (!notificationType || !operationId || !amount || !sha1Hash) {
     console.warn("[YooMoney Webhook] Missing required fields", { keys: Object.keys(body) });
+    recordPaymentFailed("yoomoney", "missing_fields");
+    recordPaymentWebhookOutcome("yoomoney", "rejected_payload");
     return res.status(400).send("Bad request");
   }
 
   if (codeproStr === "true") {
     console.log("[YooMoney Webhook] Ignored: codepro=true (protected transfer)");
+    recordPaymentWebhookOutcome("yoomoney", "ignored");
     return res.status(200).send("OK");
   }
   if (unaccepted && unaccepted !== "false") {
     console.log("[YooMoney Webhook] Ignored: unaccepted=", unaccepted);
+    recordPaymentWebhookOutcome("yoomoney", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -115,6 +128,8 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
   const secret = config.yoomoneyNotificationSecret?.trim();
   if (!secret) {
     console.warn("[YooMoney Webhook] yoomoney_notification_secret not configured");
+    recordPaymentFailed("yoomoney", "not_configured");
+    recordPaymentWebhookOutcome("yoomoney", "error");
     return res.status(500).send("Server configuration error");
   }
 
@@ -131,11 +146,14 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
   );
   if (expectedHash.toLowerCase() !== sha1Hash.toLowerCase()) {
     console.warn("[YooMoney Webhook] Invalid sha1_hash", { expected: expectedHash.slice(0, 8) + "…", received: sha1Hash.slice(0, 8) + "…" });
+    recordPaymentFailed("yoomoney", "signature_invalid");
+    recordPaymentWebhookOutcome("yoomoney", "rejected_signature");
     return res.status(403).send("Invalid signature");
   }
 
   if (!label.trim()) {
     console.warn("[YooMoney Webhook] Empty label, cannot match payment");
+    recordPaymentWebhookOutcome("yoomoney", "rejected_payload");
     return res.status(200).send("OK");
   }
 
@@ -158,9 +176,11 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
     id: true,
     clientId: true,
     amount: true,
+    currency: true,
     tariffId: true,
     proxyTariffId: true,
     singboxTariffId: true,
+    wdttTariffId: true,
     status: true,
     metadata: true,
   } as const;
@@ -188,6 +208,8 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
 
   if (!payment) {
     console.warn("[YooMoney Webhook] Payment not found", { label: labelNorm, operationId });
+    recordPaymentFailed("yoomoney", "payment_not_found");
+    recordPaymentWebhookOutcome("yoomoney", "payment_not_found");
     return res.status(200).send("OK");
   }
 
@@ -195,16 +217,20 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
 
   if (payment.status === "PAID") {
     console.log("[YooMoney Webhook] Payment already processed", { paymentId: payment.id });
+    recordPaymentWebhookOutcome("yoomoney", "payment_already_paid");
     return res.status(200).send("OK");
   }
 
   const amountNum = parseFloat(amount);
   if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    recordPaymentFailed("yoomoney", "amount_mismatch");
+    recordPaymentWebhookOutcome("yoomoney", "rejected_payload");
     return res.status(200).send("OK");
   }
 
   const isExtraOption = hasExtraOptionInMetadata(payment.metadata);
   const isTopUp = !payment.tariffId && !payment.proxyTariffId && !payment.singboxTariffId && !isExtraOption;
+  const processingStart = process.hrtime.bigint();
 
   if (isTopUp) {
     await prisma.$transaction([
@@ -281,5 +307,8 @@ yoomoneyWebhooksRouter.post("/yoomoney", async (req, res) => {
     console.error("[YooMoney Webhook] Referral distribution error", { paymentId: payment.id, error: e });
   });
 
+  const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+  recordPaymentProcessed("yoomoney", deriveProduct(payment), seconds);
+  recordPaymentWebhookOutcome("yoomoney", "accepted");
   return res.status(200).send("OK");
 });

@@ -20,6 +20,7 @@ import { ensureTheme, seedDefaultsToEmptyBlocks } from "./modules/landing/landin
 import { migrateLandingToBlocks } from "./scripts/migrate-landing-to-blocks.js";
 import { registerCron } from "./modules/diagnostics/cron-registry.js";
 import { runContestDailyReminder } from "./modules/contest/contest-daily-reminder.service.js";
+import { startMetricsCollector, stopMetricsCollector } from "./lib/metrics-collector.js";
 
 async function main() {
   await prisma.$connect();
@@ -72,6 +73,15 @@ async function main() {
   registerCron({ name: "gift-expiry", cron: "*/30 * * * *", description: "Истёкшие gift-коды → освобождаем зарезервированные подписки" });
   registerCron({ name: "auto-backup", cron: "0 4 * * *", description: "Автоматический бэкап БД" });
   registerCron({ name: "marketplace-heartbeat", cron: "*/10 * * * *", description: "Heartbeat в маркетплейс-хаб" });
+  registerCron({
+    name: "metrics-collector",
+    cron: "*/30 * * * * *", // каждые 30s — встроенный setInterval, но регистрируем для visibility
+    description: "Сбор технических метрик Remnawave → Prometheus",
+  });
+
+  // Prometheus metrics collector. Безопасен если Remnawave не настроена —
+  // просто оставит node/user gauges пустыми, HTTP/Prisma-метрики работают.
+  startMetricsCollector();
 
   const server = app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`API v5.0.0 listening on port ${env.PORT}`);
@@ -84,6 +94,7 @@ async function main() {
     stopFreekassaReconcileScheduler();
     stopAutoBackupScheduler();
     stopMarketplaceScheduler();
+    stopMetricsCollector();
     server.close();
     await prisma.$disconnect();
     process.exit(0);

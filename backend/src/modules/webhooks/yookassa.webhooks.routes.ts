@@ -25,6 +25,13 @@ import { notifyBalanceToppedUp, notifyTariffActivated, notifyProxySlotsCreated, 
 import { createNalogReceipt } from "../nalog/nalog.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -113,11 +120,14 @@ async function verifyYookassaWebhookAuth(req: { headers: Record<string, unknown>
 }
 
 yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
+  recordPaymentWebhookReceived("yookassa");
   // ВАЖНО: проверка аутентификации ПЕРЕД любыми DB-операциями.
   const auth = await verifyYookassaWebhookAuth(req);
   if (!auth.ok) {
     console.warn(`[YooKassa Webhook] Auth failed: ${auth.reason}`);
     res.set("WWW-Authenticate", 'Basic realm="yookassa-webhook"');
+    recordPaymentFailed("yookassa", `auth_${auth.reason ?? "invalid"}`);
+    recordPaymentWebhookOutcome("yookassa", "rejected_signature");
     return res.status(401).json({ message: "Unauthorized" });
   }
 
@@ -130,17 +140,20 @@ yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
       hasBody: !!req.body,
       event: body.event,
     });
+    recordPaymentWebhookOutcome("yookassa", "rejected_payload");
     return res.status(200).send("OK");
   }
 
   const event = body.event ?? "";
   const paymentId = body.object?.metadata?.payment_id?.trim();
   if (!paymentId) {
+    recordPaymentWebhookOutcome("yookassa", "rejected_payload");
     return res.status(200).send("OK");
   }
 
   if (event !== "payment.succeeded") {
     console.log("[YooKassa Webhook] Ignored event", { event, paymentId });
+    recordPaymentWebhookOutcome("yookassa", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -154,6 +167,7 @@ yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
       tariffId: true,
       proxyTariffId: true,
       singboxTariffId: true,
+      wdttTariffId: true,
       status: true,
       metadata: true,
     },
@@ -161,6 +175,8 @@ yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
 
   if (!payment) {
     console.warn("[YooKassa Webhook] Payment not found", { paymentId });
+    recordPaymentFailed("yookassa", "payment_not_found");
+    recordPaymentWebhookOutcome("yookassa", "payment_not_found");
     return res.status(200).send("OK");
   }
 
@@ -168,10 +184,12 @@ yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
 
   if (payment.status === "PAID") {
     console.log("[YooKassa Webhook] Already processed", { paymentId });
+    recordPaymentWebhookOutcome("yookassa", "payment_already_paid");
     return res.status(200).send("OK");
   }
 
   const yookassaId = body.object?.id ?? null;
+  const processingStart = process.hrtime.bigint();
   await prisma.payment.update({
     where: { id: payment.id },
     data: { status: "PAID", paidAt: new Date(), externalId: yookassaId },
@@ -284,5 +302,8 @@ yookassaWebhooksRouter.post("/yookassa", async (req, res) => {
     console.warn("[YooKassa Webhook] Nalog receipt error (non-critical):", e);
   });
 
+  const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+  recordPaymentProcessed("yookassa", deriveProduct(payment), seconds);
+  recordPaymentWebhookOutcome("yookassa", "accepted");
   return res.status(200).send("OK");
 });

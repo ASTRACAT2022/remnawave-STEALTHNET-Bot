@@ -21,6 +21,13 @@ import { distributeReferralRewards } from "../referral/referral.service.js";
 import { notifyBalanceToppedUp, notifyTariffActivated, notifyProxySlotsCreated, notifySingboxSlotsCreated } from "../notification/telegram-notify.service.js";
 import { recordPromoCodeUsageFromPayment } from "../payment/promo-code-usage.util.js";
 import { auditPaymentClientBotAlignment } from "../payment/payment-webhook-audit.util.js";
+import {
+  recordPaymentWebhookReceived,
+  recordPaymentWebhookOutcome,
+  recordPaymentProcessed,
+  recordPaymentFailed,
+  deriveProduct,
+} from "../../lib/payment-metrics.js";
 
 function hasExtraOptionInMetadata(metadata: string | null): boolean {
   if (!metadata?.trim()) return false;
@@ -48,10 +55,12 @@ type LavaWebhookPayload = {
 
 /** POST /api/webhooks/lava — вызывается с express.raw(), req.body = Buffer */
 lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
+  recordPaymentWebhookReceived("lava");
   const rawBody = req.body;
   const rawString = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : "";
   if (!rawString) {
     console.warn("[Lava Webhook] Empty body");
+    recordPaymentWebhookOutcome("lava", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -66,9 +75,12 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
   if (!additionalKey) {
     if (secretKey) {
       console.warn("[Lava Webhook] additional_key NOT configured — webhook нельзя проверить. Зайди в кабинет Lava → Доп. настройки → Дополнительный секретный ключ → сгенерируй и впиши его в админке (Settings → Платежи → Lava → Additional key).");
+      recordPaymentFailed("lava", "not_configured");
+      recordPaymentWebhookOutcome("lava", "error");
       return res.status(503).send("Lava webhook signing key not configured");
     }
     console.warn("[Lava Webhook] Lava not configured at all");
+    recordPaymentWebhookOutcome("lava", "ignored");
     return res.status(200).send("OK");
   }
   const verifyKey = additionalKey;
@@ -81,6 +93,8 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
 
   if (!verifyLavaWebhookSignature(verifyKey, rawString, sigHeader)) {
     console.warn("[Lava Webhook] Invalid signature");
+    recordPaymentFailed("lava", "signature_invalid");
+    recordPaymentWebhookOutcome("lava", "rejected_signature");
     return res.status(401).send("Invalid signature");
   }
 
@@ -89,6 +103,7 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
     body = JSON.parse(rawString) as LavaWebhookPayload;
   } catch {
     console.warn("[Lava Webhook] Invalid JSON");
+    recordPaymentWebhookOutcome("lava", "bad_payload");
     return res.status(200).send("OK");
   }
 
@@ -96,6 +111,7 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
   const orderId = body.order_id?.trim();
   if (!orderId) {
     console.warn("[Lava Webhook] No order_id");
+    recordPaymentWebhookOutcome("lava", "ignored");
     return res.status(200).send("OK");
   }
 
@@ -109,6 +125,7 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
       tariffId: true,
       proxyTariffId: true,
       singboxTariffId: true,
+      wdttTariffId: true,
       status: true,
       metadata: true,
     },
@@ -116,6 +133,8 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
 
   if (!payment) {
     console.warn("[Lava Webhook] Payment not found", { orderId });
+    recordPaymentFailed("lava", "payment_not_found");
+    recordPaymentWebhookOutcome("lava", "payment_not_found");
     return res.status(200).send("OK");
   }
 
@@ -126,15 +145,18 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
     if (payment.status === "PENDING" && (status === "expired" || status === "cancel" || status === "error")) {
       await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
     }
+    recordPaymentWebhookOutcome("lava", "ignored");
     return res.status(200).send("OK");
   }
 
   // Идемпотентность: если уже PAID — просто OK.
   if (payment.status === "PAID") {
+    recordPaymentWebhookOutcome("lava", "payment_already_paid");
     return res.status(200).send("OK");
   }
 
   const invoiceId = body.invoice_id ?? null;
+  const processingStart = process.hrtime.bigint();
   await prisma.payment.update({
     where: { id: payment.id },
     data: { status: "PAID", paidAt: new Date(), externalId: invoiceId },
@@ -181,5 +203,8 @@ lavaWebhooksRouter.post("/", async (req: Request, res: Response) => {
 
   await distributeReferralRewards(payment.id).catch(() => {});
 
+  const seconds = Number(process.hrtime.bigint() - processingStart) / 1e9;
+  recordPaymentProcessed("lava", deriveProduct(payment), seconds);
+  recordPaymentWebhookOutcome("lava", "accepted");
   return res.status(200).send("OK");
 });
