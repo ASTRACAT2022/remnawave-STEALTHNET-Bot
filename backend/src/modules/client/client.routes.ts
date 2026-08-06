@@ -141,6 +141,53 @@ function calculateExpireAt(currentExpireAt: Date | null, durationDays: number): 
   return new Date(base.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+type CabinetPaymentKind = "tariff" | "proxy" | "singbox" | "wdtt" | "custom_build" | "option" | "topup";
+
+function detectCabinetPaymentKind(input: {
+  tariffId?: string | null;
+  proxyTariffId?: string | null;
+  singboxTariffId?: string | null;
+  wdttTariffId?: string | null;
+  customBuild?: unknown;
+  extraOption?: unknown;
+  metadata?: string | null;
+}): CabinetPaymentKind {
+  if (input.tariffId) return "tariff";
+  if (input.proxyTariffId) return "proxy";
+  if (input.singboxTariffId) return "singbox";
+  if (input.wdttTariffId) return "wdtt";
+  if (input.customBuild) return "custom_build";
+  if (input.extraOption) return "option";
+  if (input.metadata) {
+    try {
+      const meta = JSON.parse(input.metadata) as Record<string, unknown>;
+      if (meta.customBuild) return "custom_build";
+      if (meta.extraOption) return "option";
+    } catch {
+      /* ignore malformed legacy metadata */
+    }
+  }
+  return "topup";
+}
+
+function buildCabinetPaymentResultUrl(appUrl: string, kind: CabinetPaymentKind, status: "success" | "failed", orderId?: string): string {
+  if (!appUrl) return "";
+  const path = status === "success" && kind !== "topup" ? "/cabinet/subscribe" : "/cabinet/dashboard";
+  const params = new URLSearchParams({ payment: status, payment_kind: kind });
+  if (orderId) params.set("oid", orderId);
+  return `${appUrl}${path}?${params.toString()}`;
+}
+
+function normalizeSubscriptionDisplayName(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim().replace(/\s+/g, " ");
+  return trimmed ? trimmed.slice(0, 120) : null;
+}
+
+function normalizeSubscriptionDescription(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed ? trimmed.slice(0, 1000) : null;
+}
+
 /**
  * Определяет, какому Bot-клону принадлежит запрос на регистрацию/логин.
  *
@@ -1765,6 +1812,33 @@ clientRouter.patch("/auto-renew", async (req, res) => {
     data: updates,
     select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, remnawaveUuid: true, trialUsed: true, isBlocked: true, autoRenewEnabled: true, autoRenewTariffId: true, autoRenewPromoCode: true, createdAt: true, onboardingCompleted: true, passwordHash: true },
   });
+
+  const subUpdates: {
+    autoRenewEnabled?: boolean;
+    autoRenewTariffId?: string | null;
+    autoRenewPriceOptionId?: string | null;
+    autoRenewExtraDevices?: number;
+    autoRenewPromoCode?: string | null;
+  } = {};
+  if (updates.autoRenewEnabled !== undefined) subUpdates.autoRenewEnabled = updates.autoRenewEnabled;
+  if (updates.autoRenewTariffId !== undefined) subUpdates.autoRenewTariffId = updates.autoRenewTariffId;
+  if (updates.autoRenewPriceOptionId !== undefined) subUpdates.autoRenewPriceOptionId = updates.autoRenewPriceOptionId;
+  if (updates.autoRenewExtraDevices !== undefined) subUpdates.autoRenewExtraDevices = updates.autoRenewExtraDevices;
+  if (updates.autoRenewPromoCode !== undefined) subUpdates.autoRenewPromoCode = updates.autoRenewPromoCode;
+  if (Object.keys(subUpdates).length > 0) {
+    const primary = await prisma.subscription.findUnique({
+      where: { ownerId_subscriptionIndex: { ownerId: client.id, subscriptionIndex: 0 } },
+      select: { id: true, tariffId: true },
+    });
+    if (primary) {
+      if (subUpdates.autoRenewEnabled === true && subUpdates.autoRenewTariffId === undefined && primary.tariffId) {
+        subUpdates.autoRenewTariffId = primary.tariffId;
+      }
+      await prisma.subscription.update({ where: { id: primary.id }, data: subUpdates }).catch((e) => {
+        console.warn("[client/auto-renew] failed to sync primary subscription:", e instanceof Error ? e.message : e);
+      });
+    }
+  }
   return res.json(toClientShape(updated));
 });
 
@@ -2810,7 +2884,7 @@ clientRouter.get("/subscription", async (req, res) => {
   // EXPIRED Remna-юзера, тогда как subscriptions хранит актуального). Бот берёт из subscriptions — кабинет теперь тоже.
   const rootSub = await prisma.subscription.findFirst({
     where: { ownerId: client.id, subscriptionIndex: 0, remnawaveUuid: { not: null } },
-    select: { remnawaveUuid: true },
+    select: { id: true, remnawaveUuid: true, displayName: true, description: true },
   });
   const effectiveUuid = rootSub?.remnawaveUuid ?? client.remnawaveUuid;
   if (!effectiveUuid) {
@@ -2923,6 +2997,9 @@ clientRouter.get("/subscription", async (req, res) => {
 
   return res.json({
     subscription: result.data ?? null,
+    subscriptionId: rootSub?.id ?? null,
+    displayName: rootSub?.displayName ?? null,
+    description: rootSub?.description ?? null,
     tariffDisplayName,
     currentPricePerDay: dbClient?.currentPricePerDay ?? null,
     autoRenewNextChargeAmount,
@@ -2945,13 +3022,21 @@ clientRouter.get("/subscription/by-uuid/:uuid", async (req, res) => {
 
   // Проверяем принадлежность: root или secondary подписка
   const isRoot = client.remnawaveUuid === uuid;
+  let matchedSub: { id: string; displayName: string | null; description: string | null } | null = null;
   if (!isRoot) {
     const secondarySub = await prisma.subscription.findFirst({
       where: { ownerId: clientId, remnawaveUuid: uuid },
+      select: { id: true, displayName: true, description: true },
     });
     if (!secondarySub) {
       return res.status(404).json({ subscription: null, tariffDisplayName: null, message: "Подписка не найдена" });
     }
+    matchedSub = secondarySub;
+  } else {
+    matchedSub = await prisma.subscription.findFirst({
+      where: { ownerId: clientId, remnawaveUuid: uuid },
+      select: { id: true, displayName: true, description: true },
+    });
   }
 
   const result = await remnaGetUser(uuid);
@@ -2963,7 +3048,13 @@ clientRouter.get("/subscription/by-uuid/:uuid", async (req, res) => {
     await encryptSubscriptionUrlInPlace(result.data);
   }
   const tariffDisplayName = await resolveTariffDisplayName(result.data ?? null);
-  return res.json({ subscription: result.data ?? null, tariffDisplayName });
+  return res.json({
+    subscription: result.data ?? null,
+    subscriptionId: matchedSub?.id ?? null,
+    displayName: matchedSub?.displayName ?? null,
+    description: matchedSub?.description ?? null,
+    tariffDisplayName,
+  });
 });
 
 /**
@@ -2990,6 +3081,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
     remnawaveUuid: string | null;
     tariffId: string | null;
     trialId: string | null;
+    displayName: string | null;
+    description: string | null;
     autoRenewEnabled: boolean;
     /** Итоговый статус с учётом БД (expireAt) — чтобы возврат сразу показывал "EXPIRED". */
     status: string;
@@ -3013,6 +3106,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
       id: true,
       remnawaveUuid: true,
       subscriptionIndex: true,
+      displayName: true,
+      description: true,
       trialId: true,
       giftStatus: true,
       autoRenewEnabled: true,
@@ -3068,6 +3163,8 @@ clientRouter.get("/subscription/all", async (req, res) => {
       remnawaveUuid: sub.remnawaveUuid,
       tariffId: sub.tariff?.id ?? null,
       trialId: sub.trialId ?? null,
+      displayName: sub.displayName ?? null,
+      description: sub.description ?? null,
       autoRenewEnabled: sub.autoRenewEnabled === true,
       status,
       tariffMenuEmoji: sub.tariff?.menuEmoji?.trim() || null,
@@ -3079,6 +3176,53 @@ clientRouter.get("/subscription/all", async (req, res) => {
 
   console.log(`[subscription/all] client=${clientId} total=${visible.length}`);
   return res.json({ items });
+});
+
+const subscriptionMetadataSchema = z.object({
+  displayName: z.string().max(120).nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+clientRouter.patch("/subscription/:id/metadata", async (req, res) => {
+  const clientId = (req as unknown as { clientId: string }).clientId;
+  const subscriptionId = typeof req.params.id === "string" ? req.params.id.trim() : "";
+  if (!subscriptionId) return res.status(400).json({ message: "subscriptionId required" });
+
+  const parsed = subscriptionMetadataSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Неверные параметры", errors: parsed.error.flatten() });
+  }
+
+  const sub = await prisma.subscription.findFirst({
+    where: {
+      id: subscriptionId,
+      OR: [
+        { ownerId: clientId },
+        { giftedToClientId: clientId, giftStatus: "GIFTED" },
+      ],
+    },
+    select: { id: true },
+  });
+  if (!sub) return res.status(404).json({ message: "Подписка не найдена" });
+
+  const data: { displayName?: string | null; description?: string | null } = {};
+  if ("displayName" in parsed.data) {
+    data.displayName = normalizeSubscriptionDisplayName(parsed.data.displayName);
+  }
+  if ("description" in parsed.data) {
+    data.description = normalizeSubscriptionDescription(parsed.data.description);
+  }
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ message: "Нет данных для сохранения" });
+  }
+
+  const updated = await prisma.subscription.update({
+    where: { id: subscriptionId },
+    data,
+    select: { id: true, displayName: true, description: true },
+  });
+
+  return res.json(updated);
 });
 
 /**
@@ -3349,7 +3493,7 @@ clientRouter.post("/subscription/:type/:id/auto-renew", async (req, res) => {
   };
   if (enabled) {
     const lastPaid = await prisma.payment.findFirst({
-      where: { clientId, status: "PAID", tariffId: { not: null } },
+      where: { clientId, subscriptionId: sub.id, status: "PAID", tariffId: { not: null } },
       orderBy: { paidAt: "desc" },
       select: { tariffId: true, tariffPriceOptionId: true, deviceCount: true },
     });
@@ -3939,14 +4083,17 @@ clientRouter.post("/payments/platega", async (req, res) => {
 
   const serviceName = config.serviceName?.trim() || "STEALTHNET";
   const orderId = randomUUID();
-  const paymentKind = tariffIdToStore ? "tariff" : proxyTariffIdToStore ? "proxy" : singboxTariffIdToStore ? "singbox" : wdttTariffIdToStore ? "wdtt" : metadataExtra ? "option" : "topup";
+  const paymentKind = detectCabinetPaymentKind({
+    tariffId: tariffIdToStore,
+    proxyTariffId: proxyTariffIdToStore,
+    singboxTariffId: singboxTariffIdToStore,
+    wdttTariffId: wdttTariffIdToStore,
+    customBuild: customBuildBody,
+    extraOption,
+  });
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const returnUrl = appUrl
-    ? `${appUrl}/cabinet/dashboard?payment=success&payment_kind=${paymentKind}&oid=${orderId}`
-    : "";
-  const failedUrl = appUrl
-    ? `${appUrl}/cabinet/dashboard?payment=failed&payment_kind=${paymentKind}&oid=${orderId}`
-    : "";
+  const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
+  const failedUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId);
   // добавляем tg:<id> в description для удобного поиска
   // в кабинете Plategá (зеркалит логику YooKassa/CryptoPay).
   const plategaClient = await prisma.client.findUnique({
@@ -4005,7 +4152,22 @@ clientRouter.post("/payments/platega", async (req, res) => {
   });
 
   if ("error" in result) {
-    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    const meta = payment.metadata ? JSON.parse(payment.metadata) as Record<string, unknown> : {};
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        metadata: JSON.stringify({
+          ...meta,
+          businessRetry: {
+            firstSeenAt: new Date().toISOString(),
+            lastCheckedAt: new Date().toISOString(),
+            attempts: 1,
+            lastError: result.error,
+            finalReason: "platega_create_api_error_pending_final_check",
+          },
+        }),
+      },
+    });
     return res.status(502).json({ message: result.error });
   }
 
@@ -4351,6 +4513,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   // а корректно продлевает существующую.
   let activateResult: { ok: true; subscriptionId?: string } | { ok: false; error: string; status: number };
   let isExtendingSecondary = false;
+  let isExtendingPrimary = false;
   let createdSubscriptionId: string | null = null;
 
   if (extendsSecondarySubId) {
@@ -4384,7 +4547,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
       includedDevices: tariff.includedDevices,
       internalSquadUuids: tariff.internalSquadUuids,
       trafficResetMode: tariff.trafficResetMode ?? undefined,
-    }, { extraDevices: requestedExtras, skipConfigCheck: true });
+    }, { extraDevices: requestedExtras, purchasedAsGift: asGift === true, skipConfigCheck: true });
     activateResult = addResult.ok
       ? { ok: true, subscriptionId: addResult.data.subscriptionId }
       : { ok: false, error: addResult.error, status: addResult.status };
@@ -4476,6 +4639,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   if (removeExtrasOnActivate === true && extendsSecondarySubId) tariffMeta.removeExtrasOnActivate = true;
   // T-fix (11.05.2026): маркер покупки доп. подписки балансом (без gift).
   if (asAdditional && !extendsSecondarySubId) tariffMeta.isAdditionalSubscription = true;
+  if (asGift === true && !extendsSecondarySubId) tariffMeta.purchasedAsGift = true;
   const payment = await createPayment({
     data: asPaymentUncheckedCreate({
       clientId: clientRaw.id,
@@ -4524,7 +4688,7 @@ clientRouter.post("/payments/balance", async (req, res) => {
   }
 
   // T7b: сообщение клиенту — продлено или активировано (как fallback в кабинете/мини-аппе).
-  const okMessage = isExtendingSecondary
+  const okMessage = isExtendingSecondary || isExtendingPrimary
     ? `🔄 Подписка продлена на ${effectiveDays} дн.! Списано ${tariffPaySnap.amount.toFixed(2)} ${tariff.currency.toUpperCase()} с баланса.`
     : `Тариф «${tariff.name}» активирован! Списано ${tariffPaySnap.amount.toFixed(2)} ${tariff.currency.toUpperCase()} с баланса.`;
   return res.json({
@@ -5422,7 +5586,15 @@ clientRouter.post("/yoomoney/create-form-payment", async (req, res) => {
 
   const serviceName = config.serviceName?.trim() || "STEALTHNET";
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const successURL = appUrl ? `${appUrl}/cabinet?yoomoney_form=success` : "";
+  const paymentKind = detectCabinetPaymentKind({
+    tariffId: tariffIdToStore,
+    proxyTariffId: proxyTariffIdToStore,
+    singboxTariffId: singboxTariffIdToStore,
+    wdttTariffId: wdttTariffIdToStore,
+    customBuild: customBuildBody,
+    extraOption,
+  });
+  const successURL = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
   const targets = tariffIdToStore
     ? `Тариф ${serviceName} #${orderId}`
     : proxyTariffIdToStore
@@ -5469,7 +5641,16 @@ clientRouter.get("/yoomoney/form-payment/:paymentId", async (req, res) => {
 
   const payment = await prisma.payment.findFirst({
     where: { id: paymentId, clientId, status: "PENDING", provider: "yoomoney_form" },
-    select: { id: true, amount: true, metadata: true },
+    select: {
+      id: true,
+      amount: true,
+      metadata: true,
+      orderId: true,
+      tariffId: true,
+      proxyTariffId: true,
+      singboxTariffId: true,
+      wdttTariffId: true,
+    },
   });
   if (!payment) return res.status(404).json({ message: "Платёж не найден или уже оплачен" });
 
@@ -5484,7 +5665,8 @@ clientRouter.get("/yoomoney/form-payment/:paymentId", async (req, res) => {
   } catch { /* ignore */ }
 
   const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-  const successURL = appUrl ? `${appUrl}/cabinet?yoomoney_form=success` : "";
+  const paymentKind = detectCabinetPaymentKind(payment);
+  const successURL = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", payment.orderId);
 
   return res.json({
     receiver,
@@ -5809,7 +5991,15 @@ clientRouter.post("/yookassa/create-payment", async (req, res) => {
 
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const returnUrl = appUrl ? `${appUrl}/cabinet?yookassa=success` : "";
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId);
     // добавляем tg:<id> в description, чтобы админ мог
     // быстро искать платежи по telegram_id в кабинете YooKassa (раньше там был
     // только orderId UUID, который никак не связать с клиентом без БД).
@@ -5843,9 +6033,29 @@ clientRouter.post("/yookassa/create-payment", async (req, res) => {
     });
 
     if (!result.ok) {
-      await prisma.payment.delete({ where: { id: payment.id } }).catch(() => {});
+      const meta = payment.metadata ? JSON.parse(payment.metadata) as Record<string, unknown> : {};
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          metadata: JSON.stringify({
+            ...meta,
+            businessRetry: {
+              firstSeenAt: new Date().toISOString(),
+              lastCheckedAt: new Date().toISOString(),
+              attempts: 1,
+              lastError: result.error,
+              finalReason: "yookassa_create_api_error_pending_final_check",
+            },
+          }),
+        },
+      }).catch(() => {});
       return res.status(500).json({ message: result.error });
     }
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { externalId: result.paymentId },
+    }).catch(() => {});
 
     const confirmationUrl = await saveRedirectAndBuildUrl(payment.id, orderId, result.confirmationUrl, config.publicAppUrl);
 
@@ -6418,7 +6628,15 @@ clientRouter.post("/heleket/create-payment", async (req, res) => {
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
     const urlCallback = appUrl ? `${appUrl}/api/webhooks/heleket` : undefined;
-    const urlSuccess = appUrl ? `${appUrl}/cabinet?heleket=success` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const urlSuccess = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
     const urlReturn = appUrl ? `${appUrl}/cabinet?heleket=return` : undefined;
 
     const result = await createHeleketInvoice({
@@ -6701,8 +6919,16 @@ clientRouter.post("/lava/create-payment", async (req, res) => {
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
     const hookUrl = appUrl ? `${appUrl}/api/webhooks/lava` : undefined;
-    const successUrl = appUrl ? `${appUrl}/cabinet?lava=success` : undefined;
-    const failUrl = appUrl ? `${appUrl}/cabinet?lava=fail` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const successUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
+    const failUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId) || undefined;
 
     const result = await createLavaInvoice({
       config: lavaConfig,
@@ -7008,8 +7234,15 @@ clientRouter.post("/lavatop/create-payment", async (req, res) => {
     });
 
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const redirectUrl = appUrl ? `${appUrl}/cabinet?lavatop=success` : undefined;
-    const failUrl = appUrl ? `${appUrl}/cabinet?lavatop=fail` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const redirectUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
+    const failUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "failed", orderId) || undefined;
 
     // Для покупки тарифа используем подписку MONTHLY — Lava.top будет авто-списывать
     // ежемесячно, и при каждом списании webhook продлит тариф у клиента (см. lavatop
@@ -7278,7 +7511,15 @@ clientRouter.post("/overpay/create-payment", async (req, res) => {
 
     const serviceName = config.serviceName?.trim() || "STEALTHNET";
     const appUrl = (config.publicAppUrl || "").replace(/\/$/, "");
-    const returnUrl = appUrl ? `${appUrl}/cabinet?overpay=return` : undefined;
+    const paymentKind = detectCabinetPaymentKind({
+      tariffId: tariffIdToStore,
+      proxyTariffId: proxyTariffIdToStore,
+      singboxTariffId: singboxTariffIdToStore,
+      wdttTariffId: wdttTariffIdToStore,
+      customBuild: customBuildBody,
+      extraOption,
+    });
+    const returnUrl = buildCabinetPaymentResultUrl(appUrl, paymentKind, "success", orderId) || undefined;
 
     const clientRow = await prisma.client.findUnique({
       where: { id: clientId },

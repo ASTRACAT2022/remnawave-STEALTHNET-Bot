@@ -513,7 +513,7 @@ function MobileCabinetShell() {
   const logo = config?.logo && !logoError ? config.logo : null;
 
   return (
-    <div className="min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
+    <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent min-w-0 overflow-x-hidden pb-36 relative">
       <IdleFloatingChat />
       <header className="sticky top-0 z-50 border-b border-border bg-card shrink-0 transition-colors duration-150" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="relative flex h-14 items-center justify-between gap-3 px-4 min-w-0 w-full max-w-7xl mx-auto">
@@ -523,7 +523,7 @@ function MobileCabinetShell() {
                 <img src={logo} alt="" className="h-6 max-w-[100px] object-contain" onError={() => setLogoError(true)} />
               </span>
             ) : (
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/20 text-primary shadow-sm">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-white/14 bg-white/12 text-primary shadow-sm">
                 <Shield className="h-4 w-4" />
               </span>
             )}
@@ -673,7 +673,7 @@ function CabinetShell() {
   }
 
   return (
-    <div className="min-h-svh flex flex-col bg-transparent">
+    <div className="cabinet-liquid-shell min-h-svh flex flex-col bg-transparent">
       <IdleFloatingChat />
       <header className="sticky top-0 z-50 border-b border-border bg-card shadow-sm transition-colors duration-150">
         <div className="relative w-full max-w-7xl mx-auto flex h-16 items-center justify-between gap-4 px-4">
@@ -683,13 +683,13 @@ function CabinetShell() {
                 <img src={logo} alt="" className="h-6 max-w-[110px] object-contain" onError={() => setLogoError(true)} />
               </span>
             ) : (
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shadow-sm">
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/14 bg-white/12 text-primary shadow-sm">
                 <Shield className="h-5 w-5" />
               </span>
             )}
             {serviceName ? <span className="hidden sm:inline truncate">{serviceName}</span> : null}
           </Link>
-          <nav className="flex items-center gap-1 flex-wrap justify-center flex-1">
+          <nav className="cabinet-liquid-nav flex items-center gap-1 flex-wrap justify-center flex-1 rounded-full border border-white/10 bg-white/[0.035] p-1">
             {visibleNav.map(({ to, label, icon: Icon }) => {
               const active = location.pathname === to;
               const dataTourMap = ROUTE_TOUR_MAP;
@@ -726,7 +726,7 @@ function CabinetShell() {
                   <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", moreOpen && "rotate-180")} />
                 </Button>
                 {moreOpen && (
-                  <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-xl border border-border bg-card py-1.5 shadow-lg">
+                  <div className="absolute left-0 top-full z-50 mt-2 min-w-[190px] rounded-[24px] border border-white/16 bg-slate-950/75 py-2 shadow-2xl shadow-black/35 backdrop-blur-2xl">
                     {moreNav.map(({ to, label, icon: Icon }) => {
                       const active = location.pathname === to;
                       return (
@@ -737,7 +737,7 @@ function CabinetShell() {
                           onClick={() => setMoreOpen(false)}
                           className={cn(
                             "flex cursor-pointer items-center gap-2 px-4 py-2.5 text-sm transition-colors",
-                            active ? "bg-primary/20 text-primary" : "hover:bg-muted/60"
+                            active ? "bg-white/14 text-foreground" : "hover:bg-white/10"
                           )}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
@@ -785,7 +785,7 @@ function CabinetShell() {
           </div>
         </div>
       </header>
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6 transition-all duration-300">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-8 transition-all duration-300">
         <Suspense fallback={<CabinetPageLoader />}>
           <Outlet />
         </Suspense>

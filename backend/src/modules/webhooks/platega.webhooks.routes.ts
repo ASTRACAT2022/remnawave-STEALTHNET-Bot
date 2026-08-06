@@ -57,6 +57,7 @@ type PaymentRow = {
   orderId: string;
   externalId: string | null;
   status: string;
+  createdAt: Date;
   clientId: string;
   amount: number;
   currency: string;
@@ -71,6 +72,7 @@ const PAYMENT_SELECT = {
   orderId: true,
   externalId: true,
   status: true,
+  createdAt: true,
   clientId: true,
   amount: true,
   currency: true,
@@ -82,6 +84,7 @@ const PAYMENT_SELECT = {
 
 const SUCCESS_STATUSES = new Set(["CONFIRMED", "PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "SUCCESSFUL", "APPROVED"]);
 const FAILED_STATUSES = new Set(["CANCELED", "CANCELLED", "FAILED", "DECLINED", "REJECTED", "ERROR", "EXPIRED", "CHARGEBACK", "CHARGEBACKED"]);
+const PAYMENT_RETRY_WINDOW_MS = 20 * 60 * 1000;
 
 type Meta = Record<string, unknown> & {
   plategaActivationAppliedAt?: string;
@@ -126,6 +129,7 @@ async function findPlategaPaymentByAnyId(candidateIds: string[]): Promise<Paymen
         orderId: byOrder.orderId,
         externalId: byOrder.externalId,
         status: byOrder.status,
+        createdAt: byOrder.createdAt,
         clientId: byOrder.clientId,
         amount: byOrder.amount,
         currency: byOrder.currency,
@@ -229,6 +233,28 @@ async function ensureTariffActivation(paymentId: string): Promise<void> {
   } else {
     console.error("[Platega Webhook] Tariff activation failed", { paymentId, error: activation.error });
   }
+}
+
+async function markPaymentCheckPending(payment: { id: string; metadata: string | null }, patch: Record<string, unknown>) {
+  const meta = parseMeta(payment.metadata);
+  const prev = meta.businessRetry && typeof meta.businessRetry === "object"
+    ? meta.businessRetry as Record<string, unknown>
+    : {};
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      metadata: JSON.stringify({
+        ...meta,
+        businessRetry: {
+          ...prev,
+          firstSeenAt: typeof prev.firstSeenAt === "string" ? prev.firstSeenAt : new Date().toISOString(),
+          lastCheckedAt: new Date().toISOString(),
+          attempts: Number(prev.attempts ?? 0) + 1,
+          ...patch,
+        },
+      }),
+    },
+  });
 }
 
 /**
@@ -400,14 +426,24 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
     await auditPaymentClientBotAlignment(payment);
 
     if (FAILED_STATUSES.has(status)) {
-      const failed = await prisma.payment.updateMany({
-        where: { id: payment.id, status: "PENDING" },
-        data: { status: "FAILED", externalId: transactionId ?? payment.externalId },
-      });
-      if (failed.count > 0) {
-        console.log("[Platega Webhook] Payment marked FAILED", { paymentId: payment.id, status, transactionId, orderId: payment.orderId });
+      const ageMs = Date.now() - payment.createdAt.getTime();
+      if (ageMs >= PAYMENT_RETRY_WINDOW_MS) {
+        const failed = await prisma.payment.updateMany({
+          where: { id: payment.id, status: "PENDING" },
+          data: { status: "FAILED", externalId: transactionId ?? payment.externalId },
+        });
+        if (failed.count > 0) {
+          console.log("[Platega Webhook] Payment marked FAILED after retry window", { paymentId: payment.id, status, transactionId, orderId: payment.orderId });
+        }
+        ack(200, "payment_failed", `provider status=${status}`, payment.id);
+        return res.status(200).json({ received: true });
       }
-      ack(200, "payment_failed", `provider status=${status}`, payment.id);
+      await markPaymentCheckPending(payment, {
+        providerStatus: status,
+        lastError: `provider returned early failed status=${status}`,
+      });
+      console.log("[Platega Webhook] Early failed status postponed for final check", { paymentId: payment.id, status });
+      ack(200, "ignored_event", `early failed status postponed=${status}`, payment.id);
       return res.status(200).json({ received: true });
     }
 
@@ -429,8 +465,12 @@ plategaWebhooksRouter.post("/platega", async (req, res) => {
         webhookStatus: status,
         reason: apiVerify.reason,
       });
-      ack(401, "rejected_signature", `API double-check: ${apiVerify.reason}`, payment.id);
-      return res.status(401).json({ message: "Platega API does not confirm this transaction" });
+      await markPaymentCheckPending(payment, {
+        providerStatus: status,
+        lastError: `API double-check: ${apiVerify.reason}`,
+      });
+      ack(200, "ignored_event", `API double-check postponed: ${apiVerify.reason}`, payment.id);
+      return res.status(200).json({ received: true });
     }
     if (apiVerify.trusted === "unverified") {
       // Креды не настроены — falling back to webhook trust. Громко предупреждаем.

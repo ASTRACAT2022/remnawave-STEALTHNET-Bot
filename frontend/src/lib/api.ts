@@ -116,16 +116,14 @@ export const MANAGER_SECTIONS: { key: string; label: string; category: ManagerSe
   { key: "olcrtc", label: "OlcRTC", category: "management" },
   { key: "backup", label: "Бэкапы", category: "management" },
   { key: "tickets", label: "Тикеты", category: "management" },
-  { key: "withdrawals", label: "Заявки на вывод", category: "management" },
   // Подписка
   { key: "tariffs", label: "Тарифы", category: "subscription" },
-  { key: "trials", label: "Триалы", category: "subscription" },
   { key: "auto-renew", label: "Автосписание", category: "subscription" },
   { key: "promo", label: "Промо-ссылки", category: "subscription" },
   { key: "promo-codes", label: "Промокоды", category: "subscription" },
   { key: "marketing", label: "Маркетинг", category: "subscription" },
   { key: "referral-network", label: "Реф. сеть", category: "subscription" },
-  { key: "secondary-subscriptions", label: "Доп. подписки", category: "subscription" },
+  { key: "secondary-subscriptions", label: "Подписки", category: "subscription" },
   // Инструменты
   { key: "video-instructions", label: "Видео-инструкции", category: "tools" },
   { key: "broadcast", label: "Рассылка", category: "tools" },
@@ -138,8 +136,6 @@ export const MANAGER_SECTIONS: { key: string; label: string; category: ManagerSe
   { key: "settings", label: "Настройки", category: "settings" },
   { key: "languages", label: "Языки", category: "settings" },
   { key: "api-keys", label: "API ключи", category: "settings" },
-  { key: "bots", label: "Боты-клоны", category: "settings" },
-  { key: "antibot", label: "Антибот", category: "settings" },
   { key: "diagnostics", label: "Диагностика", category: "settings" },
   { key: "webhook-inbox", label: "Webhook inbox", category: "settings" },
   { key: "audit", label: "Аудит-лог", category: "settings" },
@@ -1885,14 +1881,25 @@ export const api = {
     /** ISO-дата следующего списания (за N дней до истечения, N из config.autoRenewDaysBeforeExpiry). */
     autoRenewNextChargeAt?: string | null;
     autoRenewCurrency?: string | null;
+    subscriptionId?: string | null;
+    displayName?: string | null;
+    description?: string | null;
     message?: string;
   }> {
     return request("/client/subscription", { token });
   },
 
   /** Подписка по Remnawave UUID (для secondary подписок на /cabinet/subscribe?uuid=xxx) */
-  async clientSubscriptionByUuid(token: string, uuid: string): Promise<{ subscription: unknown; tariffDisplayName?: string | null; message?: string }> {
+  async clientSubscriptionByUuid(token: string, uuid: string): Promise<{ subscription: unknown; subscriptionId?: string | null; displayName?: string | null; description?: string | null; tariffDisplayName?: string | null; message?: string }> {
     return request(`/client/subscription/by-uuid/${encodeURIComponent(uuid)}`, { token });
+  },
+
+  async clientUpdateSubscriptionMetadata(token: string, subscriptionId: string, data: { displayName?: string | null; description?: string | null }): Promise<{ id: string; displayName: string | null; description: string | null }> {
+    return request(`/client/subscription/${encodeURIComponent(subscriptionId)}/metadata`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(data),
+    });
   },
 
   /** Все подписки клиента (root + secondary) с Remnawave-данными */
@@ -1906,6 +1913,8 @@ export const api = {
       remnawaveUuid: string | null;
       tariffId?: string | null;
       trialId?: string | null;
+      displayName?: string | null;
+      description?: string | null;
       autoRenewEnabled?: boolean;
       status?: string;
       tariffMenuEmoji?: string | null;
@@ -3435,6 +3444,8 @@ export interface AdminClientSubscriptionItem {
   subscriptionIndex: number;
   isPrimary: boolean;
   remnawaveUuid: string | null;
+  displayName: string | null;
+  description: string | null;
   tariffId: string | null;
   tariffName: string | null;
   giftStatus: string | null;

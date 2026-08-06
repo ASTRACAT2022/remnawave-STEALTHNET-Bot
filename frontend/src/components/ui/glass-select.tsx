@@ -36,7 +36,7 @@ export function GlassSelect({ value, onChange, options, className }: GlassSelect
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-9 w-full items-center justify-between rounded-lg border border-white/15 bg-card/40 backdrop-blur-xl px-3 py-1.5 text-sm transition-all duration-200 hover:bg-card/60 focus:outline-none focus:ring-2 focus:ring-primary/50"
+        className="flex h-10 w-full items-center justify-between rounded-2xl border border-white/14 bg-white/[0.075] px-4 py-2 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-xl transition-all duration-300 hover:border-white/26 hover:bg-white/[0.11] focus:outline-none focus:ring-2 focus:ring-white/20"
       >
         <span>{selectedOption?.label ?? value}</span>
         <ChevronDown
@@ -48,7 +48,7 @@ export function GlassSelect({ value, onChange, options, className }: GlassSelect
       </button>
       <div
         className={cn(
-          "absolute left-0 top-full z-50 mt-1 w-full rounded-lg border border-white/15 bg-card/50 backdrop-blur-2xl shadow-2xl transition-all duration-200 origin-top overflow-hidden",
+          "absolute left-0 top-full z-50 mt-2 w-full overflow-hidden rounded-2xl border border-white/16 bg-slate-950/70 shadow-2xl shadow-black/35 backdrop-blur-2xl transition-all duration-200 origin-top",
           open
             ? "opacity-100 scale-100 pointer-events-auto"
             : "opacity-0 scale-95 pointer-events-none"
@@ -63,10 +63,10 @@ export function GlassSelect({ value, onChange, options, className }: GlassSelect
               setOpen(false);
             }}
             className={cn(
-              "flex w-full items-center px-3 py-2 text-sm transition-all duration-150",
+              "flex w-full items-center px-4 py-2.5 text-sm transition-all duration-150",
               opt.value === value
-                ? "bg-primary/20 text-primary font-medium"
-                : "hover:bg-white/10 text-foreground"
+                ? "bg-white/14 text-foreground font-medium"
+                : "hover:bg-white/10 text-foreground/82"
             )}
           >
             {opt.label}

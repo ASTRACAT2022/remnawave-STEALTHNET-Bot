@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Zap, Settings2, Smartphone, Gift, Users, ChevronRight, Shield, Calendar, Clock } from "lucide-react";
+import { Zap, Settings2, Smartphone, Gift, Users, ChevronRight, Shield, Calendar, Clock, Check, Loader2, X } from "lucide-react";
 import { StealthPromocodeModal } from "@/components/stealth/stealth-promocode-modal";
 import { StealthDevicesModal } from "@/components/stealth/stealth-devices-modal";
 import { useClientAuth } from "@/contexts/client-auth";
@@ -21,6 +21,9 @@ import { api } from "@/lib/api";
 import { StadiumButton } from "@/components/stealth/stadium-button";
 
 interface SubInfo {
+  id: string | null;
+  displayName: string | null;
+  description: string | null;
   expiresAt: string | null;
   daysLeft: number | null;
   hasActive: boolean;
@@ -59,6 +62,11 @@ export function StealthDashboard() {
   const [reloadKey, setReloadKey] = useState(0); // bump чтобы перезагрузить инфо после модалок
   const [showPromo, setShowPromo] = useState(false);
   const [showDevices, setShowDevices] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [descriptionValue, setDescriptionValue] = useState("");
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [metaSaved, setMetaSaved] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!state.token) return;
@@ -81,7 +89,14 @@ export function StealthDashboard() {
         : null;
       const limit = typeof s?.hwidDeviceLimit === "number" ? s.hwidDeviceLimit
         : s?.hwidDeviceLimit != null ? Number(s.hwidDeviceLimit) : 0;
+      const displayName = sub?.displayName ?? null;
+      const description = sub?.description ?? null;
+      setNameValue(displayName ?? "");
+      setDescriptionValue(description ?? "");
       setInfo({
+        id: sub?.subscriptionId ?? null,
+        displayName,
+        description,
         expiresAt: expireAt,
         daysLeft,
         hasActive,
@@ -91,6 +106,30 @@ export function StealthDashboard() {
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [state.token, reloadKey]);
+
+  async function saveMeta() {
+    if (!state.token || !info?.id) return;
+    setSavingMeta(true);
+    setMetaSaved(false);
+    setMetaError(null);
+    try {
+      const result = await api.clientUpdateSubscriptionMetadata(state.token, info.id, {
+        displayName: nameValue.trim() || null,
+        description: descriptionValue.trim() || null,
+      });
+      setInfo((prev) => prev ? { ...prev, displayName: result.displayName, description: result.description } : prev);
+      setNameValue(result.displayName ?? "");
+      setDescriptionValue(result.description ?? "");
+      setMetaSaved(true);
+      setTimeout(() => setMetaSaved(false), 1800);
+    } catch (e) {
+      setMetaError(e instanceof Error ? e.message : "Не удалось сохранить");
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
+  const metaChanged = !!info && (nameValue.trim() !== (info.displayName ?? "").trim() || descriptionValue.trim() !== (info.description ?? "").trim());
 
   return (
     <div className="px-4 pt-2 space-y-5">
@@ -103,7 +142,10 @@ export function StealthDashboard() {
       {/* Subscription card */}
       <div className="rounded-2xl bg-slate-900 border border-slate-700 p-5 shadow-sm space-y-4">
         <div className="flex items-start justify-between gap-3">
-          <h2 className="text-xl font-bold tracking-tight">Подписка</h2>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight">{info?.displayName?.trim() || "Подписка"}</h2>
+            {info?.description?.trim() && <p className="mt-1 text-xs text-zinc-400 whitespace-pre-line">{info.description.trim()}</p>}
+          </div>
           {info?.hasActive ? (
             <div className="flex flex-col items-end gap-1.5">
               <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-zinc-500">ДО</span>
@@ -133,6 +175,58 @@ export function StealthDashboard() {
                 {info.devicesUsed}{info.devicesTotal > 0 ? `/${info.devicesTotal}` : ""}
               </span>
             </span>
+          </div>
+        )}
+
+        {info?.id && (
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.035] p-3 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">Имя и описание</p>
+              {metaSaved && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
+                  <Check className="h-3 w-3" />
+                  Сохранено
+                </span>
+              )}
+            </div>
+            <input
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value.slice(0, 120))}
+              placeholder="Например: iPhone, Дом, Ноутбук"
+              maxLength={120}
+              className="w-full rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-rose-500/40"
+            />
+            <textarea
+              value={descriptionValue}
+              onChange={(e) => setDescriptionValue(e.target.value.slice(0, 1000))}
+              placeholder="Описание или заметка по подписке"
+              maxLength={1000}
+              className="min-h-[74px] w-full resize-none rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-rose-500/40"
+            />
+            {metaError && <p className="text-xs font-medium text-rose-300">{metaError}</p>}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={!metaChanged || savingMeta}
+                onClick={saveMeta}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-rose-500 px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingMeta ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Сохранить
+              </button>
+              <button
+                type="button"
+                disabled={savingMeta || (!nameValue && !descriptionValue)}
+                onClick={() => {
+                  setNameValue("");
+                  setDescriptionValue("");
+                }}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-sm font-semibold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+                Очистить
+              </button>
+            </div>
           </div>
         )}
 

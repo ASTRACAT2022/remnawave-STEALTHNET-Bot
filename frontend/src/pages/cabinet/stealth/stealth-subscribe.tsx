@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Laptop, Download, Key, Copy, Check, ArrowRight, Smartphone, MonitorSmartphone, Apple, Tv, ExternalLink, Plus } from "lucide-react";
 import { useClientAuth } from "@/contexts/client-auth";
 import { api, type SubscriptionPageConfig } from "@/lib/api";
@@ -105,9 +105,37 @@ function buildDeeplinkHref(rawLink: string, subUrl: string, baseUrl: string, isM
   return `${baseUrl}/api/public/deeplink?url=${encodeURIComponent(filled)}${skipAuto}`;
 }
 
+type PaymentNotice = "success_topup" | "success_tariff" | "success";
+
+function getPaymentNotice(searchParams: URLSearchParams): PaymentNotice | null {
+  if (searchParams.get("payment") === "success") {
+    const kind = searchParams.get("payment_kind");
+    if (kind === "topup") return "success_topup";
+    if (kind === "tariff" || kind === "custom_build") return "success_tariff";
+    return "success";
+  }
+  if (
+    searchParams.get("yoomoney_form") === "success" ||
+    searchParams.get("yookassa") === "success" ||
+    searchParams.get("heleket") === "success" ||
+    searchParams.get("lava") === "success" ||
+    searchParams.get("lavatop") === "success"
+  ) {
+    return "success";
+  }
+  return null;
+}
+
+function clearPaymentNoticeParams(searchParams: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  ["payment", "payment_kind", "oid", "yoomoney_form", "yookassa", "heleket", "lava", "lavatop"].forEach((key) => next.delete(key));
+  return next;
+}
+
 export function StealthSubscribe() {
-  const { state } = useClientAuth();
+  const { state, refreshProfile } = useClientAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [step, setStep] = useState(1);
   const [platform, setPlatform] = useState<Platform>(() => detectPlatform());
@@ -119,12 +147,21 @@ export function StealthSubscribe() {
   const [pageConfig, setPageConfig] = useState<SubscriptionPageConfig | null>(null);
   const [publicAppUrl, setPublicAppUrl] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [paymentNotice, setPaymentNotice] = useState<PaymentNotice | null>(null);
 
   const isMiniapp = useMemo(() => {
     if (typeof window === "undefined") return false;
     const tg = (window as unknown as { Telegram?: { WebApp?: unknown } }).Telegram?.WebApp;
     return !!tg;
   }, []);
+
+  useEffect(() => {
+    const notice = getPaymentNotice(searchParams);
+    if (!notice) return;
+    setPaymentNotice(notice);
+    setSearchParams(clearPaymentNoticeParams(searchParams), { replace: true });
+    if (state.token) refreshProfile().catch(() => {});
+  }, [searchParams, setSearchParams, state.token, refreshProfile]);
 
   useEffect(() => {
     if (!state.token) return;
@@ -197,9 +234,25 @@ export function StealthSubscribe() {
 
   const externalBtns = useMemo(() => collectButtons(currentApp, "external"), [currentApp]);
   const subscriptionBtns = useMemo(() => collectButtons(currentApp, "subscriptionLink"), [currentApp]);
+  const paymentNoticeText = paymentNotice === "success_topup"
+    ? "Оплата прошла успешно. Баланс пополнен."
+    : paymentNotice === "success_tariff"
+      ? "Оплата прошла успешно. Подписка активируется автоматически."
+      : paymentNotice
+        ? "Оплата прошла успешно. Статус подписки обновляется автоматически."
+        : null;
 
   return (
     <div className="px-4 pt-2 space-y-5 pb-2">
+      {paymentNoticeText && (
+        <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-200 shadow-[0_12px_32px_-20px_rgba(16,185,129,0.8)]">
+          <div className="flex items-start gap-2.5">
+            <Check className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{paymentNoticeText}</span>
+          </div>
+        </div>
+      )}
+
       <WizardHeader
         step={step}
         totalSteps={3}

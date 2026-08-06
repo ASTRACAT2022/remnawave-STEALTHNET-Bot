@@ -11,6 +11,7 @@ import { ensureSystemSettings } from "./scripts/seed-system-settings.js";
 import { startAutoBroadcastScheduler, stopAutoBroadcastScheduler } from "./modules/auto-broadcast/auto-broadcast-scheduler.js";
 import { startContestDailyReminderScheduler, stopContestDailyReminderScheduler } from "./modules/contest/contest-daily-reminder-scheduler.js";
 import { startAutoRenewScheduler } from "./modules/payment/auto-renew.cron.js";
+import { startPaymentFinalizerScheduler } from "./modules/payment/payment-finalizer.cron.js";
 import { startAutoBackupScheduler, stopAutoBackupScheduler } from "./modules/backup/auto-backup.scheduler.js";
 import { startGiftExpiryCron } from "./modules/gift/gift-expiry.cron.js";
 import { startWdttCron, stopWdttCron } from "./worker/wdtt.cron.js";
@@ -47,6 +48,7 @@ async function main() {
   await startAutoBroadcastScheduler();
   startContestDailyReminderScheduler(env.CONTEST_REMINDER_CRON ?? undefined);
   startAutoRenewScheduler();
+  startPaymentFinalizerScheduler();
   startGiftExpiryCron();
   startWdttCron();
   startFreekassaReconcileScheduler();

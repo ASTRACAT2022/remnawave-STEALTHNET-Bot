@@ -186,6 +186,64 @@ export function isYookassaConfigured(shopId: string | null, secretKey: string | 
   return Boolean(shopId?.trim() && secretKey?.trim());
 }
 
+export async function getYookassaPaymentStatus(params: {
+  shopId: string;
+  secretKey: string;
+  paymentId: string;
+}): Promise<
+  | { ok: true; status: string; raw: Record<string, unknown> }
+  | { ok: false; error: string; status?: number }
+> {
+  const { shopId, secretKey, paymentId } = params;
+  if (!shopId?.trim() || !secretKey?.trim()) {
+    return { ok: false, error: "YooKassa not configured" };
+  }
+  if (!paymentId?.trim()) {
+    return { ok: false, error: "paymentId required" };
+  }
+
+  const auth = Buffer.from(`${shopId.trim()}:${secretKey.trim()}`).toString("base64");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const proxy = await getProxyUrl("payments");
+    const res = await proxyFetch(`${YOOKASSA_API}/payments/${encodeURIComponent(paymentId.trim())}`, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+    }, proxy);
+    clearTimeout(timeoutId);
+
+    let data: Record<string, unknown> = {};
+    try {
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      return { ok: false, error: `YooKassa: ответ не JSON (${res.status})`, status: res.status };
+    }
+
+    if (!res.ok) {
+      const msg = typeof data.description === "string"
+        ? data.description
+        : typeof data.code === "string"
+          ? data.code
+          : res.statusText;
+      return { ok: false, error: msg || "YooKassa error", status: res.status };
+    }
+
+    const status = typeof data.status === "string" ? data.status : "";
+    if (!status) return { ok: false, error: "YooKassa: API ответил без status" };
+    return { ok: true, status, raw: data };
+  } catch (e) {
+    clearTimeout(timeoutId);
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: message };
+  }
+}
+
 // ────────────────────────────────────────────
 // Автоплатёж по сохранённому способу оплаты
 // ────────────────────────────────────────────

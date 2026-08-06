@@ -1212,6 +1212,10 @@ export function subDetailButtons(
     const compactType = type === "root" ? "r" : "s";
     rows.push([btn("🌐 Локации", `loc:${tariffId}:${compactType}:${id}`, undefined, undefined)]);
   }
+  rows.push([
+    btn("✏️ Название", `sub:edit_name:${type}:${id}`, undefined, undefined),
+    btn("📝 Описание", `sub:edit_desc:${type}:${id}`, undefined, undefined),
+  ]);
   // новый порядок по запросу клиента —
   // Инструкции / Локации / Продлить / Купить новую / Автосписание / Обновить подписку / К списку подписок.
   // T15.4: для trial-подписок — иконка карты (оплата конвертирует триал в платную подписку).

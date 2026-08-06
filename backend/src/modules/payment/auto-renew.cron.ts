@@ -151,12 +151,26 @@ export async function processAutoRenewals() {
     // defensive дедуп — если у клиента primary-подписка
     // (Subscription[0]) уже имеет autoRenewEnabled=true → её обработает новый Subscription-цикл.
     // Пропускаем в legacy Client-цикле, чтобы не списать дважды.
-    const primaryHasAutoRenew = await prisma.subscription.findUnique({
+    const primarySub = await prisma.subscription.findUnique({
       where: { ownerId_subscriptionIndex: { ownerId: client.id, subscriptionIndex: 0 } },
-      select: { autoRenewEnabled: true },
+      select: { id: true, tariffId: true, autoRenewEnabled: true },
     });
-    if (primaryHasAutoRenew?.autoRenewEnabled === true) {
+    if (primarySub?.autoRenewEnabled === true) {
       console.log(`[auto-renew] Skipping legacy Client-cycle for ${client.id}: Subscription[0].autoRenewEnabled handled by unified cycle.`);
+      continue;
+    }
+    if (primarySub) {
+      await prisma.subscription.update({
+        where: { id: primarySub.id },
+        data: {
+          autoRenewEnabled: true,
+          autoRenewTariffId: client.autoRenewTariffId ?? primarySub.tariffId,
+          autoRenewPriceOptionId: client.autoRenewPriceOptionId,
+          autoRenewExtraDevices: client.autoRenewExtraDevices ?? 0,
+          autoRenewPromoCode: client.autoRenewPromoCode,
+        },
+      });
+      console.log(`[auto-renew] Migrated legacy Client auto-renew for ${client.id} to Subscription[0].`);
       continue;
     }
 
@@ -668,6 +682,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
     },
     include: {
       tariff: true,
+      autoRenewTariff: true,
       owner: {
         select: {
           id: true,
@@ -792,7 +807,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         await dispatchAutoRenewNotification(billingClient.id, "UPCOMING", {
           tariffName: sec.tariff.name,
           amount: price,
-          currency: sec.tariff.currency,
+          currency: renewTariff.currency,
           minutesLeft,
           expireAt: expireAtDate,
           subIndex: sec.subscriptionIndex,
@@ -830,7 +845,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
           clientId: billingClient.id,
           provider: "yookassa",
           status: "PAID",
-          tariffId: sec.tariffId,
+          tariffId: renewTariff.id,
           paidAt: { gte: new Date(now - 2 * 60 * 60 * 1000) },
           metadata: { contains: sec.id },
         },
@@ -883,7 +898,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
           await dispatchAutoRenewNotification(billingClient.id, "FAILED", {
             tariffName: sec.tariff.name,
             amount: price,
-            currency: sec.tariff.currency,
+            currency: renewTariff.currency,
             expireAt: expireAtDate,
             subIndex: sec.subscriptionIndex,
             balance: balanceForUser,
@@ -945,7 +960,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
             await dispatchAutoRenewNotification(billingClient.id, "FAILED", {
               tariffName: sec.tariff.name,
               amount: price,
-              currency: sec.tariff.currency,
+              currency: renewTariff.currency,
               expireAt: expireAtDate,
               subIndex: sec.subscriptionIndex,
               balance: billingClient.balance ?? 0,
@@ -976,15 +991,21 @@ async function processSecondaryAutoRenewals(): Promise<void> {
         data: {
           clientId: billingClient.id,
           orderId: randomUUID(),
-          tariffId: sec.tariff.id,
+          tariffId: renewTariff.id,
+          tariffPriceOptionId: renewOption?.id ?? null,
+          subscriptionId: sec.id,
+          deviceCount: tariffExtrasCount,
           amount: price,
-          currency: sec.tariff.currency.toUpperCase(),
+          currency: renewTariff.currency.toUpperCase(),
           status: "PAID",
           provider: paidViaYookassa > 0 ? "yookassa" : "balance",
           paidAt: new Date(),
           metadata: JSON.stringify({
             extendsSecondarySubId: sec.id,
             autoRenew: true,
+            promoCodeId: autoRenewPromoCodeId,
+            originalPrice: autoRenewPromoCodeId || pd > 0 ? priceBeforeDiscount : undefined,
+            personalDiscountPercent: pd > 0 ? pd : undefined,
             balancePortion: paidViaBalance,
             cardPortion: paidViaYookassa,
             yookassaPaymentId,
@@ -1041,7 +1062,7 @@ async function processSecondaryAutoRenewals(): Promise<void> {
       await dispatchAutoRenewNotification(billingClient.id, "SUCCESS", {
         tariffName: sec.tariff.name,
         amount: price,
-        currency: sec.tariff.currency,
+        currency: renewTariff.currency,
         expireAt: expireAtDate,
         subIndex: sec.subscriptionIndex,
         balance: Math.max(0, (billingClient.balance ?? 0) - paidViaBalance),

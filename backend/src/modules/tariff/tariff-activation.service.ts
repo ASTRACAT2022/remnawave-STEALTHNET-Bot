@@ -758,6 +758,7 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
   // isAdditionalSubscription=true в metadata или купи через раздел доп. подписок.
   const extendsSecondaryId = getExtendsSecondarySubId(payment.metadata);
   const isGiftPurchase = isGiftPurchasePayment(payment.metadata);
+  const isAdditionalPurchase = isAdditionalSubscriptionPayment(payment.metadata);
 
   if (payment.tariffId) {
     const tariff = await prisma.tariff.findUnique({ where: { id: payment.tariffId } });
@@ -866,26 +867,31 @@ export async function activateTariffByPaymentId(paymentId: string): Promise<Acti
     // У клиента нет ни одной подписки — создаём новую (получит subscriptionIndex=0)
     const result = await createAdditionalSubscription(client.id, {
       id: tariff.id,
-      name: tariff.name,
-      price: selectedOption?.price ?? tariff.price,
       durationDays: selectedOption?.durationDays ?? tariff.durationDays,
       trafficLimitBytes: tariff.trafficLimitBytes,
       deviceLimit: tariff.deviceLimit,
       includedDevices: tariff.includedDevices,
+      pricePerExtraDevice: tariff.pricePerExtraDevice,
+      maxExtraDevices: tariff.maxExtraDevices,
+      deviceDiscountTiers: tariff.deviceDiscountTiers,
       internalSquadUuids: tariff.internalSquadUuids,
       trafficResetMode: tariff.trafficResetMode ?? undefined,
-    }, { extraDevices: payment.deviceCount ?? 0, purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
+      price: selectedOption?.price ?? tariff.price,
+    }, selectedOption, payment.deviceCount ?? undefined);
     if (result.ok) {
       await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
       await applyCustomNameToSubscription(result.data.subscriptionId, payment.metadata);
       await resetOneTimeDiscount();
     }
-    return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
+    return result;
   }
 
   const customBuild = parseCustomBuildMetadata(payment.metadata);
   if (customBuild) {
     const result = await createAdditionalSubscription(client.id, customBuild, { purchasedAsGift: isGiftPurchase, skipConfigCheck: true });
+    if (result.ok) {
+      await prisma.payment.update({ where: { id: payment.id }, data: { subscriptionId: result.data.subscriptionId } }).catch(() => {});
+    }
     return result.ok ? { ok: true } : { ok: false, error: result.error, status: result.status };
   }
 

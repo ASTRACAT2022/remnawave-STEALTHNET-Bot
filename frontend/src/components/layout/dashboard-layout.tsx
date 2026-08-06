@@ -45,8 +45,6 @@ function useNavSections(): NavItem[] {
     { to: "/admin/anti-fraud", label: "Anti-fraud", icon: ShieldAlert, section: "analytics", category: "overview" },
     { to: "/admin/bot-conversations", label: "Активность клиентов", icon: MessageSquare, section: "clients", category: "management" },
     { to: "/admin/sales-report", label: t("admin.nav.sales_report"), icon: FileText, section: "sales-report", category: "overview" },
-    // отчёт продаж только через баланс — для менеджеров с action'ом.
-    { to: "/admin/balance-sales", label: "💰 Продажи через баланс", icon: FileText, section: "balance-sales-virtual", category: "overview", requiredAction: "view_balance_sales" },
     { to: "/admin/traffic-abuse", label: t("admin.nav.traffic_abuse"), icon: ShieldAlert, section: "traffic-abuse", category: "overview" },
     { to: "/admin/geo-map", label: t("admin.nav.geo_map"), icon: Map, section: "geo-map", category: "overview" },
     { to: "/admin/clients", label: t("admin.nav.clients"), icon: Users, section: "clients", category: "management" },
@@ -56,18 +54,12 @@ function useNavSections(): NavItem[] {
     { to: "/admin/backup", label: t("admin.nav.backups"), icon: Database, section: "backup", category: "management" },
     { to: "/admin/tickets", label: t("admin.nav.tickets"), icon: MessageSquare, section: "tickets", category: "management" },
     { to: "/admin/tariffs", label: t("admin.nav.tariffs"), icon: CreditCard, section: "tariffs", category: "subscription" },
-    // T15 (11.05.2026) — управление пробными подписками (Trial-пресеты).
-    { to: "/admin/trials", label: "🎁 Триалы", icon: Gift, section: "trials", category: "subscription" },
-    // T6 (11.05.2026) — заявки на вывод реф. баланса (USDT TRC20).
-    { to: "/admin/withdrawals", label: "💰 Заявки на вывод", icon: CreditCard, section: "withdrawals", category: "management" },
     // T-autorenew (12.05.2026) — автосписание + конструктор уведомлений.
     { to: "/admin/auto-renew", label: "🔄 Автосписание", icon: RefreshCw, section: "auto-renew", category: "subscription" },
     { to: "/admin/promo", label: t("admin.nav.promo_links"), icon: Megaphone, section: "promo", category: "subscription" },
     { to: "/admin/promo-codes", label: t("admin.nav.promo_codes"), icon: Tag, section: "promo-codes", category: "subscription" },
     { to: "/admin/marketing", label: t("admin.nav.marketing"), icon: Target, section: "marketing", category: "subscription" },
     { to: "/admin/referral-network", label: t("admin.nav.referral_network"), icon: Network, section: "referral-network", category: "subscription" },
-    // детальная страница рефералки по клиенту (поиск, реферер, заработок, кредиты).
-    { to: "/admin/referrals", label: "👥 Рефералка", icon: Users, section: "referrals", category: "subscription" },
     { to: "/admin/secondary-subscriptions", label: "Подписки", icon: Gift, section: "secondary-subscriptions", category: "subscription" },
     { to: "/admin/video-instructions", label: t("admin.nav.video_instructions"), icon: Video, section: "video-instructions", category: "tools" },
     { to: "/admin/broadcast", label: t("admin.nav.broadcast"), icon: Send, section: "broadcast", category: "tools" },
@@ -80,7 +72,6 @@ function useNavSections(): NavItem[] {
     { to: "/admin/languages", label: t("admin.nav.languages"), icon: Languages, section: "languages", category: "settings" },
     { to: "/admin/admins", label: t("admin.nav.managers"), icon: UserCog, section: "admins", category: "settings" },
     { to: "/admin/api-keys", label: t("admin.nav.api_keys"), icon: Key, section: "api-keys", category: "settings" },
-    { to: "/admin/antibot", label: "Антибот", icon: Shield, section: "antibot", category: "settings" },
     { to: "/admin/diagnostics", label: "Диагностика", icon: Activity, section: "diagnostics", category: "settings" },
     { to: "/admin/email-templates", label: "Email-шаблоны", icon: Mail, section: "settings", category: "settings" },
     { to: "/admin/bot-messages", label: "Тексты бота", icon: Bot, section: "settings", category: "settings" },

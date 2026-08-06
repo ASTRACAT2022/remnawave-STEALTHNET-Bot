@@ -191,6 +191,55 @@ function getText(map: Record<string, string> | undefined, locale: string): strin
   return map[locale] || map.ru || map.en || Object.values(map)[0] || "";
 }
 
+type PaymentNotice = "success_topup" | "success_tariff" | "success";
+
+function getPaymentNotice(searchParams: URLSearchParams): PaymentNotice | null {
+  const payment = searchParams.get("payment");
+  const kind = searchParams.get("payment_kind");
+  if (payment === "success") {
+    if (kind === "topup") return "success_topup";
+    if (kind === "tariff" || kind === "custom_build") return "success_tariff";
+    return "success";
+  }
+  if (
+    searchParams.get("yoomoney_form") === "success" ||
+    searchParams.get("yookassa") === "success" ||
+    searchParams.get("heleket") === "success" ||
+    searchParams.get("lava") === "success" ||
+    searchParams.get("lavatop") === "success"
+  ) {
+    return "success";
+  }
+  return null;
+}
+
+function clearPaymentNoticeParams(searchParams: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  ["payment", "payment_kind", "oid", "yoomoney_form", "yookassa", "heleket", "lava", "lavatop"].forEach((key) => next.delete(key));
+  return next;
+}
+
+function PaymentSuccessNotice({ type }: { type: PaymentNotice }) {
+  const text = type === "success_topup"
+    ? "Оплата прошла успешно. Баланс пополнен."
+    : type === "success_tariff"
+      ? "Оплата прошла успешно. Подписка активируется автоматически."
+      : "Оплата прошла успешно. Статус подписки обновляется автоматически.";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-xl border border-green-500/30 bg-green-500/15 px-4 py-3 text-sm font-medium text-green-700 shadow-sm backdrop-blur-md dark:text-green-400"
+    >
+      <div className="flex items-start gap-2.5">
+        <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{text}</span>
+      </div>
+    </motion.div>
+  );
+}
+
 /**
  * Switcher: Stealth-design wizard или Classic. Хуки в каждой ветке вызываются
  * только в соответствующем компоненте, поэтому правила хуков не нарушены.
@@ -202,20 +251,29 @@ export function ClientSubscribePage() {
 }
 
 function ClassicSubscribePage() {
-  const { state } = useClientAuth();
+  const { state, refreshProfile } = useClientAuth();
   const isMiniapp = useCabinetMiniapp();
   const token = state.token ?? null;
   const client = state.client;
   const locale = (client?.preferredLang ?? "ru").toLowerCase().slice(0, 2);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [subscription, setSubscription] = useState<unknown>(null);
   const [pageConfig, setPageConfig] = useState<SubscriptionPageConfig | null>(null);
   const [publicAppUrl, setPublicAppUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [paymentNotice, setPaymentNotice] = useState<PaymentNotice | null>(null);
   const [copied, setCopied] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
+
+  useEffect(() => {
+    const notice = getPaymentNotice(searchParams);
+    if (!notice) return;
+    setPaymentNotice(notice);
+    setSearchParams(clearPaymentNoticeParams(searchParams), { replace: true });
+    if (token) refreshProfile().catch(() => {});
+  }, [searchParams, setSearchParams, token, refreshProfile]);
 
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 640px)");
@@ -287,6 +345,7 @@ function ClassicSubscribePage() {
   if (!subscriptionUrl) {
     return (
       <div className="space-y-6 max-w-xl mx-auto">
+        {paymentNotice && <PaymentSuccessNotice type={paymentNotice} />}
         <Button variant="ghost" size="sm" className="gap-2 -ml-2 hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground transition-colors" asChild>
           <Link to="/cabinet/dashboard">
             <ArrowLeft className="h-4 w-4" />
@@ -604,6 +663,7 @@ function ClassicSubscribePage() {
 
   return (
     <div className="space-y-8 max-w-2xl mx-auto pb-12 px-2 sm:px-0">
+      {paymentNotice && <PaymentSuccessNotice type={paymentNotice} />}
       <motion.div 
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
