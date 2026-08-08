@@ -11,6 +11,10 @@ import {
   signClientToken,
   signClient2FAPendingToken,
   verifyClient2FAPendingToken,
+  signClientRefreshToken,
+  verifyClientRefreshToken,
+  CLIENT_ACCESS_TTL,
+  CLIENT_REFRESH_TTL,
   generateReferralCode,
   getSystemConfig,
   getPublicConfig,
@@ -377,7 +381,7 @@ clientAuthRouter.post("/register", async (req, res) => {
       if (existing.isBlocked) return res.status(403).json({ message: "Account is blocked" });
       // isNewClient=false — клиент уже был
       // (бот не будет fire after_registration broadcast).
-      return res.json({ token: signClientToken(existing.id), client: toClientShape(existing), isNewClient: false });
+      return res.json({ ...buildClientTokenPair(existing), isNewClient: false });
     }
   }
 
@@ -757,9 +761,28 @@ clientAuthRouter.post("/2fa-login", async (req, res) => {
   if (!client?.totpEnabled || !client.totpSecret) return res.status(401).json({ message: "2FA не включена. Войдите снова." });
   const result = await verify({ secret: client.totpSecret, token: body.data.code });
   if (!result.valid) return res.status(401).json({ message: "Неверный код" });
-  const token = signClientToken(client.id);
   void recordClientVisit(req, client.id, "password+totp");
-  return res.json({ token, client: toClientShape(client) });
+  return res.json(buildClientTokenPair(client));
+});
+
+// ——— Refresh access token ———
+// Клиент хранит `refreshToken` (живёт 30 дней) и при истечении access (24ч)
+// вызывает этот эндпоинт — получает новую пару access+refresh.
+// Без БД-storage refresh'ей — каждый refresh создаёт НОВЫЙ jti, старый
+// продолжает жить до своего TTL (OAuth 2.1 rotation pattern).
+const refreshSchema = z.object({ refreshToken: z.string().min(1) });
+clientAuthRouter.post("/refresh", async (req, res) => {
+  const parse = refreshSchema.safeParse(req.body);
+  if (!parse.success) return res.status(400).json({ message: "Invalid input" });
+  const payload = verifyClientRefreshToken(parse.data.refreshToken);
+  if (!payload) return res.status(401).json({ message: "Invalid or expired token" });
+  const client = await prisma.client.findUnique({
+    where: { id: payload.clientId },
+    select: { id: true, email: true, telegramId: true, telegramUsername: true, preferredLang: true, preferredCurrency: true, balance: true, referralCode: true, referralPercent: true, remnawaveUuid: true, trialUsed: true, isBlocked: true, autoRenewEnabled: true, autoRenewTariffId: true, yoomoneyAccessToken: true, totpEnabled: true, createdAt: true, onboardingCompleted: true },
+  });
+  if (!client) return res.status(401).json({ message: "Invalid or expired token" });
+  if (client.isBlocked) return res.status(403).json({ message: "Account is blocked" });
+  return res.json(buildClientTokenPair(client));
 });
 
 clientAuthRouter.get("/me", requireClientAuth, async (req, res) => {
@@ -870,7 +893,25 @@ function buildAuthResponse(c: { id: string; totpEnabled?: boolean } & Parameters
   if (c.totpEnabled) {
     return { requires2FA: true as const, tempToken: signClient2FAPendingToken(c.id) };
   }
-  return { token: signClientToken(c.id), client: toClientShape(c) };
+  return buildClientTokenPair(c);
+}
+
+/**
+ * Выдаёт клиенту пару access+refresh токенов. Каждый успешный логин/refresh генерирует
+ * новый refresh (`jti`), а старый остаётся валидным до своего TTL — rotation pattern
+ * из OAuth 2.1. Это решает корневую причину массовой ошибки "Invalid or expired token":
+ * раньше у клиента был только access на 7d без refresh → на 8-й день ВСЕ клиенты
+ * разом получали ошибку и не могли войти без повторного логина.
+ */
+function buildClientTokenPair(c: Parameters<typeof toClientShape>[0]) {
+  const jti = randomUUID();
+  return {
+    token: signClientToken(c.id),
+    refreshToken: signClientRefreshToken(c.id, jti),
+    expiresIn: CLIENT_ACCESS_TTL,
+    refreshExpiresIn: CLIENT_REFRESH_TTL,
+    client: toClientShape(c),
+  };
 }
 
 // ——— Google OAuth: фронтенд отправляет id_token, полученный через Sign In With Google ———
@@ -1194,7 +1235,8 @@ clientAuthRouter.get("/telegram-login-check", async (req, res) => {
 
     notifyAdminsAboutNewClient(client.id).catch(() => {});
     const jwt = signClientToken(client.id);
-    return res.json({ confirmed: true, token: jwt, client: toClientShape(client), justCreated: true });
+    const refresh = signClientRefreshToken(client.id, randomUUID());
+    return res.json({ confirmed: true, token: jwt, refreshToken: refresh, client: toClientShape(client), justCreated: true });
   } catch (err) {
     console.error("[telegram-login-check] error:", err);
     return res.status(500).json({ message: "Internal error" });

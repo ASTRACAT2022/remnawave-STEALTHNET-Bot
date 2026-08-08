@@ -54,7 +54,12 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-export function signClientToken(clientId: string, expiresIn = "7d"): string {
+// client_access живёт 24 часа — refresh через /client/auth/refresh (refresh живёт 30 дней).
+// Раньше было 7d без refresh → каждые 7 дней у КАЖДОГО клиента массово "Invalid or expired token".
+export const CLIENT_ACCESS_TTL = "24h";
+export const CLIENT_REFRESH_TTL = env.CLIENT_REFRESH_TTL;
+
+export function signClientToken(clientId: string, expiresIn: string = CLIENT_ACCESS_TTL): string {
   return jwt.sign(
     { clientId, type: "client_access" } as ClientTokenPayload,
     env.JWT_SECRET,
@@ -66,6 +71,26 @@ export function verifyClientToken(token: string): ClientTokenPayload | null {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as ClientTokenPayload;
     return decoded?.type === "client_access" ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Refresh token для клиента. Живёт 30 дней. Используется для получения нового access без логина. */
+export type ClientRefreshPayload = { clientId: string; type: "client_refresh"; jti: string };
+
+export function signClientRefreshToken(clientId: string, jti: string, expiresIn: string = CLIENT_REFRESH_TTL): string {
+  return jwt.sign(
+    { clientId, type: "client_refresh", jti } as ClientRefreshPayload,
+    env.JWT_SECRET,
+    { expiresIn } as jwt.SignOptions
+  );
+}
+
+export function verifyClientRefreshToken(token: string): ClientRefreshPayload | null {
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as ClientRefreshPayload;
+    return decoded?.type === "client_refresh" ? decoded : null;
   } catch {
     return null;
   }

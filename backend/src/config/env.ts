@@ -8,6 +8,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
+  /** TTL refresh token для клиентского кабинета /client/auth/refresh. Default 30d. */
+  CLIENT_REFRESH_TTL: z.string().default("30d"),
   REMNA_API_URL: z.preprocess(
     (s) => (typeof s === "string" && s.trim() === "" ? undefined : s),
     z.string().url().optional()

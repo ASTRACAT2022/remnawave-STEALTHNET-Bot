@@ -12,11 +12,13 @@ import {
   hashPassword,
   verifyPassword,
   signClientToken,
+  signClientRefreshToken,
   verifyClientToken,
   signClient2FAPendingToken,
   verifyClient2FAPendingToken,
   generateReferralCode,
 } from "../client/client.service.js";
+import { randomUUID } from "crypto";
 import { getPublicConfig } from "../client/client.service.js";
 import {
   isRemnaConfigured,
@@ -27,7 +29,16 @@ import { getPrimaryBot } from "../bot/bot.service.js";
 export const externalApiRouter = Router();
 externalApiRouter.use(requireApiKey);
 
-/* ═══════════════════════════════════════════ */
+/** Возвращает пару access+refresh. Старые клиенты external API продолжат работать,
+ *  т.к. `token` всё ещё в ответе; новое поле `refreshToken` — опционально. */
+function externalTokenPair(clientId: string) {
+  return {
+    token: signClientToken(clientId),
+    refreshToken: signClientRefreshToken(clientId, randomUUID()),
+  };
+}
+
+/* �══════════════════════════════════════════ */
 /*  Helpers                                    */
 /* ═══════════════════════════════════════════ */
 
@@ -157,7 +168,7 @@ externalApiRouter.post("/auth/login", async (req: Request, res: Response) => {
   }
 
   return res.json({
-    token: signClientToken(client.id),
+    ...externalTokenPair(client.id),
     client: clientShape(client),
   });
 });
@@ -187,7 +198,7 @@ externalApiRouter.post("/auth/2fa", async (req: Request, res: Response) => {
   if (!result.valid) return res.status(401).json({ error: "Invalid 2FA code" });
 
   return res.json({
-    token: signClientToken(client.id),
+    ...externalTokenPair(client.id),
     client: clientShape(client),
   });
 });
@@ -232,7 +243,7 @@ externalApiRouter.post("/auth/register", async (req: Request, res: Response) => 
   });
 
   return res.status(201).json({
-    token: signClientToken(client.id),
+    ...externalTokenPair(client.id),
     client: clientShape(client),
   });
 });

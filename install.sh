@@ -143,11 +143,33 @@ configure_env() {
 
   echo ""
   echo -e "${BOLD}${CYAN}── JWT ──${NC}"
-  DEFAULT_JWT=$(openssl rand -base64 36 2>/dev/null | tr -d $'=+/\n' | head -c 48)
-  [ -z "$DEFAULT_JWT" ] && DEFAULT_JWT=$(head -c 48 /dev/urandom | base64 | tr -d $'=+/\n' | head -c 48)
-  ask_secret "JWT Secret (Enter = сгенерировать)" "$DEFAULT_JWT" JWT_SECRET
+  DEFAULT_JWT=$(openssl rand -base64 36 2>/dev/null | tr -d $'=+/\\n' | head -c 48)
+  [ -z "$DEFAULT_JWT" ] && DEFAULT_JWT=$(head -c 48 /dev/urandom | base64 | tr -d $'=+/\\n' | head -c 48)
+
+  # Защита от случайной перегенерации JWT_SECRET: если .env уже содержит
+  # валидный JWT_SECRET — используем его по умолчанию. Иначе любой повторный
+  # запуск install.sh с "Перезаписать .env?"=y массово инвалидирует все
+  # выданные access/refresh токены → клиенты получают "Invalid or expired token".
+  EXISTING_JWT=""
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    EXISTING_JWT=$(grep -E '^JWT_SECRET=' "$SCRIPT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
+  fi
+  if [ -n "$EXISTING_JWT" ] && [ "${#EXISTING_JWT}" -ge 32 ]; then
+    echo -e "  ${YELLOW}� Обнаружен существующий JWT_SECRET в .env.${NC}"
+    echo -e "  ${YELLOW}  Если его перегенерировать — ВСЕ активные сессии клиентов и админов умрут${NC}"
+    echo -e "  ${YELLOW}  разом (массовая ошибка «Invalid or expired token»).${NC}"
+    read -rp "$(echo -e "${BOLD}Оставить текущий JWT_SECRET? [Y/n]${NC}: ")" KEEP_JWT
+    if [[ ! "$KEEP_JWT" =~ ^[Nn]$ ]]; then
+      JWT_SECRET="$EXISTING_JWT"
+      echo -e "  ${GREEN}✔ JWT_SECRET сохранён (${#EXISTING_JWT} символов).${NC}"
+    else
+      ask_secret "Новый JWT Secret (Enter = сгенерировать)" "$DEFAULT_JWT" JWT_SECRET
+    fi
+  else
+    ask_secret "JWT Secret (Enter = сгенерировать)" "$DEFAULT_JWT" JWT_SECRET
+  fi
   ask "Время жизни access-токена" "15m" JWT_ACCESS_EXPIRES_IN
-  ask "Время жизни refresh-токена" "7d" JWT_REFRESH_EXPIRES_IN
+  ask "Время жизни refresh-токена" "7d" JWT_REFRESH_TTL
 
   echo ""
   echo -e "${BOLD}${CYAN}── Админ ──${NC}"

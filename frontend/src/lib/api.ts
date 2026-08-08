@@ -3,9 +3,23 @@ const API_BASE = "/api";
 /** Вызывается при 401: возвращает новый access token или null. Устанавливается из AuthProvider. */
 let tokenRefreshFn: (() => Promise<string | null>) | null = null;
 let tokenRefreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Вызывается при 401 на client-* роутах: возвращает НОВУЮ ПАРУ { token, refreshToken }
+ * (и сам обновляет стейт), или null если refresh протух и пользователь должен войти снова.
+ * Устанавливается из ClientAuthProvider.
+ */
+let clientTokenRefreshFn: (() => Promise<string | null>) | null = null;
+let clientTokenRefreshPromise: Promise<string | null> | null = null;
+
 export function setTokenRefreshFn(fn: (() => Promise<string | null>) | null) {
   tokenRefreshFn = fn;
   tokenRefreshPromise = null;
+}
+
+export function setClientTokenRefreshFn(fn: (() => Promise<string | null>) | null) {
+  clientTokenRefreshFn = fn;
+  clientTokenRefreshPromise = null;
 }
 
 let publicConfigCache: PublicConfig | null = null;
@@ -349,15 +363,26 @@ async function request<T>(
       throw new Error(res.statusText || "Request failed");
     }
 
-    if (res.status === 401 && token && !_retry && tokenRefreshFn && !path.startsWith("/auth/")) {
-      if (!tokenRefreshPromise) {
-        tokenRefreshPromise = tokenRefreshFn().finally(() => {
-          tokenRefreshPromise = null;
-        });
-      }
-      const newToken = await tokenRefreshPromise;
-      if (newToken) {
-        return request<T>(path, { ...options, token: newToken, _retry: true });
+    if (res.status === 401 && token && !_retry && !path.startsWith("/auth/") && !path.startsWith("/client/auth/")) {
+      // Для client-* роутов используем отдельный refreshFn (он возвращает новую
+      // пару access+refresh и сам сохраняет её в localStorage).
+      const useClientRefresh = path.startsWith("/client/") && clientTokenRefreshFn;
+      const refreshFn = useClientRefresh ? clientTokenRefreshFn : tokenRefreshFn;
+      const refreshPromiseSlot = useClientRefresh ? clientTokenRefreshPromise : tokenRefreshPromise;
+
+      if (refreshFn) {
+        if (!refreshPromiseSlot) {
+          const p = refreshFn().finally(() => {
+            if (useClientRefresh) clientTokenRefreshPromise = null;
+            else tokenRefreshPromise = null;
+          });
+          if (useClientRefresh) clientTokenRefreshPromise = p;
+          else tokenRefreshPromise = p;
+        }
+        const newToken = await (useClientRefresh ? clientTokenRefreshPromise : tokenRefreshPromise);
+        if (newToken) {
+          return request<T>(path, { ...options, token: newToken, _retry: true });
+        }
       }
     }
 
@@ -1800,6 +1825,14 @@ export const api = {
     return request("/client/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
+    });
+  },
+
+  /** Обмен refreshToken на новую пару access+refresh. Используется auto-retry в api.request. */
+  async clientRefresh(refreshToken: string): Promise<ClientAuthResponse> {
+    return request<ClientAuthResponse>("/client/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
     });
   },
 
@@ -4584,6 +4617,15 @@ export interface ClientProfile {
 
 export interface ClientAuthResponse {
   token: string;
+  /**
+   * Refresh token для прозрачного обновления access без логина (живёт 30 дней).
+   * Опционален — старые роуты (telegram-login-confirm и т.п.) могут отдавать только token.
+   * Если refreshToken нет — auto-refresh на следующем 401 не сработает, юзер увидит экран логина.
+   */
+  refreshToken?: string;
+  /** TTL access token в формате jsonwebtoken ("24h"). */
+  expiresIn?: string;
+  refreshExpiresIn?: string;
   client: ClientProfile;
 }
 
